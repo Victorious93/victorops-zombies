@@ -16,4 +16,10 @@ class Barricade(val maxPlanks: Int = 6, val plankHp: Int = 50) {
         hp = minOf(maxHp, (hp / plankHp + 1) * plankHp)
         return true
     }
+
+    /** Restores up to [n] planks; returns how many were actually added. */
+    fun repairPlanks(n: Int): Int { var done = 0; while (done < n && repairPlank()) done++; return done }
+
+    /** Restores every missing plank; returns how many were added. */
+    fun repairAll(): Int = repairPlanks(maxPlanks)
 }

@@ -11,10 +11,14 @@ class PerkMachine(val name: String = "Iron Hide Tonic", val cost: Int = 2500) {
     }
 }
 
-/** Weapon upgrade machine ("Overcharge Forge"). */
+/** Weapon upgrade machine ("Overcharge Forge"). Each tier costs more: [cost], then 2x, ... */
 class UpgradeMachine(val name: String = "Overcharge Forge", val cost: Int = 5000) {
+    /** Price of the next upgrade for [weapon], or null if it is already maxed. */
+    fun costFor(weapon: Weapon): Int? = if (weapon.maxed) null else cost * (weapon.tier + 1)
+
     fun upgrade(weapon: Weapon, economy: Economy): Weapon? {
-        if (weapon.upgraded || !economy.spend(cost)) return null
+        val price = costFor(weapon) ?: return null
+        if (!economy.spend(price)) return null
         return weapon.upgradedVersion()
     }
 }

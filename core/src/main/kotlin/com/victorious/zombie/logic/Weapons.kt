@@ -10,19 +10,63 @@ data class Weapon(
     val fireInterval: Float,
     val bulletSpeed: Float = 700f,
     val pellets: Int = 1,
-    val upgraded: Boolean = false,
+    /** Extra zombies a bullet passes through before it stops. */
+    val pierce: Int = 0,
+    /** Radius of the blast on impact; splash targets take half damage. 0 = none. */
+    val splash: Float = 0f,
+    /** Forge upgrade level, 0..[MAX_TIER]. */
+    val tier: Int = 0,
+    /** Shots per magazine; one trigger pull uses one round regardless of [pellets]. */
+    val magSize: Int = 12,
+    val reloadTime: Float = 1.5f,
 ) {
-    fun upgradedVersion(): Weapon =
-        if (upgraded) this else copy(name = "$name Mk.II", damage = damage * 2, fireInterval = fireInterval * 0.8f, upgraded = true)
+    val upgraded: Boolean get() = tier > 0
+    val maxed: Boolean get() = tier >= MAX_TIER
+    val displayName: String get() = if (tier == 0) name else "$name Mk.${tier + 1}"
+
+    /** One Forge step. Mk.II: x2 damage, faster fire. Mk.III: x1.5 more damage, faster again, +1 pierce.
+     *  Multi-pellet weapons gain 2 pellets per step; blast weapons gain 50% radius per step. */
+    fun upgradedVersion(): Weapon {
+        if (maxed) return this
+        val t = tier + 1
+        return copy(
+            tier = t,
+            damage = (damage * DAMAGE_STEP[tier]).toInt(),
+            fireInterval = fireInterval * INTERVAL_STEP[tier],
+            pellets = if (pellets > 1) pellets + 2 else pellets,
+            pierce = if (t == MAX_TIER) pierce + 1 else pierce,
+            splash = splash * 1.5f,
+            magSize = (magSize * 1.5f).toInt(),
+            reloadTime = reloadTime * 0.85f,
+        )
+    }
+
+    companion object {
+        const val MAX_TIER = 2
+        private val DAMAGE_STEP = floatArrayOf(2.0f, 1.5f)
+        private val INTERVAL_STEP = floatArrayOf(0.8f, 0.8125f)
+    }
 }
 
 object Weapons {
-    val STARTER = Weapon("sidearm", "Volt Sidearm", 30, 0.35f)
-    val SCATTER = Weapon("scatter", "Scatterbolt", 25, 0.8f, pellets = 5)
-    val RIFLE = Weapon("rifle", "Pulse Rifle", 40, 0.12f)
-    val CANNON = Weapon("cannon", "Rail Lancer", 200, 0.9f, bulletSpeed = 1100f)
-    val SMG = Weapon("smg", "Buzzsaw SMG", 22, 0.07f)
-    val NOVA = Weapon("nova", "Nova Disruptor", 400, 0.6f, bulletSpeed = 500f)
+    val STARTER = Weapon("sidearm", "Volt Sidearm", 30, 0.35f, magSize = 12, reloadTime = 1.2f)
+    val SCATTER = Weapon("scatter", "Scatterbolt", 25, 0.8f, pellets = 5, magSize = 6, reloadTime = 2.0f)
+    val RIFLE = Weapon("rifle", "Pulse Rifle", 40, 0.12f, magSize = 30, reloadTime = 1.8f)
+    val CANNON = Weapon("cannon", "Rail Lancer", 200, 0.9f, bulletSpeed = 1100f, pierce = 2, magSize = 5, reloadTime = 2.2f)
+    val SMG = Weapon("smg", "Buzzsaw SMG", 22, 0.07f, magSize = 40, reloadTime = 1.9f)
+    val NOVA = Weapon("nova", "Nova Disruptor", 400, 0.6f, bulletSpeed = 500f, splash = 60f, magSize = 4, reloadTime = 2.5f)
+
+    val ALL = listOf(STARTER, SCATTER, RIFLE, CANNON, SMG, NOVA)
+
+    /** Base weapon with the given id; null if unknown. */
+    fun byId(id: String): Weapon? = ALL.firstOrNull { it.id == id }
+
+    /** Reconstructs a weapon from its id and Forge tier (used to rebuild state received over the network). */
+    fun at(id: String, tier: Int): Weapon {
+        var w = byId(id) ?: STARTER
+        repeat(tier.coerceIn(0, Weapon.MAX_TIER)) { w = w.upgradedVersion() }
+        return w
+    }
 }
 
 /** Mystery weapon box: weighted random weapon for a point cost. */
