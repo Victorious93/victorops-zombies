@@ -1,0 +1,15 @@
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+.kotlin/
+# Release signing material must never be committed
+*.jks
+release*.keystore
+*release*.jks
+keystore.properties
+signing.properties
+!android/debug.keystore
