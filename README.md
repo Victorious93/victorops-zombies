@@ -19,6 +19,10 @@ at the Mystery Crate, the Iron Hide Tonic perk machine and the Overcharge Forge.
   - *Snoop Dogg*: faster move and fire rate, starts with the Buzzsaw SMG, ability **Bass Drop** (knockback + damage blast).
   - *Martha Stewart*: more health, repairs 2 planks per use for double points, starts with the Scatterbolt, ability **Fortify** (rebuilds every barricade).
 - **Callouts** – text-only shouts over the player: low health, reload, game over.
+- **Offline play** – *Solo* needs no internet, no Wi-Fi and opens no sockets. The Android `INTERNET` permission is declared only for Wi-Fi/LAN co-op.
+- **Co-op multiplayer (1-4 players, drop-in/drop-out)** – host-authoritative: the host runs the whole simulation (`core/.../sim/World.kt`) and streams ~15 Hz snapshots (~1 KB); clients send ~20 Hz inputs. Each player has their own points, weapon, armor, perk and ammo; barricades, rounds and zombies are shared. A downed player is revived by a teammate standing next to them for 3 s; the game ends only when everyone is down.
+  - **Wi-Fi/LAN (built in)**: pick *Host* on one device and *Join* on the others (enter the host's LAN address, port 47464). Works without internet.
+  - **Bluetooth**: the game talks to a small `NetLink` interface (`core/.../net/NetLink.kt`), so any transport can carry it. A Bluetooth/online adapter is meant to live in VictorLink64, which already has an RFCOMM transport (2 players, since that transport accepts one peer). **Not built or device-tested yet.**
 - **Controls** – Android: virtual joystick (left half), USE button (right). Desktop: WASD + E, Q for the character ability (SKILL button on touch). Aiming/firing is automatic at the nearest zombie.
 - Graphics are procedural placeholder shapes for now.
 

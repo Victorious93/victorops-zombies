@@ -20,6 +20,8 @@ class CharacterSelectScreen : ScreenAdapter() {
     private val shapes = ShapeRenderer(); private val batch = SpriteBatch(); private val font = BitmapFont()
     private val tmp = Vector3()
     private var selected = 0
+    /** Set once we hand over to another screen: its GL resources are disposed, so this frame must not draw. */
+    private var done = false
     private val colors = listOf(Color(0.1f, 0.95f, 1f, 1f), Color(1f, 0.6f, 0.2f, 1f))
 
     private fun cardX(i: Int) = 140f + i * 520f
@@ -28,6 +30,7 @@ class CharacterSelectScreen : ScreenAdapter() {
     override fun resize(width: Int, height: Int) { view.update(width, height, true) }
 
     override fun render(delta: Float) {
+        if (done) return
         val n = Characters.ALL.size
         if (Gdx.input.isKeyJustPressed(Input.Keys.A) || Gdx.input.isKeyJustPressed(Input.Keys.LEFT)) selected = (selected + n - 1) % n
         if (Gdx.input.isKeyJustPressed(Input.Keys.D) || Gdx.input.isKeyJustPressed(Input.Keys.RIGHT)) selected = (selected + 1) % n
@@ -38,12 +41,14 @@ class CharacterSelectScreen : ScreenAdapter() {
             view.unproject(tmp.set(Gdx.input.x.toFloat(), Gdx.input.y.toFloat(), 0f))
             for (i in 0 until n) if (tmp.x in cardX(i)..cardX(i) + cardW && tmp.y in cardY..cardY + cardH) { selected = i; start() }
         }
-        draw()
+        if (!done) draw()
     }
 
     private fun start() {
+        if (done) return
+        done = true
         val game = Gdx.app.applicationListener as? VictorOpsGame ?: return
-        game.setScreen(GameScreen(Characters.ALL[selected])); dispose()
+        game.setScreen(ModeSelectScreen(Characters.ALL[selected])); dispose()
     }
 
     private fun draw() {
@@ -71,7 +76,7 @@ class CharacterSelectScreen : ScreenAdapter() {
                 c.tagline, "HP ${c.maxHealth.toInt()}   Speed x${c.speedMult}   Start: ${c.startWeapon.name}",
                 "Ability: ${c.abilityName} (${c.abilityCooldown.toInt()}s cooldown)",
                 "Repairs ${c.repairPlanksPerUse} plank(s) per use",
-            )) { font.draw(batch, line, x, y, cardW - 48, 1, true); y -= 52 }
+            )) { font.draw(batch, line, x, y, cardW - 48, 1, true); y -= 46 }
         }
         font.data.setScale(1f)
         font.draw(batch, "Tap a card, or press 1 / 2", W / 2 - 90, 110f)

@@ -55,6 +55,18 @@ object Weapons {
     val CANNON = Weapon("cannon", "Rail Lancer", 200, 0.9f, bulletSpeed = 1100f, pierce = 2, magSize = 5, reloadTime = 2.2f)
     val SMG = Weapon("smg", "Buzzsaw SMG", 22, 0.07f, magSize = 40, reloadTime = 1.9f)
     val NOVA = Weapon("nova", "Nova Disruptor", 400, 0.6f, bulletSpeed = 500f, splash = 60f, magSize = 4, reloadTime = 2.5f)
+
+    val ALL = listOf(STARTER, SCATTER, RIFLE, CANNON, SMG, NOVA)
+
+    /** Base weapon with the given id; null if unknown. */
+    fun byId(id: String): Weapon? = ALL.firstOrNull { it.id == id }
+
+    /** Reconstructs a weapon from its id and Forge tier (used to rebuild state received over the network). */
+    fun at(id: String, tier: Int): Weapon {
+        var w = byId(id) ?: STARTER
+        repeat(tier.coerceIn(0, Weapon.MAX_TIER)) { w = w.upgradedVersion() }
+        return w
+    }
 }
 
 /** Mystery weapon box: weighted random weapon for a point cost. */
