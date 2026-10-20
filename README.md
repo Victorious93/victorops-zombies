@@ -12,8 +12,14 @@ at the Mystery Crate, the Iron Hide Tonic perk machine and the Overcharge Forge.
 - **Barricades** – four windows with 6 planks each; zombies must tear them down to get in.
 - **Mystery Crate** (950 pts) – weighted random weapon (Scatterbolt, Buzzsaw SMG, Pulse Rifle, Rail Lancer, Nova Disruptor).
 - **Perk machine** – *Iron Hide Tonic* (2500 pts) doubles max health.
-- **Upgrade machine** – *Overcharge Forge* (5000 pts) doubles weapon damage, faster fire.
-- **Controls** – Android: virtual joystick (left half), USE button (right). Desktop: WASD + E. Aiming/firing is automatic at the nearest zombie.
+- **Upgrade machine** – *Overcharge Forge*, three tiers: Mk.II (5000 pts) doubles damage and speeds fire; Mk.III (10000 pts) adds +50% damage, faster fire and +1 pierce. Multi-pellet guns gain 2 pellets per tier, the Nova's blast grows, and magazines get bigger with faster reloads.
+- **Armor packs** – three racks: Light Plating (500, +50), Reinforced Vest (1000, +100), Bulwark Suit (1800, +150). Armor soaks damage before health, caps at 200 and carries between rounds. Zombies also drop free Light packs (6%).
+- **Ammo** – each weapon has a magazine and reload time. Reserve ammo is unlimited; an empty magazine triggers a reload.
+- **Characters** – pick one on the start screen (names are display data in `Characters.kt`):
+  - *Snoop Dogg*: faster move and fire rate, starts with the Buzzsaw SMG, ability **Bass Drop** (knockback + damage blast).
+  - *Martha Stewart*: more health, repairs 2 planks per use for double points, starts with the Scatterbolt, ability **Fortify** (rebuilds every barricade).
+- **Callouts** – text-only shouts over the player: low health, reload, game over.
+- **Controls** – Android: virtual joystick (left half), USE button (right). Desktop: WASD + E, Q for the character ability (SKILL button on touch). Aiming/firing is automatic at the nearest zombie.
 - Graphics are procedural placeholder shapes for now.
 
 ## Why libGDX + Kotlin
@@ -50,7 +56,13 @@ and both ABIs with `apksigner`, and uploads the APK as an artifact.
 - **Later milestone – co-op multiplayer (scoped, not built)**: local split/shared-screen co-op, then online co-op (host-authoritative netcode, lobby, revive mechanic).
 
 ## Originality / IP statement
-VictorOps Zombies is an original work. All names, code, rules and (placeholder) graphics are
+VictorOps Zombies is an original work. Code, rules, weapon names and (placeholder) graphics are
 created for this project. It is inspired only by the general genre of round-based survival
 modes and uses **no** names, assets, audio, maps or code from Activision, Call of Duty, or any
 other third-party franchise.
+
+**Exception: real people.** Two playable characters use the real names of Snoop Dogg and Martha Stewart.
+They are drawn as plain placeholder shapes and use no photos, voices, music or likenesses, and the in-game
+callouts are generic player text. Even so, using a real person's name on a game character can raise
+right-of-publicity and endorsement issues, especially if the game is published or sold. Before any public
+release (e.g. Google Play), either get permission or rename them in `core/.../logic/Characters.kt`.

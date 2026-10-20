@@ -7,7 +7,7 @@ class Economy(startingPoints: Int = 500) {
 
     fun onHit() { points += HIT }
     fun onKill(headshot: Boolean = false) { points += if (headshot) KILL_CRIT else KILL }
-    fun onRepair() { points += REPAIR }
+    fun onRepair(planks: Int = 1, multiplier: Int = 1) { points += REPAIR * planks * multiplier }
 
     /** Attempts to spend; returns true and deducts only if affordable. */
     fun spend(cost: Int): Boolean {
