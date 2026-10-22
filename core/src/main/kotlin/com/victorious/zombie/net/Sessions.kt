@@ -14,6 +14,7 @@ object Msg {
     const val WELCOME = "zw"   // host -> client: "<playerId>"
     const val STATE = "zs"     // host -> client: Snapshot base64
     const val FULL = "zf"      // host -> client: lobby full
+    const val BYE = "zb"       // client -> host: leaving the game (the link itself may stay up, e.g. a shared Connect session)
 }
 
 /**
@@ -71,6 +72,7 @@ class HostSession(val world: World, private val sendHz: Float = 15f) {
                 else { peers[link] = Peer(id, link); link.send(Msg.WELCOME, id.toString()) }
             }
             Msg.INPUT -> if (peer != null) PlayerInput.fromText(data)?.let { world.setInput(peer.id, it) }
+            Msg.BYE -> if (peer != null) { peers.remove(link); world.removePlayer(peer.id) }
         }
     }
 
@@ -78,12 +80,13 @@ class HostSession(val world: World, private val sendHz: Float = 15f) {
 }
 
 /** Client side: sends inputs, keeps the latest snapshot. Safe to read [latest] from the render thread. */
-class ClientSession(private val link: NetLink, characterId: String, private val inputHz: Float = 20f) {
+class ClientSession(private val link: NetLink, private val characterId: String, private val inputHz: Float = 20f) {
     @Volatile var latest: Snapshot? = null; private set
     @Volatile var playerId: Int = -1; private set
     @Volatile var connected = true; private set
     @Volatile var rejected = false; private set
     private var sendT = 0f
+    private var joinT = 0f
 
     init {
         link.listener = object : NetLink.Listener {
@@ -102,7 +105,11 @@ class ClientSession(private val link: NetLink, characterId: String, private val 
     fun tick(dt: Float, input: PlayerInput) {
         sendT += dt
         if (sendT >= 1f / inputHz) { sendT = 0f; link.send(Msg.INPUT, input.toText()) }
+        // A shared link has no handshake of its own, so the host may not have been listening for the first JOIN. Repeat it until welcomed.
+        if (playerId < 0 && !rejected && connected) { joinT += dt; if (joinT >= JOIN_RETRY_S) { joinT = 0f; link.send(Msg.JOIN, characterId) } }
     }
 
-    fun close() = link.close()
+    fun close() { link.send(Msg.BYE, "bye"); link.close() }
+
+    private companion object { const val JOIN_RETRY_S = 1f }
 }
