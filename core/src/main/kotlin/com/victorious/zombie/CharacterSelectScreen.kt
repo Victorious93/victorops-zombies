@@ -48,7 +48,7 @@ class CharacterSelectScreen : ScreenAdapter() {
         if (done) return
         done = true
         val game = Gdx.app.applicationListener as? VictorOpsGame ?: return
-        game.setScreen(ModeSelectScreen(Characters.ALL[selected])); dispose()
+        game.onCharacterChosen(Characters.ALL[selected]); dispose()
     }
 
     private fun draw() {

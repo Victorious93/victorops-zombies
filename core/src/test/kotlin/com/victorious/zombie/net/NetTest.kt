@@ -112,3 +112,36 @@ class TcpTest {
         } finally { server.close() }
     }
 }
+
+/** Added for the VictorLink64 integration (Victorious Framework): leaving a shared link, and a host that wasn't listening yet. */
+class SharedLinkTest {
+    @Test fun byeRemovesPlayerButKeepsLinkUsable() {
+        val (a, b) = LoopbackLink.pair()
+        val host = HostSession.create(Characters.SNOOP); host.attach(a)
+        val client = ClientSession(b, "martha")
+        host.tick(0.05f); assertEquals(1, host.peerCount); assertEquals(1, client.playerId)
+        client.close() // sends BYE then closes the link
+        host.tick(0.05f)
+        assertEquals(0, host.peerCount); assertNull(host.world.players[1])
+    }
+
+    /** Drops everything sent to it until [hearing] is set, like a shared session with nobody collecting yet. */
+    private class DeafStartLink(private val peerRef: () -> DeafStartLink?) : NetLink {
+        @Volatile var hearing = false
+        @Volatile override var listener: NetLink.Listener? = null
+        override fun send(type: String, data: String) { val p = peerRef(); if (p != null && p.hearing) p.listener?.onMessage(type, data) }
+        override fun close() { listener?.onClosed() }
+    }
+
+    @Test fun joinIsRepeatedUntilWelcomed() {
+        var h: DeafStartLink? = null; var c: DeafStartLink? = null
+        val hostLink = DeafStartLink { c }.also { h = it }; val clientLink = DeafStartLink { h }.also { c = it }
+        clientLink.hearing = true
+        val client = ClientSession(clientLink, "martha") // host not listening: this JOIN is lost
+        val host = HostSession.create(Characters.SNOOP); host.attach(hostLink); hostLink.hearing = true
+        host.tick(0.05f); assertEquals(0, host.peerCount)
+        client.tick(1.1f, PlayerInput()) // retry fires
+        host.tick(0.05f)
+        assertEquals(1, host.peerCount); assertEquals(1, client.playerId)
+    }
+}
