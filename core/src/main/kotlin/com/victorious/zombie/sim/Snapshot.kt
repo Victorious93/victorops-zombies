@@ -75,15 +75,37 @@ object SnapshotCodec {
     fun fromText(t: String): Snapshot = decode(Base64Coder.decode(t))
 }
 
-/** One player's controls for a tick. Sent client -> host. */
-data class PlayerInput(val dx: Float = 0f, val dy: Float = 0f, val use: Boolean = false, val ability: Boolean = false) {
-    fun toText(): String = "${(dx.coerceIn(-1f, 1f) * 100).toInt()},${(dy.coerceIn(-1f, 1f) * 100).toInt()},${if (use) 1 else 0},${if (ability) 1 else 0}"
+/**
+ * One player's controls for a tick. Sent client -> host. Zombie Survival uses only the first four fields (it aims
+ * for you); Blackout Royale also uses the aim direction and the fire / heal / reload buttons.
+ */
+data class PlayerInput(
+    val dx: Float = 0f, val dy: Float = 0f, val use: Boolean = false, val ability: Boolean = false,
+    val aimX: Float = 0f, val aimY: Float = 0f, val fire: Boolean = false, val heal: Boolean = false, val reload: Boolean = false,
+) {
+    private val hasExtras: Boolean get() = aimX != 0f || aimY != 0f || fire || heal || reload
+
+    /** Four fields as before when the extras are unused (older hosts still parse it), seven otherwise. */
+    fun toText(): String {
+        val base = "${pct(dx)},${pct(dy)},${if (use) 1 else 0},${if (ability) 1 else 0}"
+        if (!hasExtras) return base
+        val bits = (if (fire) 1 else 0) or (if (heal) 2 else 0) or (if (reload) 4 else 0)
+        return "$base,${pct(aimX)},${pct(aimY)},$bits"
+    }
+
     companion object {
+        private fun pct(v: Float): Int = if (v.isNaN()) 0 else (v.coerceIn(-1f, 1f) * 100).toInt()
+
         fun fromText(t: String): PlayerInput? {
             val p = t.split(',')
-            if (p.size != 4) return null
+            if (p.size != 4 && p.size != 7) return null
             val dx = p[0].toIntOrNull() ?: return null; val dy = p[1].toIntOrNull() ?: return null
-            return PlayerInput(dx.coerceIn(-100, 100) / 100f, dy.coerceIn(-100, 100) / 100f, p[2] == "1", p[3] == "1")
+            var ax = 0; var ay = 0; var bits = 0
+            if (p.size == 7) { ax = p[4].toIntOrNull() ?: return null; ay = p[5].toIntOrNull() ?: return null; bits = p[6].toIntOrNull() ?: return null }
+            return PlayerInput(
+                dx.coerceIn(-100, 100) / 100f, dy.coerceIn(-100, 100) / 100f, p[2] == "1", p[3] == "1",
+                ax.coerceIn(-100, 100) / 100f, ay.coerceIn(-100, 100) / 100f, bits and 1 != 0, bits and 2 != 0, bits and 4 != 0,
+            )
         }
     }
 }

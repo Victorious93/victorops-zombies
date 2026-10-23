@@ -1,6 +1,7 @@
 package com.victorious.zombie.sim
 
 import com.victorious.zombie.logic.*
+import com.victorious.zombie.net.Msg
 import kotlin.math.hypot
 import kotlin.random.Random
 
@@ -31,7 +32,7 @@ class SimPickup(val x: Float, val y: Float, val pack: ArmorPack) { var life = 15
  * Authoritative game simulation for 1..[MAX_PLAYERS] players. No rendering, no input devices, no networking:
  * the host feeds it [PlayerInput]s and calls [update]; everything else reads [snapshot]s.
  */
-class World(seed: Long = System.nanoTime()) {
+class World(seed: Long = System.nanoTime()) : Sim {
     companion object {
         const val MAX_PLAYERS = 4
         const val PLAYER_SPEED = 220f
@@ -61,6 +62,15 @@ class World(seed: Long = System.nanoTime()) {
     }
 
     fun removePlayer(id: Int) { players.remove(id) }
+
+    override val stateType: String get() = Msg.STATE
+    override val kind: String? get() = null
+    override fun hasPlayer(id: Int) = id in players
+    override fun join(id: Int, characterId: String) = addPlayer(id, Characters.byId(characterId)) != null
+    override fun leave(id: Int) = removePlayer(id)
+    override fun applyInput(id: Int, input: PlayerInput) = setInput(id, input)
+    override fun step(dt: Float) = update(dt)
+    override fun stateText(forId: Int): String = SnapshotCodec.toText(snapshot(forId))
 
     fun setInput(id: Int, input: PlayerInput) { players[id]?.input = input }
 

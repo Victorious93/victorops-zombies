@@ -14,6 +14,8 @@ sealed class Entry {
     object Menu : Entry()
     /** Offline single player straight after picking a character. */
     object Solo : Entry()
+    /** Offline Blackout Royale (you plus bots) straight after picking a character. */
+    object Royale : Entry()
     /** Run the world; [onSession] is called (on the GL thread) with the new session so the app can attach peer links. */
     class Host(val onSession: (HostSession) -> Unit, val onClose: () -> Unit = {}) : Entry()
     /** Join a host over an already-established link. */
@@ -31,8 +33,9 @@ class VictorOpsGame(private val entry: Entry = Entry.Menu) : Game() {
         setScreen(when (val e = entry) {
             Entry.Menu -> ModeSelectScreen(character)
             Entry.Solo -> GameScreen(character, Mode.Solo)
+            Entry.Royale -> BrScreen(character, Mode.Solo)
             is Entry.Host -> GameScreen(character, Mode.Host(HostSession.create(character).also(e.onSession), e.onClose))
-            is Entry.Client -> GameScreen(character, Mode.Client(ClientSession(e.link, character.id)))
+            is Entry.Client -> ConnectingScreen(character, ClientSession(e.link, character.id))
         })
     }
 }

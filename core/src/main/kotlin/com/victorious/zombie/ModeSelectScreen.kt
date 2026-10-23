@@ -26,7 +26,11 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
     private val tmp = Vector3()
     @Volatile private var status = ""
     private var done = false // GL resources are disposed once we switch screens; never draw after that
-    private val labels = listOf("1  SOLO  (offline)", "2  HOST  (Wi-Fi, up to 4 players)", "3  JOIN  (Wi-Fi, enter host address)")
+    private var royale = false // false = Zombie Survival, true = Blackout Royale
+    private val labels get() = if (royale)
+        listOf("1  SOLO  (you + bots, offline)", "2  HOST  (Wi-Fi, up to 4 players + bots)", "3  JOIN  (Wi-Fi, enter host address)")
+    else listOf("1  SOLO  (offline)", "2  HOST  (Wi-Fi, up to 4 players)", "3  JOIN  (Wi-Fi, enter host address)")
+    private val gameBtn = floatArrayOf(340f, 560f, 600f, 70f)
     private fun btn(i: Int) = floatArrayOf(340f, 440f - i * 120f, 600f, 90f) // x, y, w, h
 
     override fun resize(width: Int, height: Int) { view.update(width, height, true) }
@@ -36,9 +40,11 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) solo()
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) hostGame()
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3)) joinGame()
+        if (Gdx.input.isKeyJustPressed(Input.Keys.G) || Gdx.input.isKeyJustPressed(Input.Keys.TAB)) royale = !royale
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE)) back()
         if (Gdx.input.justTouched()) {
             view.unproject(tmp.set(Gdx.input.x.toFloat(), Gdx.input.y.toFloat(), 0f))
+            if (tmp.x in gameBtn[0]..gameBtn[0] + gameBtn[2] && tmp.y in gameBtn[1]..gameBtn[1] + gameBtn[3]) royale = !royale
             for (i in labels.indices) { val b = btn(i); if (tmp.x in b[0]..b[0] + b[2] && tmp.y in b[1]..b[1] + b[3]) when (i) { 0 -> solo(); 1 -> hostGame(); else -> joinGame() } }
         }
         if (done) return
@@ -46,10 +52,12 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
         view.apply(); shapes.projectionMatrix = cam.combined; batch.projectionMatrix = cam.combined
         shapes.begin(ShapeRenderer.ShapeType.Filled)
         labels.indices.forEach { i -> val b = btn(i); shapes.color = Color(0.14f, 0.12f, 0.22f, 1f); shapes.rect(b[0], b[1], b[2], b[3]) }
+        shapes.color = if (royale) Color(0.45f, 0.1f, 0.2f, 1f) else Color(0.12f, 0.3f, 0.16f, 1f); shapes.rect(gameBtn[0], gameBtn[1], gameBtn[2], gameBtn[3])
         shapes.end()
         batch.begin(); font.color = Color.WHITE
-        font.data.setScale(2.2f); font.draw(batch, "${character.name} - how do you want to play?", 220f, H - 60f)
-        font.data.setScale(1.5f); labels.forEachIndexed { i, t -> val b = btn(i); font.draw(batch, t, b[0] + 24, b[1] + 58) }
+        font.data.setScale(2.2f); font.draw(batch, "${character.name} - how do you want to play?", 220f, H - 40f)
+        font.data.setScale(1.5f); font.draw(batch, if (royale) "GAME:  BLACKOUT ROYALE  (tap / G to switch)" else "GAME:  ZOMBIE SURVIVAL  (tap / G to switch)", gameBtn[0] + 24, gameBtn[1] + 45)
+        labels.forEachIndexed { i, t -> val b = btn(i); font.draw(batch, t, b[0] + 24, b[1] + 58) }
         font.data.setScale(1f)
         font.draw(batch, "Solo needs no internet or Wi-Fi. Hosting and joining need both devices on the same network (no internet required).", 120f, 110f)
         if (status.isNotEmpty()) { font.color = Color.YELLOW; font.draw(batch, status, 120f, 80f) }
@@ -59,15 +67,25 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
 
     private fun go(mode: Mode) { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(GameScreen(character, mode)); dispose() }
     private fun back() { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(CharacterSelectScreen()); dispose() }
-    private fun solo() = go(Mode.Solo)
+    private fun solo() = if (royale) goRoyale(Mode.Solo) else go(Mode.Solo)
+
+    private fun goRoyale(mode: Mode) { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(BrScreen(character, mode)); dispose() }
+
+    /** Hands the new client session to the connecting screen, which opens whichever game the host runs. */
+    private fun connect(session: ClientSession) {
+        if (done) return
+        done = true
+        (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(ConnectingScreen(character, session)); dispose()
+    }
 
     private fun hostGame() {
         try {
-            val session = HostSession.create(character)
+            val session = if (royale) HostSession.createRoyale(character, autoStartS = 120f) else HostSession.create(character)
             val server = TcpHost(TcpHost.DEFAULT_PORT) { session.attach(it) }
             val addr = TcpHost.localAddress()
             Gdx.app.log("zombies", "Hosting on ${addr ?: "this device"}:${server.port}")
-            go(Mode.Host(session) { server.close() })
+            val mode = Mode.Host(session) { server.close() }
+            if (royale) goRoyale(mode) else go(mode)
         } catch (e: Exception) { status = "Could not host: ${e.message}" }
     }
 
@@ -80,7 +98,7 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
                 Thread {
                     try {
                         val link = TcpLink.connect(host, port)
-                        Gdx.app.postRunnable { if (done) link.close() else go(Mode.Client(ClientSession(link, character.id))) }
+                        Gdx.app.postRunnable { if (done) link.close() else connect(ClientSession(link, character.id)) }
                     } catch (e: Exception) { status = "Could not connect: ${e.message}" }
                 }.start()
             }

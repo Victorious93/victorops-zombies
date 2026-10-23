@@ -1,9 +1,12 @@
 package com.victorious.zombie.net
 
+import com.victorious.zombie.br.BrCodec
+import com.victorious.zombie.br.BrSnapshot
 import com.victorious.zombie.logic.Characters
 import com.victorious.zombie.sim.PlayerInput
 import com.victorious.zombie.sim.Snapshot
 import com.victorious.zombie.sim.SnapshotCodec
+import com.victorious.zombie.sim.Sim
 import com.victorious.zombie.sim.World
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -11,22 +14,33 @@ import java.util.concurrent.ConcurrentLinkedQueue
 object Msg {
     const val JOIN = "zj"      // client -> host: "<characterId>"
     const val INPUT = "zi"     // client -> host: PlayerInput text
-    const val WELCOME = "zw"   // host -> client: "<playerId>"
+    const val WELCOME = "zw"   // host -> client: "<playerId>" (Zombie Survival) or "<playerId>,<kind>" (e.g. "2,royale")
     const val STATE = "zs"     // host -> client: Snapshot base64
+    const val ROYALE_STATE = "zr" // host -> client: Blackout Royale snapshot base64
     const val FULL = "zf"      // host -> client: lobby full
     const val BYE = "zb"       // client -> host: leaving the game (the link itself may stay up, e.g. a shared Connect session)
 }
 
 /**
- * Host side: owns the [World] and talks to every connected peer. The host's own player is id [HOST_ID].
+ * Host side: owns the [Sim] and talks to every connected peer. The host's own player is id [HOST_ID].
  * Call [tick] once per frame from the game thread; network callbacks only enqueue.
  */
-class HostSession(val world: World, private val sendHz: Float = 15f) {
+class HostSession(val sim: Sim, private val sendHz: Float = 15f) {
+    /** The Zombie Survival world. Only valid when [sim] is one. */
+    val world: World get() = sim as World
+
     companion object {
         const val HOST_ID = 0
-        /** A fresh world with the host's own player already in it. */
+        /** A fresh Zombie Survival world with the host's own player already in it. */
         fun create(hostCharacter: com.victorious.zombie.logic.Character): HostSession =
             HostSession(World().also { it.addPlayer(HOST_ID, hostCharacter) })
+
+        /**
+         * A fresh Blackout Royale lobby with the host in it. [autoStartS] is how long the lobby waits for the host to
+         * start (solo play uses a short wait; hosting for friends a long one).
+         */
+        fun createRoyale(hostCharacter: com.victorious.zombie.logic.Character, autoStartS: Float = 1.5f, skill: com.victorious.zombie.br.BotSkill = com.victorious.zombie.br.BotSkill.NORMAL): HostSession =
+            HostSession(com.victorious.zombie.br.BrWorld(autoStartS = autoStartS, botSkill = skill).also { it.join(HOST_ID, hostCharacter.id) })
     }
 
     private class Peer(val id: Int, val link: NetLink)
@@ -51,14 +65,14 @@ class HostSession(val world: World, private val sendHz: Float = 15f) {
             when (val e = events.poll() ?: break) {
                 is Event.Join -> { /* wait for the JOIN message so we know the character */ }
                 is Event.Msg -> handle(e.link, e.type, e.data)
-                is Event.Closed -> peers.remove(e.link)?.let { world.removePlayer(it.id) }
+                is Event.Closed -> peers.remove(e.link)?.let { sim.leave(it.id) }
             }
         }
-        world.update(dt)
+        sim.step(dt)
         sendT += dt
         if (sendT >= 1f / sendHz) {
             sendT = 0f
-            for (p in peers.values) p.link.send(Msg.STATE, SnapshotCodec.toText(world.snapshot(p.id)))
+            for (p in peers.values) p.link.send(sim.stateType, sim.stateText(p.id))
         }
     }
 
@@ -66,13 +80,12 @@ class HostSession(val world: World, private val sendHz: Float = 15f) {
         val peer = peers[link]
         when (type) {
             Msg.JOIN -> if (peer == null) {
-                val id = (1..World.MAX_PLAYERS).firstOrNull { cand -> world.players[cand] == null && peers.values.none { it.id == cand } }
-                val added = id?.let { world.addPlayer(it, Characters.byId(data.trim())) }
-                if (id == null || added == null) { link.send(Msg.FULL, "full"); link.close() }
-                else { peers[link] = Peer(id, link); link.send(Msg.WELCOME, id.toString()) }
+                val id = (1..World.MAX_PLAYERS).firstOrNull { cand -> !sim.hasPlayer(cand) && peers.values.none { it.id == cand } }
+                if (id == null || !sim.join(id, data.trim())) { link.send(Msg.FULL, "full"); link.close() }
+                else { peers[link] = Peer(id, link); link.send(Msg.WELCOME, sim.kind?.let { "$id,$it" } ?: id.toString()) }
             }
-            Msg.INPUT -> if (peer != null) PlayerInput.fromText(data)?.let { world.setInput(peer.id, it) }
-            Msg.BYE -> if (peer != null) { peers.remove(link); world.removePlayer(peer.id) }
+            Msg.INPUT -> if (peer != null) PlayerInput.fromText(data)?.let { sim.applyInput(peer.id, it) }
+            Msg.BYE -> if (peer != null) { peers.remove(link); sim.leave(peer.id) }
         }
     }
 
@@ -82,6 +95,10 @@ class HostSession(val world: World, private val sendHz: Float = 15f) {
 /** Client side: sends inputs, keeps the latest snapshot. Safe to read [latest] from the render thread. */
 class ClientSession(private val link: NetLink, private val characterId: String, private val inputHz: Float = 20f) {
     @Volatile var latest: Snapshot? = null; private set
+    /** Latest Blackout Royale frame (when the host runs that game). */
+    @Volatile var latestRoyale: BrSnapshot? = null; private set
+    /** Which game the host runs: null = Zombie Survival (or not welcomed yet, see [playerId]), "royale" = Blackout Royale. */
+    @Volatile var kind: String? = null; private set
     @Volatile var playerId: Int = -1; private set
     @Volatile var connected = true; private set
     @Volatile var rejected = false; private set
@@ -92,8 +109,12 @@ class ClientSession(private val link: NetLink, private val characterId: String, 
         link.listener = object : NetLink.Listener {
             override fun onMessage(type: String, data: String) {
                 when (type) {
-                    Msg.WELCOME -> data.trim().toIntOrNull()?.let { playerId = it }
+                    Msg.WELCOME -> {
+                        val parts = data.trim().split(',', limit = 2)
+                        parts[0].toIntOrNull()?.let { kind = parts.getOrNull(1)?.takeIf { k -> k.isNotBlank() }; playerId = it }
+                    }
                     Msg.STATE -> try { latest = SnapshotCodec.fromText(data) } catch (_: Exception) { /* drop bad packet */ }
+                    Msg.ROYALE_STATE -> try { latestRoyale = BrCodec.fromText(data) } catch (_: Exception) { /* drop bad packet */ }
                     Msg.FULL -> rejected = true
                 }
             }
