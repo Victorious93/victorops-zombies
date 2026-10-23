@@ -118,6 +118,8 @@ class GameScreen(private val character: Character = Characters.DEFAULT, private 
 
     private fun draw(s: Snapshot?, dt: Float) {
         Gdx.gl.glClearColor(0.03f, 0.02f, 0.06f, 1f); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT)
+        // SpriteBatch.end() switches blending off; without this the translucent touch controls are drawn opaque
+        Gdx.gl.glEnable(GL20.GL_BLEND); Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA)
         view.apply(); shapes.projectionMatrix = cam.combined; batch.projectionMatrix = cam.combined
         if (s == null) {
             batch.begin(); font.color = Color.WHITE

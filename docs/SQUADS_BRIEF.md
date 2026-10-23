@@ -3,6 +3,18 @@
 Status: **not started**. This is a hand-off for a fresh session. Read `docs/BLACKOUT_ROYALE.md` (current design and measured
 numbers) and `tools/dev/README.md` (how to build, test, probe and screenshot in this container) first.
 
+## Deliverable: an Android APK
+This game ships as an **Android APK** (`:android` module, applicationId `com.victorious.zombie`, minSdk 24, ARM only). The desktop
+module (`:lwjgl3`) exists only as a development harness, used for screenshots in this container; it is not the product.
+Every feature must therefore be designed and judged for a **phone**:
+- **Touch first.** Squads, revive and any new prompt must work with the on-screen controls (left stick, right aim stick, USE,
+  HEAL, SKILL, RELOAD). Hold-to-revive has to be usable with a thumb while moving the other. Nothing may depend on a keyboard or mouse.
+- **Readable at phone size.** Small text and thin rings that look fine in a 1280x720 desktop window can disappear on a 6-inch screen.
+- **Cheap per frame.** Avoid per-tick allocations in hot paths, keep A* repaths bounded, and keep snapshots small (measure bytes).
+- The CI workflow (`.github/workflows`) builds the debug APK and checks signatures and ABIs; keep it green. Build the APK
+  yourself at the end with the recipe in `tools/dev/README.md` and report the path and size. Say plainly what you could not run
+  on a device or emulator.
+
 ## Goal
 Add a **Squads** variant of Blackout Royale: fighters are grouped into squads, a fighter whose health hits zero is **downed**
 (not eliminated) while a teammate lives, and teammates can **revive** them. Last squad standing wins. The existing
@@ -61,9 +73,11 @@ free-for-all must keep working unchanged and keep passing its pacing/stuck/jitte
 2. Bot-only squad matches: all finish; pacing stays in a sensible band (state the measured numbers; target roughly 3 to 5 minutes);
    0 stuck bots; jitter within the existing 0.5% limit; revives actually happen (measure how many per match, and how many bot revives succeed).
 3. Existing free-for-all tests and its pacing band still pass.
-4. Look at real frames with the Xvfb recipe: downed state, revive progress, squad panel, squad rings, lobby options, result screen.
-   Report what you could not verify (touch input, Android, real two-device play).
+4. Look at real frames with the Xvfb recipe (a desktop render of the same code, so it shows layout and colours, not touch behaviour):
+   downed state, revive progress, squad panel, squad rings, lobby options, result screen. Then build the **debug APK**
+   (`:android:assembleDebug`) and report its path and size. Report what you could not verify (touch input on a device, real
+   two-device play, Bluetooth).
 5. Update `docs/BLACKOUT_ROYALE.md` with the rules and measured numbers. Commit in sensible steps and push.
 
 ## Out of scope
-Sound, vehicles, respawn beacons from fully dead players, ping system, cross-squad alliances, Android device testing.
+Sound, vehicles, respawn beacons from fully dead players, ping system, cross-squad alliances.

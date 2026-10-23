@@ -3,14 +3,36 @@
 Everything here is a recipe, not code the Gradle build compiles. Files ending in `.txt` are Kotlin sources to copy into a
 source set **temporarily** and delete again before committing.
 
+## Building the Android APK in this container (this is the product)
+A fresh container has no Android SDK and only JDK 21. Outbound access to `dl.google.com` and Google Maven works. One-time setup (about 3 min):
+
+    apt-get update -q && apt-get install -y -q openjdk-17-jdk-headless          # the build pins a JDK 17 toolchain
+    mkdir -p ~/android-sdk/cmdline-tools && cd ~/android-sdk
+    curl -sS -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+    unzip -q /tmp/cmdtools.zip -d cmdline-tools && mv cmdline-tools/cmdline-tools cmdline-tools/latest
+    export ANDROID_HOME=~/android-sdk
+    yes | cmdline-tools/latest/bin/sdkmanager --licenses
+    cmdline-tools/latest/bin/sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+
+Then, from the repo root (the system `gradle` works; with JDK 17 installed the toolchain override below is not needed):
+
+    export ANDROID_HOME=~/android-sdk
+    gradle :android:assembleDebug --console=plain
+    # APK: android/build/outputs/apk/debug/android-debug.apk
+
+The APK is signed with the default debug key unless `VOZ_KEYSTORE_*` secrets are set (see `android/build.gradle.kts`). CI additionally
+verifies v2/v3 signatures and the arm64-v8a / armeabi-v7a native libraries; the same checks can be run with
+`$ANDROID_HOME/build-tools/35.0.0/apksigner verify --verbose` and `unzip -l`. There is no emulator or device here, so touch
+input and performance on a phone remain unverified until someone installs the APK.
+
 ## Build and test in this container
-Only JDK 21 is installed but the build pins a JDK 17 toolchain, so override it from outside the repo:
+If you did not install JDK 17 (see above) the build cannot find its pinned toolchain; override it from outside the repo instead:
 
     gradle :core:test --console=plain -I tools/dev/jdk-override.init.gradle
 
 Add `-I tools/dev/test-output.init.gradle` to see `println` output and pass/fail lines (it also caps the test heap at 96 MB,
 which is what made the old unbounded-line bug visible). The wrapper's Gradle is not needed; the system `gradle` works.
-Android (`:android`) cannot be built here (no SDK). `:lwjgl3:compileKotlin` can.
+`:lwjgl3:compileKotlin` compiles the desktop harness.
 
 Summarise results from the XML (`core/build/test-results/test/*.xml`) rather than scrolling Gradle output.
 

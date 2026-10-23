@@ -50,7 +50,10 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     private val client = (mode as? Mode.Client)?.session
 
     // ---- input state
-    private val isTouch = Gdx.app.type == Application.ApplicationType.Android
+    private val isTouch = Gdx.app.type == Application.ApplicationType.Android || System.getProperty("zombie.touch") == "1" // the property lets the desktop harness draw the phone HUD
+    /** Text scale. The default font is ~1 mm tall on a 6-inch phone at this virtual size, so touch devices get bigger type. */
+    private val ui = if (isTouch) 1.6f else 1f
+    init { font.data.setScale(ui) }
     private val moveC = Vector2(150f, 150f); private val aimC = Vector2(W - 170f, 150f)
     private val useB = Vector2(W - 95f, 330f); private val healB = Vector2(W - 205f, 340f); private val skillB = Vector2(W - 325f, 310f); private val reloadB = Vector2(W - 345f, 190f)
     private val moveV = Vector2(); private val aimV = Vector2()
@@ -196,6 +199,12 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     private val fighterColors = listOf(Color(0.1f, 0.95f, 1f, 1f), Color(1f, 0.6f, 0.2f, 1f), Color(0.5f, 1f, 0.4f, 1f), Color(1f, 0.4f, 0.9f, 1f), Color(1f, 0.85f, 0.3f, 1f), Color(0.6f, 0.6f, 1f, 1f))
     private fun colorOf(id: Int) = fighterColors[id % fighterColors.size]
 
+    /** Starts a shape pass with alpha blending on: [SpriteBatch.end] switches blending off, which made every translucent shape drawn after text opaque. */
+    private fun beginShapes(type: ShapeRenderer.ShapeType) {
+        Gdx.gl.glEnable(GL20.GL_BLEND); Gdx.gl.glBlendFunc(GL20.GL_SRC_ALPHA, GL20.GL_ONE_MINUS_SRC_ALPHA)
+        shapes.begin(type)
+    }
+
     // ---- drawing --------------------------------------------------------------------------------------------------
     private fun draw(s: BrSnapshot?, dt: Float) {
         Gdx.gl.glClearColor(0.02f, 0.02f, 0.04f, 1f); Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT)
@@ -210,7 +219,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         val phase = Phase.values()[s.phase.coerceIn(0, 3)]
         if (phase == Phase.LOBBY) { // a clean screen: nothing of the arena exists yet
             hudView.apply(); shapes.projectionMatrix = hudCam.combined; batch.projectionMatrix = hudCam.combined
-            shapes.begin(ShapeRenderer.ShapeType.Line); shapes.color = Color(1f, 0.35f, 0.5f, 0.35f)
+            beginShapes(ShapeRenderer.ShapeType.Line); shapes.color = Color(1f, 0.35f, 0.5f, 0.35f)
             for (r in 1..4) shapes.circle(W / 2, H / 2 - 40f, r * 90f, 64)
             shapes.end()
             batch.begin(); font.color = Color.WHITE; lobbyText(s); batch.end()
@@ -222,7 +231,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         val x0 = cam.position.x - W / 2 - 60f; val x1 = cam.position.x + W / 2 + 60f; val y0 = cam.position.y - H / 2 - 60f; val y1 = cam.position.y + H / 2 + 60f
 
         // world, filled
-        shapes.begin(ShapeRenderer.ShapeType.Filled)
+        beginShapes(ShapeRenderer.ShapeType.Filled)
         shapes.color = Color(0.085f, 0.095f, 0.12f, 1f); shapes.rect(0f, 0f, BrConst.SIZE, BrConst.SIZE)
         m?.pois?.forEach { shapes.color = Color(0.11f, 0.12f, 0.16f, 1f); shapes.circle(it.x, it.y, 330f, 40) }
         shapes.color = Color(0.12f, 0.13f, 0.17f, 1f)
@@ -267,17 +276,17 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
 
         // damage numbers and names (world space text)
         batch.begin(); font.color = Color.WHITE
-        m?.pois?.forEach { font.color = Color(1f, 1f, 1f, 0.22f); font.data.setScale(2f); layout.setText(font, it.name); font.draw(batch, it.name, it.x - layout.width / 2, it.y + 12); font.data.setScale(1f) }
+        m?.pois?.forEach { font.color = Color(1f, 1f, 1f, 0.22f); font.data.setScale(2f * ui); layout.setText(font, it.name); font.draw(batch, it.name, it.x - layout.width / 2, it.y + 12); font.data.setScale(ui) }
         for (f in s.fighters) {
             if (!f.alive || f.id == s.meId) continue
             val p = smooth(f.id, f.x, f.y, dt); font.color = Color(1f, 1f, 1f, 0.85f); layout.setText(font, f.name); font.draw(batch, f.name, p.x - layout.width / 2, p.y + 44)
         }
         for (a in s.airdrops) { font.color = Color(1f, 0.85f, 0.3f, 1f); font.draw(batch, "SUPPLY ${max(0, a.t.toInt())}s", a.x - 34, a.y - 8) }
-        for (f in floaters) { val k = f.age / 0.9f; font.color = Color(f.color.r, f.color.g, f.color.b, 1f - k * k); font.data.setScale(1.2f); font.draw(batch, f.text, f.x - 8, f.y + 30 + 40 * k); font.data.setScale(1f) }
+        for (f in floaters) { val k = f.age / 0.9f; font.color = Color(f.color.r, f.color.g, f.color.b, 1f - k * k); font.data.setScale(1.2f * ui); font.draw(batch, f.text, f.x - 8, f.y + 30 + 40 * k); font.data.setScale(ui) }
         batch.end()
 
         // aim line + zone arrow (line type)
-        shapes.begin(ShapeRenderer.ShapeType.Line)
+        beginShapes(ShapeRenderer.ShapeType.Line)
         if (me != null && me.alive && phase == Phase.LIVE) {
             val p = smooth(me.id, me.x, me.y, dt)
             val range = BrGuns.at(me.gunIndex).range
@@ -296,7 +305,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     }
 
     private fun drawZone(z: BrZoneSnap) {
-        shapes.begin(ShapeRenderer.ShapeType.Filled)
+        beginShapes(ShapeRenderer.ShapeType.Filled)
         shapes.color = Color(0.7f, 0.05f, 0.25f, 0.3f)
         val seg = 96; val outer = 3600f
         for (i in 0 until seg) {
@@ -306,7 +315,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             shapes.triangle(ix0, iy0, ox0, oy0, ox1, oy1); shapes.triangle(ix0, iy0, ox1, oy1, ix1, iy1)
         }
         shapes.end()
-        shapes.begin(ShapeRenderer.ShapeType.Line)
+        beginShapes(ShapeRenderer.ShapeType.Line)
         shapes.color = Color(1f, 0.35f, 0.5f, 1f); shapes.circle(z.cx, z.cy, z.r, 120)
         if (z.nextR > 0f && (z.nextCx != z.cx || z.nextR != z.r)) { shapes.color = Color(1f, 1f, 1f, 0.7f); shapes.circle(z.nextCx, z.nextCy, z.nextR, 90) }
         shapes.end()
@@ -318,7 +327,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         val self = s.self
         // minimap
         val mm = 170f; val mx = W - mm - 16f; val my = H - mm - 16f; val sc = mm / BrConst.SIZE
-        shapes.begin(ShapeRenderer.ShapeType.Filled)
+        beginShapes(ShapeRenderer.ShapeType.Filled)
         shapes.color = Color(0f, 0f, 0f, 0.55f); shapes.rect(mx, my, mm, mm)
         map?.pois?.forEach { shapes.color = Color(0.2f, 0.22f, 0.3f, 1f); shapes.circle(mx + it.x * sc, my + it.y * sc, 330f * sc, 16) }
         s.airdrops.forEach { shapes.color = Color(1f, 0.8f, 0.2f, 1f); shapes.rect(mx + it.x * sc - 2, my + it.y * sc - 2, 4f, 4f) }
@@ -343,7 +352,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             shapes.color = Color(1f, 1f, 1f, 0.25f); shapes.circle(reloadB.x, reloadB.y, 34f)
         }
         shapes.end()
-        shapes.begin(ShapeRenderer.ShapeType.Line)
+        beginShapes(ShapeRenderer.ShapeType.Line)
         shapes.color = Color(1f, 1f, 1f, 0.5f); shapes.rect(mx, my, mm, mm)
         shapes.color = Color(1f, 0.35f, 0.5f, 1f); shapes.circle(mx + s.zone.cx * sc, my + s.zone.cy * sc, s.zone.r * sc, 48)
         if (s.zone.nextR > 0f) { shapes.color = Color.WHITE; shapes.circle(mx + s.zone.nextCx * sc, my + s.zone.nextCy * sc, s.zone.nextR * sc, 36) }
@@ -361,20 +370,20 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
                 font.color = gunColor(me.rarity)
                 font.draw(batch, (if (rar == Rarity.COMMON) gun.name else "${rar.label} ${gun.name}") + "   " + (if (me.reloading) "RELOADING" else "${me.rounds}/${self?.magSize ?: 0}"), 22f, H - 58f)
                 font.color = Color.WHITE
-                font.draw(batch, "HP ${me.hp.toInt()}   SHIELD ${me.shield.toInt()}", 22f, H - 76f)
+                font.draw(batch, "HP ${me.hp.toInt()}   SHIELD ${me.shield.toInt()}", 22f, H - 58f - lh)
             }
             if (self != null) {
-                font.draw(batch, "MEDKIT x${self.medkits}   CELL x${self.cells}   KILLS ${self.kills}", 22f, H - 94f)
-                font.draw(batch, characterAbility(me) + if (self.abilityCd <= 0f) ": READY [Q]" else ": ${self.abilityCd.toInt()}s", 22f, H - 112f)
+                font.draw(batch, "MEDKIT x${self.medkits}   CELL x${self.cells}   KILLS ${self.kills}", 22f, H - 58f - 2 * lh)
+                font.draw(batch, characterAbility(me) + if (self.abilityCd <= 0f) ": READY [Q]" else ": ${self.abilityCd.toInt()}s", 22f, H - 58f - 3 * lh)
             }
-            font.data.setScale(1.5f); text("ALIVE ${s.alive}", W / 2, H - 18f, 1.5f)
+            text("ALIVE ${s.alive}", W / 2, H - 18f, 1.5f)
             val zl = if (s.zone.stage >= BrWorld.ZONES.size) "FINAL ZONE" else if (s.zone.shrinking) "ZONE CLOSING  ${s.zone.timeLeft.toInt()}s" else "NEXT ZONE IN  ${s.zone.timeLeft.toInt()}s"
-            font.data.setScale(1f); text(zl, W / 2, H - 50f, 1f)
+            text(zl, W / 2, H - 24f - 22.5f * ui, 1f)
             if (me != null && me.alive && hypot(me.x - s.zone.cx, me.y - s.zone.cy) > s.zone.r) { font.color = Color(1f, 0.35f, 0.4f, 1f); text("IN THE DEAD ZONE  -${s.zone.dps.toInt()}/s  GET INSIDE", W / 2, 190f, 1.2f); font.color = Color.WHITE }
             if (self != null && self.prompt.isNotEmpty()) text(self.prompt + if (isTouch) "  (tap USE)" else "  (press E)", W / 2, 120f, 1f)
             if (self != null && !self.alive) { font.color = Color(1f, 0.5f, 0.5f, 1f); text("ELIMINATED  -  #${self.placement}   spectating ${self.spectating}", W / 2, 150f, 1.2f); font.color = Color.WHITE }
             var fy = H - mm - 30f
-            font.data.setScale(0.9f); for (line in s.feed.asReversed()) { layout.setText(font, line); font.draw(batch, line, W - 16f - layout.width, fy); fy -= 16f }; font.data.setScale(1f)
+            font.data.setScale(0.9f * ui); for (line in s.feed.asReversed()) { layout.setText(font, line); font.draw(batch, line, W - 16f - layout.width, fy); fy -= 16f * ui }; font.data.setScale(ui)
             if (isTouch) { label("USE", useB); label("HEAL", healB); label(if (self == null || self.abilityCd <= 0f) "SKILL" else self.abilityCd.toInt().toString(), skillB); label("R", reloadB) }
         }
         if (s.banner.isNotEmpty() && phase != Phase.ENDED) { font.color = Color(1f, 0.9f, 0.4f, 1f); text(s.banner, W / 2, H / 2 + 150f, 2f); font.color = Color.WHITE }
@@ -385,32 +394,38 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
 
     private fun characterAbility(me: BrFighterSnap?) = (me?.let { Characters.byId(it.characterId).abilityName }) ?: character.abilityName
 
+    private val lh get() = 18f * ui
+
+    /** Draws a centred line at [y] and returns the y for the next line, [gap] below its bottom edge. */
+    private fun line(t: String, y: Float, scale: Float, gap: Float = 12f): Float { text(t, W / 2, y, scale); return y - 15f * scale * ui - gap }
+
     private fun lobbyText(s: BrSnapshot) {
-        font.color = Color(1f, 0.9f, 0.4f, 1f); text("BLACKOUT ROYALE", W / 2, H - 120f, 3f); font.color = Color.WHITE
-        text("${s.field} fighters  -  last one standing wins. Stay inside the Dead Zone.", W / 2, H - 200f, 1.1f)
-        var y = H - 260f
-        text("Players", W / 2, y, 1.2f); y -= 28f
-        s.lobby.forEach { text(it, W / 2, y, 1f); y -= 20f }
-        y -= 12f
-        text(if (host != null) "Bots fill the rest. Starts in ${s.timer.toInt()}s  -  ${if (isTouch) "tap" else "press Enter / tap"} to start now" else "Waiting for the host to start...  (${s.timer.toInt()}s)", W / 2, max(y, 200f), 1.2f)
+        var y = H - 70f
+        font.color = Color(1f, 0.9f, 0.4f, 1f); y = line("BLACKOUT ROYALE", y, 3f, 18f); font.color = Color.WHITE
+        y = line("${s.field} fighters  -  last one standing wins. Stay inside the Dead Zone.", y, 1.1f, 30f)
+        y = line("Players", y, 1.2f, 8f)
+        s.lobby.forEach { y = line(it, y, 1f, 6f) }
+        y -= 14f
+        line(if (host != null) "Bots fill the rest. Starts in ${s.timer.toInt()}s  -  ${if (isTouch) "tap" else "press Enter / tap"} to start now" else "Waiting for the host to start...  (${s.timer.toInt()}s)", y, 1.2f)
         if (!isTouch) text("WASD move   Mouse aim   Click fire   E swap gun   F heal (hold)   Q skill   R reload   Esc leave", W / 2, 70f, 0.95f)
     }
 
     private fun resultText(s: BrSnapshot, self: BrSelf?) {
         val won = self != null && self.alive
+        var y = H / 2 + 190f
         font.color = if (won) Color(1f, 0.9f, 0.3f, 1f) else Color(1f, 0.6f, 0.6f, 1f)
-        text(if (won) "VICTORY!" else "GAME OVER", W / 2, H / 2 + 150f, 3f)
+        y = line(if (won) "VICTORY!" else "GAME OVER", y, 3f, 14f)
         font.color = Color.WHITE
-        text(s.banner, W / 2, H / 2 + 90f, 1.3f)
-        if (self != null) text("Placed #${self.placement} of ${s.field}   -   ${self.kills} eliminations", W / 2, H / 2 + 55f, 1.2f)
-        text(if (host != null) "Tap / Enter to play again" else "Waiting for host to restart", W / 2, H / 2 + 15f, 1f)
+        y = line(s.banner, y, 1.3f, 12f)
+        if (self != null) y = line("Placed #${self.placement} of ${s.field}   -   ${self.kills} eliminations", y, 1.2f, 14f)
+        line(if (host != null) "Tap / Enter to play again" else "Waiting for host to restart", y, 1f)
     }
 
     private fun label(t: String, c: Vector2) { layout.setText(font, t); font.draw(batch, t, c.x - layout.width / 2, c.y + layout.height / 2) }
 
     /** Draws [t] horizontally centred at [x] with the given scale (resets scale). */
     private fun text(t: String, x: Float, y: Float, scale: Float) {
-        font.data.setScale(scale); layout.setText(font, t); font.draw(batch, t, x - layout.width / 2, y); font.data.setScale(1f)
+        font.data.setScale(scale * ui); layout.setText(font, t); font.draw(batch, t, x - layout.width / 2, y); font.data.setScale(ui)
     }
 
     override fun dispose() {
