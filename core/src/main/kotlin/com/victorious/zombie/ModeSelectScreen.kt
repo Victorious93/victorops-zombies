@@ -61,7 +61,7 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
         shapes.end()
         batch.begin(); font.color = Color.WHITE
         font.data.setScale(2.2f); font.draw(batch, "${character.name} - how do you want to play?", 220f, H - 40f)
-        font.data.setScale(1.5f); font.draw(batch, if (royale) "BLACKOUT ROYALE  (tap to switch)" else "GAME:  ZOMBIE SURVIVAL  (tap / G to switch)", gameBtn[0] + 24, gameBtn[1] + 45)
+        font.data.setScale(1.5f); font.draw(batch, if (royale) "BLACKOUT ROYALE  (switch)" else "GAME:  ZOMBIE SURVIVAL  (tap / G to switch)", gameBtn[0] + 24, gameBtn[1] + 45)
         if (royale) { font.data.setScale(1.3f); font.draw(batch, if (BrPrefs.squadSize > 1) "SQUADS OF ${BrPrefs.squadSize}" else "NO SQUADS", squadBtn[0] + 18, squadBtn[1] + 44); font.data.setScale(1.5f) }
         labels.forEachIndexed { i, t -> val b = btn(i); font.draw(batch, t, b[0] + 24, b[1] + 58) }
         font.data.setScale(1f)

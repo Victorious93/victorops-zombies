@@ -1,6 +1,6 @@
 # Brief: squads with revives for Blackout Royale
 
-Status: **not started**. This is a hand-off for a fresh session. Read `docs/BLACKOUT_ROYALE.md` (current design and measured
+Status: **implemented** (see `docs/BLACKOUT_ROYALE.md`, "Squads and revives", for the rules as built and the measured numbers). This was the hand-off brief for the work. Read `docs/BLACKOUT_ROYALE.md` (current design and measured
 numbers) and `tools/dev/README.md` (how to build, test, probe and screenshot in this container) first.
 
 ## Deliverable: an Android APK

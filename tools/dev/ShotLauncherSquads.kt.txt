@@ -1,0 +1,123 @@
+package com.victorious.zombie.desktop
+
+import com.badlogic.gdx.Game
+import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration
+import com.badlogic.gdx.graphics.Pixmap
+import com.badlogic.gdx.graphics.PixmapIO
+import com.badlogic.gdx.utils.BufferUtils
+import com.badlogic.gdx.utils.ScreenUtils
+import com.victorious.zombie.BrScreen
+import com.victorious.zombie.CharacterSelectScreen
+import com.victorious.zombie.ModeSelectScreen
+import com.victorious.zombie.Mode
+import com.victorious.zombie.br.BrWorld
+import com.victorious.zombie.br.Phase
+import com.victorious.zombie.logic.Characters
+import com.victorious.zombie.net.HostSession
+
+/** Throwaway: renders Blackout Royale at several points of a match and writes PNGs. Not part of the repo. */
+class ShotGame(private val outDir: String) : Game() {
+    private class Scenario(val name: String, val advance: Int, val autoStart: Float, val menu: Int = -1, val touch: Boolean = false, val squad: Int = 1, val stage: String = "")
+    private val scenarios = listOf(
+        Scenario("s0_menu_royale", 0, 0f, menu = 1),
+        Scenario("s1_lobby_squads", 0, 60f, squad = 3),
+        Scenario("s1b_touch_lobby_squads", 0, 60f, touch = true, squad = 3),
+        Scenario("s2_revive_progress", 30 * 20, 0f, squad = 3, stage = "revive"),
+        Scenario("s3_revive_prompt", 30 * 20, 0f, squad = 3, stage = "prompt"),
+        Scenario("s4_me_downed", 30 * 20, 0f, squad = 3, stage = "medown"),
+        Scenario("s5_offscreen_arrow", 30 * 20, 0f, squad = 3, stage = "arrow"),
+        Scenario("s6_touch_revive", 30 * 20, 0f, touch = true, squad = 3, stage = "prompt"),
+        Scenario("s7_touch_hud", 30 * 20, 0f, touch = true, squad = 3, stage = "revive"),
+        Scenario("s8_result", 30 * 600, 0f, squad = 3, stage = "result"),
+        Scenario("s9_touch_result", 30 * 600, 0f, touch = true, squad = 3, stage = "result"),
+        Scenario("s10_rings_fight", 30 * 70, 0f, squad = 3, stage = "fight"),
+        Scenario("s11_enemy_squads", 30 * 20, 0f, squad = 3, stage = "enemies"),
+        Scenario("s12_touch_enemy_squads", 30 * 20, 0f, touch = true, squad = 3, stage = "enemies"),
+    )
+    private var idx = -1; private var frames = 0
+
+    override fun create() { next() }
+
+    private fun put(w: BrWorld, f: com.victorious.zombie.br.Fighter, x: Float, y: Float) { val p = w.map.nearestFree(x, y, 20f); f.x = p.x; f.y = p.y }
+    private fun down(w: BrWorld, f: com.victorious.zombie.br.Fighter) {
+        val enemy = w.fighters.values.first { it.squad != f.squad }
+        f.protectedT = 0f; f.shield = 0f; f.hp = 1f; w.damage(f, 10f, enemy.id, "Pulse Rifle")
+    }
+
+    /** Arranges the world for a squad scenario. Mates are the two bots of the human's squad. */
+    private fun stage(w: BrWorld, kind: String) {
+        val me = w.fighters.getValue(0)
+        val mates = w.fighters.values.filter { it.squad == me.squad && it.id != 0 }
+        val a = mates[0]; val b = mates[1]
+        // clear the neighbourhood of strangers so the scene is about the squad
+        for (o in w.fighters.values) if (o.squad != me.squad && Math.hypot((o.x - a.x).toDouble(), (o.y - a.y).toDouble()) < 700) put(w, o, o.x + 900f, o.y + 900f)
+        when (kind) {
+            "revive" -> { put(w, me, a.x - 120f, a.y + 30f); put(w, b, a.x + 40f, a.y + 8f); down(w, a); var n = 0; while (a.reviveP < 0.55f && n++ < 400) { w.update(1 / 30f); me.protectedT = 1e9f } }
+            "prompt" -> { put(w, b, a.x + 700f, a.y + 300f); put(w, me, a.x - 40f, a.y + 10f); down(w, a); repeat(40) { w.update(1 / 30f); me.protectedT = 1e9f }; put(w, me, a.x - 40f, a.y + 10f) }
+            "medown" -> { put(w, a, me.x + 160f, me.y + 40f); put(w, b, me.x - 180f, me.y - 60f); down(w, me); repeat(60) { w.update(1 / 30f) } }
+            "arrow" -> { put(w, a, me.x + 800f, me.y + 60f); put(w, b, me.x + 200f, me.y - 80f); down(w, a); repeat(30) { w.update(1 / 30f); me.protectedT = 1e9f } }
+            "fight" -> { }
+            "enemies" -> {
+                val others = w.fighters.values.filter { it.squad != me.squad }.groupBy { it.squad }.values.toList()
+                others.take(3).forEachIndexed { i, grp ->
+                    val ang = i * 2.1f + 0.4f
+                    grp.forEachIndexed { k, o -> put(w, o, me.x + Math.cos(ang.toDouble()).toFloat() * 330f + k * 50f, me.y + Math.sin(ang.toDouble()).toFloat() * 230f + k * 20f) }
+                }
+                put(w, a, me.x - 60f, me.y + 60f); put(w, b, me.x - 60f, me.y - 60f)
+                val dn = others[0][0]; down(w, dn)
+            }
+            "result" -> { }
+        }
+    }
+
+    private fun next() {
+        idx++
+        if (idx >= scenarios.size) { Gdx.app.exit(); return }
+        val sc = scenarios[idx]
+        if (sc.menu >= 0) {
+            frames = 0
+            if (sc.menu == 2) { setScreen(CharacterSelectScreen()); return }
+            val ms = ModeSelectScreen(Characters.SNOOP)
+            if (sc.menu == 1) ModeSelectScreen::class.java.getDeclaredField("royale").apply { isAccessible = true }.setBoolean(ms, true)
+            setScreen(ms); return
+        }
+        System.setProperty("zombie.touch", if (sc.touch) "1" else "0") // read when BrScreen is constructed
+        val session = HostSession.createRoyale(Characters.SNOOP, autoStartS = sc.autoStart, squadSize = sc.squad)
+        val w = session.sim as BrWorld
+        repeat(sc.advance) { if (w.phase != Phase.ENDED) w.update(1 / 30f); w.fighters[0]?.protectedT = 1e9f }
+        val me = w.fighters.getValue(0)
+        if (sc.stage.isEmpty()) {
+            if (w.phase == Phase.LIVE) {
+                val others = w.fighters.values.filter { it.alive && it.bot }
+                val pair = others.flatMap { a -> others.filter { it.id > a.id }.map { b -> a to b } }.minByOrNull { (a, b) -> Math.hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble()) }
+                if (pair != null) { me.x = (pair.first.x + pair.second.x) / 2 + 160f; me.y = (pair.first.y + pair.second.y) / 2 + 60f }
+            }
+        } else stage(w, sc.stage)
+        frames = 0
+        setScreen(BrScreen(Characters.SNOOP, Mode.Host(session)))
+    }
+
+    override fun render() {
+        super.render()
+        frames++
+        if (frames == 12) {
+            val w = Gdx.graphics.backBufferWidth; val h = Gdx.graphics.backBufferHeight
+            val pixels = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true)
+            for (i in 3 until pixels.size step 4) pixels[i] = 0xFF.toByte() // a window ignores framebuffer alpha; make the PNG opaque so it looks like the screen
+            val pm = Pixmap(w, h, Pixmap.Format.RGBA8888)
+            BufferUtils.copy(pixels, 0, pm.pixels, pixels.size)
+            PixmapIO.writePNG(Gdx.files.absolute("$outDir/${scenarios[idx].name}.png"), pm)
+            pm.dispose()
+            println("SHOT wrote ${scenarios[idx].name} ${w}x$h")
+            screen.dispose()
+            next()
+        }
+    }
+}
+
+fun main(args: Array<String>) {
+    val cfg = Lwjgl3ApplicationConfiguration().apply { setTitle("shots"); setWindowedMode(args.getOrNull(1)?.toInt() ?: 1280, args.getOrNull(2)?.toInt() ?: 720); useVsync(false); setForegroundFPS(60) }
+    Lwjgl3Application(ShotGame(args[0]), cfg)
+}

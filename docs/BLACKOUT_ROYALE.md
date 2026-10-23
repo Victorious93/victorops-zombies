@@ -1,6 +1,6 @@
 # Blackout Royale (design)
 
-An additional, self-contained mode: a top-down free-for-all battle royale. Up to **12 fighters** (1-4 humans, bots fill the rest) drop onto a 3200x3200 map. The **Dead Zone** closes in; the horde walks out of it. Last fighter standing wins. A match against bots lasts about 3-4 minutes (the zone schedule caps it at 5.4 minutes).
+An additional, self-contained mode: a top-down battle royale, free-for-all or in **squads with revives** (see "Squads" below). Up to **12 fighters** (1-4 humans, bots fill the rest) drop onto a 3200x3200 map. The **Dead Zone** closes in; the horde walks out of it. Last fighter (or squad) standing wins. A match against bots lasts about 3-4 minutes (the zone schedule caps it at 5.4 minutes).
 
 All names, shapes and numbers are original placeholders, like the rest of the game. Zombie Survival is untouched: Royale has its own sim (`core/.../br`), its own weapon table and its own screen.
 
@@ -71,12 +71,35 @@ Same input struct as humans, no extra knowledge. Priorities: leave the zone (and
 
 Measured on 16 bot-only matches per level (all finish): EASY first kill 54 s / match 213 s, NORMAL 33 s / 202 s, HARD 24 s / 171 s. Tests guard the pacing band, zero stuck bots and a low jitter rate.
 
+## Squads and revives
+`BrWorld.squadSize` is 1 (free-for-all, the original rules, unchanged) or 2..4. The host picks it in the lobby (tap the green button, or `T`); the menu remembers the choice (`BrPrefs`, default **3**) and the solo game uses it. Clients learn the mode from the snapshot.
+
+- **Squads.** 12 fighters make 12 / size squads. Humans fill squad 0 first, then spill into squad 1; bots fill the gaps. Squads land together (members within ~70 px of one anchor, anchors chosen farthest-first around the spawn ring), and a squad's bots share one loot neighbourhood (each gets one of the three nearest loot spots to the squad's area; a squad with a human uses the spot nearest the human).
+- **No friendly fire.** Bullets (including the Lancer's pierce, which passes through a mate and still hits the enemy behind), explosion splash, Bass Drop (no damage, no knockback) and direct `damage()` calls all skip squad mates. Zombies are unaffected by squads. Mates never push or block each other.
+- **Downed.** At zero health a fighter with a teammate who can still move is **downed**, not eliminated: shield is lost, they crawl at 25% speed, cannot fire, heal, reload, use or cast, stay visible and targetable, and **bleed out in 30 s**. Enemy hits, zone damage and horde bites cost 0.25 s of bleed per point of damage (a Pulse Rifle bullet costs ~3 s, zone stage 5 about 3 s per second), so lying in the open under fire is fatal. Bleeding pauses while a mate is reviving them, and a fighter being revived holds still.
+- **Revive.** A living, non-downed mate within 60 px who holds **USE** for 4 s revives them to 40% HP, no shield. While reviving you move at half speed and cannot heal; USE does not swap weapons while a mate needs you. Damage to the reviver breaks the channel for 0.8 s (zone damage does not), after which holding USE resumes it. Progress falls at half the build-up rate when nobody is working on it. Only one reviver counts at a time. Touch: the same USE button, which turns green and pulses when a revive prompt is up.
+- **Last mobile mate.** A fighter who reaches zero health while no mate can move is eliminated, and so are the squad's downed members (they cannot be revived any more). Eliminated fighters drop their gun and a shield cell as before.
+- **Placement and winner.** A squad's placement is the number of squads still in the match when its last member falls; all its members share it. The match ends when one squad is left (everyone in it places 1st) or when no human is left alive (a downed human is alive: their bots can still revive them). Kills stay individual; the result screen shows "Placed #n of N squads" and squad kills. Eliminated humans spectate a living mate first (one who can move before a downed one), then their killer.
+- **Bots** ignore mates when scanning, and downed enemies are the last thing they shoot. Every new decision has two thresholds or a cooldown: *revive* starts only when it is safe (nobody in sight; a zombie farther than 200 px; an enemy farther than 350 px who cannot see the mate) and stops when it is clearly dangerous (hit, a zombie within 130 px, an enemy within 300 px, or within 450 px with a line to the mate), then waits 2.5 s; *leash* starts beyond 380 px from the leader (the human, otherwise the first mobile bot) and ends within 220 px, and followers only fetch loot within 330 px of the leader and wander around them. A bot walks to a standable point beside the mate (arrival radius 24 px) and holds USE inside 54 px; the hold range is 60 px. An active revive beats the soft zone states (rotating, "burned") but not standing in a deadly zone. A downed bot crawls to a spot an enemy cannot see (re-chosen at most every 1.5 s and kept for 2 s) or toward a mobile mate.
+- **UI (`BrScreen`).** Squad halo under every fighter (mine green, other squads one colour each), teammate names in green, a squad panel under the stat block (name, health and shield, or the bleed-out clock and revive progress), a revive wedge around a downed fighter, a green pulse ring on the reviver, edge arrows to off-screen downed mates, a red downed overlay with the bleed clock, a progress bar for your own revive, and mates on the minimap (orange when downed). Mates are always in the snapshot, whatever the distance.
+
+### Squad measurements
+Bot-only matches, NORMAL skill, all finished, 0 stuck bots.
+
+| Squad size | Matches | Avg length | First down / first kill | Downs per match | Revives tried / succeeded | Bleed-outs |
+|---|---|---|---|---|---|---|
+| 2 (6 squads) | 12 | 209 s | 50 s / 58 s | 6.0 | 2.3 / 0.5 | 3.6 |
+| 3 (4 squads) | 12 | 206 s (157-241) | 78 s / 86 s | 7.5 | 4.1 / 1.2 | 4.6 |
+| 4 (3 squads) | 12 | 190 s | 82 s / 94 s | 8.0 | 4.8 / 1.2 | 5.1 |
+
+Bleed-outs here are downs that ended with a mate still able to move, i.e. missed revives. Of the downs where a revive was possible, roughly one in five is saved; the rest happen next to the fight that caused them, where a bot correctly refuses to stand still for 4 s. Free-for-all is unchanged to the digit (avg 210 s, first kill 32 s, jitter 122 of 43,428 bot-seconds). Squad jitter (12+ reversals in one second) is 0.27% of bot-seconds (limit 0.5%). The biggest snapshot in a squad match is 465 bytes (free-for-all 470 after the codec grew by 5 bytes per fighter and a few per snapshot).
+
 ## Networking
 Host-authoritative, reusing `HostSession`/`ClientSession` through the `Sim` interface. Clients send the extended `PlayerInput` (aim, fire, heal, reload); the host streams ~15 Hz snapshots filtered to what is near each viewer (fog of war), including damage numbers and the kill feed.
 
 ## Verification status
-- Simulation, bots, codec and networking: covered by 118 automated tests (reachability of every loot spot over 60 seeds, bot-match invariants, pacing band, stuck/jitter limits, session layer over loopback).
-- Rendering: the desktop build was run under a virtual display with software GL and frames were inspected (menu, lobby, deploy, early, mid and late match). **Not yet verified:** touch controls and the Android build (no SDK or device here), real two-device Wi-Fi play, and Bluetooth.
+- Simulation, bots, codec and networking: covered by 143 automated tests (reachability of every loot spot over 60 seeds, bot-match invariants, pacing band, stuck/jitter limits, session layer over loopback; for squads: friendly fire by bullet, splash and ability, down vs eliminated, bleed-out, revive success, interruption, range and last-mate elimination, squad placement and winner, the all-humans-dead rule, codec round trip and fuzz, a client joining a squad lobby, and squad versions of the finish, stuck, jitter and pacing bot-match tests).
+- Rendering: the desktop build was run under a virtual display with software GL and frames were inspected: menu, lobby, deploy, early, mid and late match, and for squads the menu toggle, lobby option, revive progress, revive prompt, downed overlay, off-screen arrow, enemy squad rings and the result screen, at 1280x720 and at a phone-like 1170x540 with the touch HUD (`-Dzombie.touch=1`). **Not verified:** touch input on a device (a desktop render cannot press the on-screen buttons), whether hold-to-revive feels right under a thumb, frame time on a phone, real two-device Wi-Fi play, and Bluetooth.
 
 ## Out of scope for v1 (ideas)
-Squads with revives, vehicles, a lobby with map voting, sound, real art.
+Vehicles, a lobby with map voting, sound, real art, respawn beacons, pings, cross-squad alliances.

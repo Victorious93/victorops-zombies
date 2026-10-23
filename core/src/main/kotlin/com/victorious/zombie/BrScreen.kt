@@ -501,7 +501,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             val k = min((W / 2 - 34f) / max(0.001f, abs(cos(a))), (H / 2 - 34f) / max(0.001f, abs(sin(a))))
             val ex = W / 2 + cos(a) * k; val ey = H / 2 + sin(a) * k
             shapes.color = Color(1f, 0.3f, 0.2f, 0.4f + 0.5f * abs(sin(time * 5f)))
-            shapes.triangle(ex + cos(a) * 16f, ey + sin(a) * 16f, ex + cos(a + 2.5f) * 14f, ey + sin(a + 2.5f) * 14f, ex + cos(a - 2.5f) * 14f, ey + sin(a - 2.5f) * 14f)
+            shapes.triangle(ex + cos(a) * 24f, ey + sin(a) * 24f, ex + cos(a + 2.5f) * 20f, ey + sin(a + 2.5f) * 20f, ex + cos(a - 2.5f) * 20f, ey + sin(a - 2.5f) * 20f)
         }
         if (self.downed) { // red wash and the bleed-out clock
             shapes.color = Color(0.6f, 0f, 0.05f, 0.16f); shapes.rect(0f, 0f, W, H)

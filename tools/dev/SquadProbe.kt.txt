@@ -1,0 +1,108 @@
+package com.victorious.zombie.br
+
+import kotlin.test.Test
+
+class SqProbe {
+    private val DT = 1 / 30f
+    private val causes = HashMap<String, Int>()
+    class R(val seed: Long, val time: Float, val firstDown: Float, val firstElim: Float, val downs: Int, val started: Int, val interrupted: Int, val ok: Int, val bleed: Int, val stuck: Int, val osc: Int, val botSec: Int, val spread: Float, val ended: Boolean, val notes: List<String>)
+
+    private fun play(seed: Long, skill: BotSkill, size: Int): R {
+        val w = BrWorld(seed, autoStartS = 0f, botSkill = skill, squadSize = size)
+        var firstDown = -1f; var firstElim = -1f; var lastAlive = BrConst.FIELD
+        val lastPos = HashMap<Int, Pair<Float, Float>>(); val still = HashMap<Int, Float>()
+        val flips = HashMap<Int, Int>(); val prevDir = HashMap<Int, Pair<Float, Float>>(); var osc = 0; var stuck = 0; var botSec = 0
+        var spreadSum = 0f; var spreadN = 0; val notes = ArrayList<String>(); val diag = ArrayList<String>(); val prevRev = HashMap<Int, Int>(); val lastInfo = HashMap<Int, String>(); val everDowned = HashSet<Int>(); val outcomes = HashMap<String, String>()
+        var t = 0f
+        while (w.phase != Phase.ENDED && t < 700f) {
+            w.update(DT); t += DT
+            if (w.phase != Phase.LIVE) continue
+            if (firstDown < 0f && w.statDowns > 0) firstDown = w.matchTime
+            if (firstElim < 0f && w.aliveCount() < lastAlive) firstElim = w.matchTime
+            lastAlive = w.aliveCount()
+            val sample = (w.matchTime * 30).toInt() % 30 == 0
+            for (d in w.fighters.values) {
+                if (d.downed && d.alive && seed == 1L && (w.matchTime * 30).toInt() % 60 == 0 && w.matchTime < 75f) {
+                    diag += "TRACE t=${w.matchTime.toInt()} ${d.name}@(${d.x.toInt()},${d.y.toInt()}) bleed=${d.downedT.toInt()} :: " + w.fighters.values.filter { it !== d && it.alive && it.squad == d.squad }.joinToString { m -> "${m.name}@${Geo.dist(m.x, m.y, d.x, d.y).toInt()} dn=${m.downed} ${w.brainDebug(m.id).replace(Regex("goal=.*stuckHits=\\d+ "), "")}" }
+                }
+                if (d.downed && d.alive) {
+                    val mates = w.fighters.values.filter { it !== d && it.alive && !it.downed && it.squad == d.squad }
+                    val near = mates.minByOrNull { Geo.dist(it.x, it.y, d.x, d.y) }
+                    lastInfo[d.id] = if (near == null) "nomate" else "${Geo.dist(near.x, near.y, d.x, d.y).toInt()}px ${w.brainDebug(near.id).substringBefore(' ')} ${w.brainDebug(near.id).substringAfter("tgt=")} hp=${(near.hp + near.shield).toInt()}"
+                    everDowned.add(d.id)
+                } else if (!d.alive && d.id in everDowned) {
+                    everDowned.remove(d.id)
+                    val info = lastInfo[d.id] ?: "?"
+                    outcomes["$seed-${d.id}-${w.matchTime.toInt()}"] = info
+                    diag += "ENDDOWN seed $seed t=${w.matchTime.toInt()} ${d.name} last: $info"
+                } else if (d.alive && !d.downed && d.id in everDowned) { everDowned.remove(d.id); diag += "SAVED seed $seed t=${w.matchTime.toInt()} ${d.name}" }
+            }
+            for (f in w.fighters.values) {
+                val prev = prevRev[f.id] ?: -1
+                if (prev >= 0 && f.reviveTarget < 0) {
+                    val tg = w.fighters[prev]
+                    if (tg != null && tg.alive && tg.downed) {
+                        val cause = when { !f.alive -> "died"; f.reviveBreakT > 0f -> "hit"; !f.input.use -> "released"; else -> "range" }
+                        causes[cause] = (causes[cause] ?: 0) + 1
+                        if (cause == "released") diag += "REL seed $seed t=${w.matchTime.toInt()} ${f.name} ${w.brainDebug(f.id)} p=${"%.2f".format(tg.reviveP)} dist=${Geo.dist(f.x, f.y, tg.x, tg.y).toInt()}"
+                    }
+                }
+                prevRev[f.id] = f.reviveTarget
+            }
+            for (f in w.fighters.values) {
+                val prev = prevRev[f.id] ?: -1
+                if (prev >= 0 && f.reviveTarget < 0) {
+                    val tg = w.fighters[prev]
+                    if (tg != null && tg.alive && tg.downed) {
+                        val cause = when { !f.alive -> "died"; f.reviveBreakT > 0f -> "hit"; !f.input.use -> "released"; else -> "range" }
+                        causes[cause] = (causes[cause] ?: 0) + 1
+                        if (cause == "released") diag += "REL seed $seed t=${w.matchTime.toInt()} ${f.name} ${w.brainDebug(f.id)} p=${"%.2f".format(tg.reviveP)} dist=${Geo.dist(f.x, f.y, tg.x, tg.y).toInt()}"
+                    }
+                }
+                prevRev[f.id] = f.reviveTarget
+            }
+            for (d in w.fighters.values) if (d.alive && d.downed && (w.matchTime * 30).toInt() % 60 == 0) {
+                val key = d.id
+                val mates = w.fighters.values.filter { it !== d && it.alive && !it.downed && it.squad == d.squad }
+                val info = mates.joinToString { m -> "${m.name}@${Geo.dist(m.x, m.y, d.x, d.y).toInt()}[${w.brainDebug(m.id).substringBefore(' ')}${if (m.hp + m.shield < 60) " weak" else ""}]" }
+                if (diag.size < 60) diag += "DOWN seed $seed t=${w.matchTime.toInt()} ${d.name} bleed=${d.downedT.toInt()} p=${"%.1f".format(d.reviveP)} mates: $info"
+            }
+            for (f in w.fighters.values) if (f.alive) {
+                val len = kotlin.math.hypot(f.input.dx, f.input.dy)
+                if (len > 0.3f) {
+                    val d = f.input.dx / len to f.input.dy / len
+                    val pd = prevDir[f.id]
+                    if (pd != null && d.first * pd.first + d.second * pd.second < -0.7f) flips[f.id] = (flips[f.id] ?: 0) + 1
+                    prevDir[f.id] = d
+                }
+                if (sample) {
+                    botSec++
+                    if ((flips[f.id] ?: 0) >= 12) { osc++; if (notes.size < 12) notes += "OSC seed $seed t=${w.matchTime.toInt()} ${f.name} ${w.brainDebug(f.id)}" }
+                    flips[f.id] = 0
+                    val p = lastPos[f.id]
+                    val wants = kotlin.math.abs(f.input.dx) + kotlin.math.abs(f.input.dy) > 0.3f && f.healKind == 0
+                    if (p != null && Geo.dist(p.first, p.second, f.x, f.y) < 5f && wants) still[f.id] = (still[f.id] ?: 0f) + 1f else still[f.id] = 0f
+                    lastPos[f.id] = f.x to f.y
+                    if ((still[f.id] ?: 0f) >= 15f) { stuck++; still[f.id] = 0f; notes += "STUCK seed $seed t=${w.matchTime.toInt()} ${f.name} dn=${f.downed} (${f.x.toInt()},${f.y.toInt()}) ${w.brainDebug(f.id)}" }
+                    // squad spread: distance to the nearest mate
+                    if (size > 1) { val m = w.fighters.values.filter { it !== f && it.alive && it.squad == f.squad }.minOfOrNull { Geo.dist(it.x, it.y, f.x, f.y) }; if (m != null) { spreadSum += m; spreadN++ } }
+                }
+            }
+        }
+        return R(seed, w.matchTime, firstDown, firstElim, w.statDowns, w.statRevivesStarted, w.statRevivesInterrupted, w.statRevives, w.statBleedOuts, stuck, osc, botSec, if (spreadN > 0) spreadSum / spreadN else 0f, w.phase == Phase.ENDED, notes + diag)
+    }
+
+    @Test fun squads() {
+        val size = (System.getenv("SQ_SIZE") ?: "3").toInt(); val n = (System.getenv("SQ_N") ?: "12").toLong()
+        for (skill in listOf(BotSkill.NORMAL)) {
+            val rs = (1L..n).map { play(it, skill, size) }
+            fun avg(f: (R) -> Float) = rs.map(f).average()
+            println("SQPROBE size=$size $skill ended=${rs.count { it.ended }}/$n avgTime=${"%.0f".format(avg { it.time })}s min=${rs.minOf { it.time }.toInt()} max=${rs.maxOf { it.time }.toInt()} firstDown=${"%.0f".format(avg { it.firstDown })}s firstElim=${"%.0f".format(avg { it.firstElim })}s")
+            println("SQPROBE downs/match=${"%.1f".format(avg { it.downs.toFloat() })} revStarted=${"%.1f".format(avg { it.started.toFloat() })} interrupted=${"%.1f".format(avg { it.interrupted.toFloat() })} revived=${"%.1f".format(avg { it.ok.toFloat() })} bleedouts=${"%.1f".format(avg { it.bleed.toFloat() })} meanNearestMate=${"%.0f".format(avg { it.spread })}px")
+            println("SQPROBE interrupt causes: $causes")
+            println("SQPROBE stuck=${rs.sumOf { it.stuck }} osc=${rs.sumOf { it.osc }} of ${rs.sumOf { it.botSec }} bot-seconds")
+            rs.flatMap { it.notes }.take(200).forEach { println("SQPROBE note $it") }
+            rs.forEach { println("SQPROBE seed ${it.seed}: ${it.time.toInt()}s downs=${it.downs} started=${it.started} ok=${it.ok} bleed=${it.bleed}") }
+        }
+    }
+}

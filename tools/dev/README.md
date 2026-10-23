@@ -46,6 +46,12 @@ It plays bot-only matches per skill level and prints average match time, first k
 "want to move but have not for 15 s" (with `brainDebug` text). `MapProbe.kt.txt` shows the pattern for one-off investigations
 (trace one bot tick by tick, dump walls near it). **Delete probes before committing**; real checks belong in `BrTest.kt`.
 
+`SquadProbe.kt.txt` is the squad version: copy it to `core/src/test/kotlin/com/victorious/zombie/br/SqProbe.kt` and run it with
+`SQ_SIZE=3 SQ_N=12 gradle :core:cleanTest :core:test --tests 'com.victorious.zombie.br.SqProbe' --console=plain -I tools/dev/test-output.init.gradle`
+(`cleanTest` matters: Gradle does not see environment changes). It prints per-size match length, first down, downs, revives
+started / interrupted / succeeded, bleed-outs, mean distance to the nearest mate, stuck and jitter counts, why revives were
+abandoned, and diagnostic lines (`ENDDOWN`: what the nearest mate was doing when a downed fighter bled out). Delete it afterwards.
+
 ## Looking at real frames (Xvfb + software GL)
 Works in this container. Steps:
 
@@ -58,6 +64,10 @@ Works in this container. Steps:
         xvfb-run -a -s "-screen 0 1280x720x24" java -cp "<classpath>" com.victorious.zombie.desktop.ShotLauncherKt <outdir>
 
 4. Open the PNGs with the Read tool. Delete the launcher afterwards.
+
+`ShotLauncherSquads.kt.txt` is a variant with squad scenarios (it stages a revive in progress, the revive prompt, the viewer
+downed, an off-screen downed mate, enemy squads in view, and the result screen). Pass the window size as arguments 2 and 3
+(`1170 540` for a phone-like touch layout; the scenarios marked `touch` set `-Dzombie.touch=1`).
 
 The launcher pre-advances a `BrWorld` by N ticks, protects the human, and parks the camera near the busiest bots. It forces
 the PNG alpha to 255: the framebuffer keeps alpha from translucent HUD panels, so an unmodified capture shows them as light
