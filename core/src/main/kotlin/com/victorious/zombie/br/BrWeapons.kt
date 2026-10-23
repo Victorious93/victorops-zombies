@@ -17,12 +17,12 @@ class BrGun(
 )
 
 object BrGuns {
-    val SIDEARM = BrGun("sidearm", "Volt Sidearm", 14f, 0.30f, 12, 1.1f, 900f, 520f, 2f)
-    val SMG = BrGun("smg", "Buzzsaw SMG", 8f, 0.075f, 32, 1.8f, 850f, 420f, 6f)
-    val RIFLE = BrGun("rifle", "Pulse Rifle", 17f, 0.14f, 28, 2.0f, 1000f, 700f, 2.5f)
-    val SCATTER = BrGun("scatter", "Scatterbolt", 7f, 0.85f, 5, 2.4f, 800f, 300f, 14f, pellets = 8)
-    val LANCER = BrGun("lancer", "Rail Lancer", 70f, 1.05f, 4, 2.2f, 1600f, 1000f, 0.3f, pierce = 1)
-    val NOVA = BrGun("nova", "Nova Disruptor", 55f, 1.3f, 3, 2.8f, 650f, 700f, 1f, splash = 80f)
+    val SIDEARM = BrGun("sidearm", "Volt Sidearm", 11f, 0.28f, 12, 1.1f, 900f, 520f, 2f)
+    val SMG = BrGun("smg", "Buzzsaw SMG", 6.5f, 0.075f, 32, 1.8f, 850f, 380f, 6.5f)
+    val RIFLE = BrGun("rifle", "Pulse Rifle", 12f, 0.14f, 28, 2.0f, 1000f, 620f, 3.5f)
+    val SCATTER = BrGun("scatter", "Scatterbolt", 6.5f, 0.95f, 5, 2.4f, 800f, 260f, 14f, pellets = 8)
+    val LANCER = BrGun("lancer", "Rail Lancer", 58f, 1.1f, 4, 2.2f, 1600f, 1000f, 0.3f, pierce = 1)
+    val NOVA = BrGun("nova", "Nova Disruptor", 48f, 1.3f, 3, 2.8f, 650f, 700f, 1f, splash = 80f)
 
     val ALL = listOf(SIDEARM, SMG, RIFLE, SCATTER, LANCER, NOVA)
     fun byId(id: String): BrGun? = ALL.firstOrNull { it.id == id }

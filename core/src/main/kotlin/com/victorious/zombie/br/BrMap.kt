@@ -12,7 +12,7 @@ import kotlin.random.Random
 
 /** Blackout Royale constants shared by the sim, the bots and the renderer. */
 object BrConst {
-    const val SIZE = 2400f
+    const val SIZE = 3200f
     const val CENTER = SIZE / 2
     const val BODY_R = 14f
     const val ZOMBIE_R = 15f
@@ -82,12 +82,12 @@ object Geo {
  * build the same map from the seed in the snapshot, so the layout is never sent over the wire.
  */
 class BrMap(val seed: Int) {
-    private companion object { const val MIN_BUILDING_W = 200f; const val MIN_BUILDING_H = 180f; const val GRID_CELL = 200f }
+    private companion object { const val MIN_BUILDING_W = 200f; const val MIN_BUILDING_H = 180f; const val GRID_CELL = 200f; const val LO = 0.2667f; const val HI = 0.7333f }
 
     val walls = ArrayList<Rect>()
     val lootSpots = ArrayList<LootSpot>()
     val pois: List<Poi> = listOf(
-        Poi("Foundry", 640f, 640f), Poi("Depot", 1760f, 640f), Poi("Market", 640f, 1760f), Poi("Harbor", 1760f, 1760f), Poi("Plaza", BrConst.CENTER, BrConst.CENTER),
+        Poi("Foundry", BrConst.SIZE * LO, BrConst.SIZE * LO), Poi("Depot", BrConst.SIZE * HI, BrConst.SIZE * LO), Poi("Market", BrConst.SIZE * LO, BrConst.SIZE * HI), Poi("Harbor", BrConst.SIZE * HI, BrConst.SIZE * HI), Poi("Plaza", BrConst.CENTER, BrConst.CENTER),
     )
     lateinit var spawnPoints: List<Pt>; private set
     lateinit var nav: NavGrid; private set
@@ -200,7 +200,7 @@ class BrMap(val seed: Int) {
         val a0 = rng.nextFloat() * 2 * PI.toFloat()
         val rough = List(BrConst.FIELD) { i ->
             val a = a0 + i * 2 * PI.toFloat() / BrConst.FIELD
-            Pt(c + cos(a) * 1120f, c + sin(a) * 1120f)
+            Pt(c + cos(a) * (BrConst.SIZE / 2 - 100f), c + sin(a) * (BrConst.SIZE / 2 - 100f))
         }
         // Points of interest: three buildings each, one doorway per building, a few crates around.
         // Slot spacing guarantees a walkable lane (>= 90 px) between any two buildings even at maximum size and jitter,
@@ -221,7 +221,7 @@ class BrMap(val seed: Int) {
         }
         // Scattered cover and rocks.
         var placed = 0; var tries = 0
-        while (placed < 40 && tries++ < 600) {
+        while (placed < 64 && tries++ < 1000) {
             val w = 40f + rng.nextFloat() * 50f; val h = 40f + rng.nextFloat() * 50f
             val x = 150f + rng.nextFloat() * (BrConst.SIZE - 300f); val y = 150f + rng.nextFloat() * (BrConst.SIZE - 300f)
             if (pois.any { Geo.dist(it.x, it.y, x, y) < 310f } || rough.any { Geo.dist(it.x, it.y, x, y) < 150f }) continue
@@ -229,7 +229,7 @@ class BrMap(val seed: Int) {
         }
         // Outskirts loot.
         tries = 0; var spots = 0
-        while (spots < 24 && tries++ < 600) {
+        while (spots < 44 && tries++ < 1000) {
             val x = 120f + rng.nextFloat() * (BrConst.SIZE - 240f); val y = 120f + rng.nextFloat() * (BrConst.SIZE - 240f)
             if (!isFree(x, y, 30f) || lootSpots.any { Geo.dist(it.x, it.y, x, y) < 110f }) continue
             lootSpots += LootSpot(x, y, 0); spots++

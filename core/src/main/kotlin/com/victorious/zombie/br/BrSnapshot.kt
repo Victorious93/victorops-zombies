@@ -42,9 +42,9 @@ class BrSnapshot(
 /** Compact binary form: positions are 16-bit fixed point, health bytes, angles bytes. Decoding untrusted bytes throws on garbage. */
 object BrCodec {
     private const val MAX_ENTITIES = 400
-    private const val POS = 27f // 2400 * 27 < 65535
+    private const val POS = 20f // 3200 * 20 < 65535
 
-    private fun DataOutputStream.pos(v: Float) = writeShort((v.coerceIn(0f, 2400f) * POS).roundToInt())
+    private fun DataOutputStream.pos(v: Float) = writeShort((v.coerceIn(0f, BrConst.SIZE) * POS).roundToInt())
     private fun DataInputStream.pos(): Float = readUnsignedShort() / POS
     private fun DataOutputStream.ang(v: Float) = writeByte((((v / (2 * PI.toFloat())) % 1f + 1f) % 1f * 256f).toInt() and 0xFF)
     private fun DataInputStream.ang(): Float = readUnsignedByte() / 256f * 2 * PI.toFloat()

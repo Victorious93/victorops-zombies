@@ -21,7 +21,7 @@ class Fighter(val id: Int, val name: String, val characterId: String, val bot: B
     val character get() = Characters.byId(characterId)
     var x = 0f; var y = 0f; var kvx = 0f; var kvy = 0f
     var aim = 0f
-    val maxHp: Float = 100f + (character.maxHealth - 100f) * 0.5f
+    val maxHp: Float = BrWorld.BASE_HP + (character.maxHealth - 100f) * 0.5f
     var hp = maxHp; var shield = 0f
     var weapon = BrWeapon.START; var rounds = weapon.mag; var reloadLeft = 0f; var fireCd = 0f
     var abilityCd = 0f; var useCd = 0f
@@ -65,13 +65,14 @@ class BrWorld(
     companion object {
         const val MAX_HUMANS = 4
         const val SPEED = 230f
+        const val BASE_HP = 160f
         const val MAX_SHIELD = 100f
         const val CARRY = 3
         const val MEDKIT_TIME = 2.2f; const val CELL_TIME = 1.6f
         const val MEDKIT_HEAL = 50f; const val CELL_SHIELD = 50f
         const val DEPLOY_TIME = 5f
         const val AIRDROP_FALL = 12f
-        const val START_RADIUS = 1700f
+        const val START_RADIUS = 2270f // reaches the corners of the 3200 map
         const val ZOMBIE_CAP = 12
         const val ZOMBIE_SPEED = 85f; const val ZOMBIE_DPS = 14f; const val ZOMBIE_HP = 60f
         const val PICKUP_RANGE = 46f; const val AUTO_PICKUP = 26f
@@ -80,8 +81,8 @@ class BrWorld(
         const val HOST_ID = 0
         const val BOT_ID_BASE = 100
         val ZONES = listOf(
-            ZoneStep(40f, 40f, 1100f, 1.5f), ZoneStep(35f, 35f, 700f, 3f), ZoneStep(30f, 30f, 400f, 5f),
-            ZoneStep(25f, 25f, 200f, 8f), ZoneStep(20f, 20f, 80f, 12f), ZoneStep(10f, 15f, 0f, 20f),
+            ZoneStep(40f, 40f, 1450f, 1.5f), ZoneStep(35f, 35f, 920f, 3f), ZoneStep(30f, 30f, 540f, 5f),
+            ZoneStep(25f, 25f, 260f, 8f), ZoneStep(20f, 20f, 100f, 12f), ZoneStep(10f, 15f, 0f, 20f),
         )
         private val BOT_NAMES = listOf("Rook", "Vex", "Juno", "Kade", "Mox", "Nyx", "Pike", "Sable", "Tarn", "Wren", "Zed", "Ember", "Flint", "Gale", "Haze")
     }
@@ -170,11 +171,33 @@ class BrWorld(
             f.protectedT = DEPLOY_TIME + 3f
         }
         placeLoot()
+        assignLandingAreas()
         zoneCx = BrConst.CENTER; zoneCy = BrConst.CENTER; zoneR = START_RADIUS; zoneIdx = 0; zoneShrinking = false; zoneT = 0f
         beginHold()
         zombieCd = 4f; matchTime = 0f; winnerId = -1
         phase = Phase.DEPLOY; phaseT = DEPLOY_TIME
         say("Drop in", 3f)
+    }
+
+    /**
+     * Gives every bot its own area to loot first, spread out so neighbours do not all pick the same building. Humans
+     * claim the spot nearest their landing so bots keep clear of them too.
+     */
+    private fun assignLandingAreas() {
+        val taken = ArrayList<Pt>()
+        for (h in fighters.values.filter { !it.bot }) map.lootSpots.minByOrNull { hypot(it.x - h.x, it.y - h.y) }?.let { taken += Pt(it.x, it.y) }
+        for (f in fighters.values.filter { it.bot }.shuffled(rng)) {
+            val brain = brains[f.id] ?: continue
+            val near = map.lootSpots.sortedBy { hypot(it.x - f.x, it.y - f.y) }.take(16)
+            val ordered = if (brain.aggression > 0.65f) near.sortedBy { if (it.tier > 0) 0 else 1 } else near.sortedBy { if (it.tier > 0) 1 else 0 }
+            var pick: LootSpot? = null
+            for (sep in listOf(700f, 520f, 360f, 0f)) {
+                pick = ordered.firstOrNull { c -> taken.none { hypot(it.x - c.x, it.y - c.y) < sep } }
+                if (pick != null) break
+            }
+            val p = pick ?: near.first()
+            taken += Pt(p.x, p.y); brain.setHome(p.x, p.y)
+        }
     }
 
     /** Back to the lobby with the same humans (rematch). */

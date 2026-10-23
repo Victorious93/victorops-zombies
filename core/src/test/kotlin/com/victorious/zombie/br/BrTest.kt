@@ -294,7 +294,7 @@ class BrCombatTest {
         val a = w.fighters.getValue(0); a.weapon = BrWeapon(BrGuns.LANCER, Rarity.COMMON); a.rounds = 4
         w.applyInput(0, PlayerInput(aimX = 1f, fire = true)); w.run(0.4f)
         w.applyInput(0, PlayerInput())
-        assertTrue(w.fighters.getValue(1).hp < 100f && w.fighters.getValue(2).hp < 100f, "lancer should pierce into the second target")
+        assertTrue(w.fighters.getValue(1).hp < w.fighters.getValue(1).maxHp && w.fighters.getValue(2).hp < w.fighters.getValue(2).maxHp, "lancer should pierce into the second target")
     }
 
     @Test fun novaSplashHurtsNeighboursButNotTheShooter() {
@@ -303,7 +303,7 @@ class BrCombatTest {
         val a = w.fighters.getValue(0); a.weapon = BrWeapon(BrGuns.NOVA, Rarity.COMMON); a.rounds = 3
         w.applyInput(0, PlayerInput(aimX = 1f, fire = true)); w.run(0.7f)
         w.applyInput(0, PlayerInput())
-        assertTrue(w.fighters.getValue(1).hp < 100f); assertTrue(w.fighters.getValue(2).hp < 100f, "splash reaches the neighbour")
+        assertTrue(w.fighters.getValue(1).hp < w.fighters.getValue(1).maxHp); assertTrue(w.fighters.getValue(2).hp < w.fighters.getValue(2).maxHp, "splash reaches the neighbour")
         assertEquals(a.maxHp, a.hp)
     }
 }
@@ -389,7 +389,7 @@ class BrNetTest {
         val s = sample(); val d = BrCodec.fromText(BrCodec.toText(s))
         assertEquals(s.seed, d.seed); assertEquals(s.phase, d.phase); assertEquals(s.alive, d.alive); assertEquals(s.meId, d.meId)
         assertEquals(s.fighters.size, d.fighters.size); assertEquals(s.zombies.size, d.zombies.size); assertEquals(s.bullets.size, d.bullets.size); assertEquals(s.loot.size, d.loot.size)
-        val me = d.fighters.first { it.id == 1 }; assertEquals("martha", me.characterId); assertEquals(115f, me.maxHp)
+        val me = d.fighters.first { it.id == 1 }; assertEquals("martha", me.characterId); assertEquals(BrWorld.BASE_HP + 15f, me.maxHp)
         assertEquals(s.fighters.first { it.id == 1 }.x, me.x, 0.05f)
         assertEquals(BrGuns.LANCER.id, BrGuns.at(d.loot.first().gunIndex).id); assertEquals(2, d.loot.first().rarity)
         assertEquals(s.zone.r, d.zone.r); assertEquals(s.self!!.medkits, d.self!!.medkits)
@@ -459,31 +459,86 @@ class BrNetTest {
 }
 
 class BrBotMatchTest {
-    private fun match(seed: Long, skill: BotSkill, maxSeconds: Float = 700f): BrWorld {
+    private class Stats(val world: BrWorld, val firstKill: Float, val stuckBots: Int, val oscillations: Int, val botSeconds: Int, val notes: List<String>)
+
+    /** Plays a bot-only match, checking invariants every tick and measuring whether any bot "wants to move but cannot". */
+    private fun match(seed: Long, skill: BotSkill, maxSeconds: Float = 700f): Stats {
         val w = BrWorld(seed, autoStartS = 0f, botSkill = skill)
-        var t = 0f
+        var t = 0f; var firstKill = -1f; var lastAlive = BrConst.FIELD
+        val lastPos = HashMap<Int, Pair<Float, Float>>(); val still = HashMap<Int, Float>()
+        val flips = HashMap<Int, Int>(); val prevDir = HashMap<Int, Pair<Float, Float>>(); var oscillations = 0; var stuck = 0; var botSeconds = 0; val notes = ArrayList<String>()
         while (w.phase != Phase.ENDED && t < maxSeconds) {
             w.update(DT); t += DT
-            if (w.phase == Phase.LIVE) for (f in w.fighters.values) if (f.alive) {
+            if (w.phase != Phase.LIVE) continue
+            if (firstKill < 0f && w.aliveCount() < lastAlive) firstKill = w.matchTime
+            lastAlive = w.aliveCount()
+            val sample = (w.matchTime * 30).toInt() % 30 == 0 // once per second
+            for (f in w.fighters.values) if (f.alive) {
                 assertTrue(f.x.isFinite() && f.y.isFinite() && f.hp.isFinite(), "seed $seed: NaN fighter ${f.id}")
                 assertTrue(w.map.isFree(f.x, f.y, BrConst.BODY_R - 1.5f), "seed $seed t=$t: ${f.name} is inside a wall at ${f.x},${f.y}")
                 assertTrue(f.shield in 0f..BrWorld.MAX_SHIELD + 0.01f && f.hp <= f.maxHp + 0.01f, "seed $seed: bad hp/shield ${f.hp}/${f.shield}")
                 assertTrue(f.medkits in 0..BrWorld.CARRY && f.cells in 0..BrWorld.CARRY)
                 assertTrue(f.rounds in 0..f.weapon.mag)
+                // walking back and forth every tick (a goal flip-flop) shows up as the movement vector repeatedly reversing
+                val len = kotlin.math.hypot(f.input.dx, f.input.dy)
+                if (len > 0.3f) {
+                    val d = f.input.dx / len to f.input.dy / len
+                    val pd = prevDir[f.id]
+                    if (pd != null && d.first * pd.first + d.second * pd.second < -0.7f) flips[f.id] = (flips[f.id] ?: 0) + 1
+                    prevDir[f.id] = d
+                }
+                if (sample) {
+                    botSeconds++
+                    if ((flips[f.id] ?: 0) >= 12) oscillations++ // 12+ reversals in one second
+                    flips[f.id] = 0
+                    val p = lastPos[f.id]
+                    val wantsToMove = abs(f.input.dx) + abs(f.input.dy) > 0.3f && f.healKind == 0
+                    if (p != null && Geo.dist(p.first, p.second, f.x, f.y) < 5f && wantsToMove) still[f.id] = (still[f.id] ?: 0f) + 1f else still[f.id] = 0f
+                    lastPos[f.id] = f.x to f.y
+                    if ((still[f.id] ?: 0f) >= 15f) { stuck++; still[f.id] = 0f; notes += "seed $seed $skill t=${w.matchTime.toInt()} ${f.name} at (${f.x.toInt()},${f.y.toInt()}) in=(${f.input.dx},${f.input.dy}) ${w.brainDebug(f.id)}" }
+                }
             }
             assertTrue(w.zombies.size <= BrWorld.ZOMBIE_CAP)
         }
-        return w
+        return Stats(w, firstKill, stuck, oscillations, botSeconds, notes)
     }
+
+    private fun abs(v: Float) = kotlin.math.abs(v)
 
     @Test fun botMatchesAlwaysFinishWithAWinner() {
         for (seed in 1L..8L) {
-            val w = match(seed, BotSkill.NORMAL)
+            val w = match(seed, BotSkill.NORMAL).world
             assertEquals(Phase.ENDED, w.phase, "seed $seed did not finish")
             assertTrue(w.matchTime < 650f, "seed $seed took ${w.matchTime}s")
             assertTrue(w.aliveCount() <= 1)
             val placements = w.fighters.values.filter { !it.alive || it.id == w.winnerId }.map { it.placement }.sorted()
             if (w.winnerId >= 0) assertEquals((1..BrConst.FIELD).toList(), placements, "seed $seed: placements must be a clean 1..12")
         }
+    }
+
+    @Test fun botsNeverGetStuckOrFlipFlop() {
+        var stuck = 0; var osc = 0; var seconds = 0; val notes = ArrayList<String>()
+        for (seed in 1L..10L) for (skill in BotSkill.values()) { val s = match(seed, skill); stuck += s.stuckBots; osc += s.oscillations; seconds += s.botSeconds; notes += s.notes }
+        assertEquals(0, stuck, "bots that wanted to move but did not for 15 s: $notes")
+        // Holding range in a fight legitimately makes a bot step back and forth now and then; a goal flip-flop shows up as
+        // hundreds of seconds. Before the steering/hysteresis fixes this was about 4% of bot-seconds, now ~0.1%.
+        println("BR jitter: $osc of $seconds bot-seconds")
+        assertTrue(osc <= seconds * 0.005, "$osc of $seconds bot-seconds spent reversing direction 12+ times a second")
+    }
+
+    @Test fun pacingStaysInAHealthyBand() {
+        // Regression guard for the tuning: early fights were once over in under a minute with the zone irrelevant.
+        val runs = (1L..12L).map { match(it, BotSkill.NORMAL) }
+        val avg = runs.map { it.world.matchTime }.average()
+        println("BR pacing: avg ${"%.0f".format(avg)}s, shortest ${runs.minOf { it.world.matchTime }.toInt()}s, avg first kill ${"%.0f".format(runs.map { it.firstKill }.average())}s")
+        assertTrue(avg in 150.0..330.0, "average match length $avg s")
+        assertTrue(runs.all { it.world.matchTime > 90f }, "a match was over in under 90 s")
+        assertTrue(runs.map { it.firstKill }.average() > 20.0, "first blood is too early: opening should be a loot phase")
+    }
+
+    @Test fun skillLevelsAreOrdered() {
+        fun avgKillTime(s: BotSkill) = (1L..8L).map { match(it, s).firstKill }.average()
+        val easy = avgKillTime(BotSkill.EASY); val hard = avgKillTime(BotSkill.HARD)
+        assertTrue(easy > hard, "harder bots should find the first fight sooner (easy $easy, hard $hard)")
     }
 }
