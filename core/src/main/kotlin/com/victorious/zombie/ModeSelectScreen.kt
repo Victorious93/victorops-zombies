@@ -80,7 +80,7 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
                 Thread {
                     try {
                         val link = TcpLink.connect(host, port)
-                        Gdx.app.postRunnable { go(Mode.Client(ClientSession(link, character.id))) }
+                        Gdx.app.postRunnable { if (done) link.close() else go(Mode.Client(ClientSession(link, character.id))) }
                     } catch (e: Exception) { status = "Could not connect: ${e.message}" }
                 }.start()
             }

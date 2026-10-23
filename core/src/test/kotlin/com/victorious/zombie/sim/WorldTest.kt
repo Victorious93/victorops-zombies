@@ -91,6 +91,14 @@ class WorldTest {
         w.barricades[0].damage(300); w.update(0.05f); assertEquals(0, w.barricades[0].planks)
     }
 
+    @Test fun fortifyWithNothingToRepairKeepsItsCooldown() {
+        val w = world(Characters.MARTHA); val p = w.players[0]!!
+        w.setInput(0, PlayerInput(ability = true)); w.update(0.05f)
+        assertTrue(p.abilityCd <= 0f, "cooldown was spent on a no-op"); assertEquals("Nothing to repair", p.message)
+        w.barricades[2].damage(120); w.update(0.05f)
+        assertEquals(6, w.barricades[2].planks); assertTrue(p.abilityCd > 30f)
+    }
+
     @Test fun resetKeepsPlayersAndClearsProgress() {
         val w = world(Characters.SNOOP, Characters.MARTHA)
         w.players[0]!!.economy.onKill(); w.players[0]!!.health = 0f; w.players[1]!!.health = 0f; w.update(0.01f); assertTrue(w.gameOver)
