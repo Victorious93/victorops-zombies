@@ -14,4 +14,3 @@ keystore.properties
 signing.properties
 android/libs/
 *.keystore
-keystore.properties

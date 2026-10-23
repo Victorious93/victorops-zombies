@@ -212,6 +212,7 @@ class World(seed: Long = System.nanoTime()) {
                 p.say("${p.character.abilityName}!")
             }
             Ability.FORTIFY -> {
+                if (barricades.all { it.hp >= it.maxHp }) { p.say("Nothing to repair"); return }
                 val planks = barricades.sumOf { it.repairAll() }
                 p.economy.onRepair(planks); p.say("${p.character.abilityName}: +$planks planks")
             }

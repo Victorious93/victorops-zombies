@@ -56,6 +56,7 @@ class GameScreen(private val character: Character = Characters.DEFAULT, private 
     private var useTouched = false; private var abilityTouched = false
 
     private var snap: Snapshot? = null
+    private var disposed = false
     private var done = false // GL resources are disposed after leaving; never draw after that
     private val shown = HashMap<Int, Vector2>() // smoothed positions for network clients
 
@@ -188,6 +189,8 @@ class GameScreen(private val character: Character = Characters.DEFAULT, private 
     }
 
     override fun dispose() {
+        if (disposed) return
+        disposed = true
         shapes.dispose(); batch.dispose(); font.dispose()
         host?.close(); client?.close(); (mode as? Mode.Host)?.onClose?.invoke()
     }
