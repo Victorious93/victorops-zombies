@@ -74,5 +74,9 @@ Measured on 16 bot-only matches per level (all finish): EASY first kill 54 s / m
 ## Networking
 Host-authoritative, reusing `HostSession`/`ClientSession` through the `Sim` interface. Clients send the extended `PlayerInput` (aim, fire, heal, reload); the host streams ~15 Hz snapshots filtered to what is near each viewer (fog of war), including damage numbers and the kill feed.
 
+## Verification status
+- Simulation, bots, codec and networking: covered by 118 automated tests (reachability of every loot spot over 60 seeds, bot-match invariants, pacing band, stuck/jitter limits, session layer over loopback).
+- Rendering: the desktop build was run under a virtual display with software GL and frames were inspected (menu, lobby, deploy, early, mid and late match). **Not yet verified:** touch controls and the Android build (no SDK or device here), real two-device Wi-Fi play, and Bluetooth.
+
 ## Out of scope for v1 (ideas)
 Squads with revives, vehicles, a lobby with map voting, sound, real art.

@@ -602,7 +602,7 @@ class BrWorld(
         )
         val hits = hitFx.filter { it.src == viewerId || it.dst == viewerId }.map { BrHitSnap(it.seq, it.x, it.y, it.amount, it.src == viewerId, it.dst == viewerId, it.kill) }
         return BrSnapshot(
-            map.seed, phase.ordinal, when (phase) { Phase.LOBBY -> phaseT; Phase.DEPLOY -> phaseT; else -> 0f }, aliveCount(), fighters.size,
+            map.seed, phase.ordinal, when (phase) { Phase.LOBBY -> phaseT; Phase.DEPLOY -> phaseT; else -> 0f }, aliveCount(), if (phase == Phase.LOBBY) field else fighters.size,
             camX, camY, viewerId, focus?.id ?: -1,
             BrZoneSnap(zoneCx, zoneCy, zoneR, nextCx, nextCy, nextR, zoneTimeLeft, zoneShrinking, zoneDps, zoneIdx),
             self, fs,

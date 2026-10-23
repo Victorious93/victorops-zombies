@@ -208,6 +208,15 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         val m = map
         val me = s.fighters.firstOrNull { it.id == s.meId }
         val phase = Phase.values()[s.phase.coerceIn(0, 3)]
+        if (phase == Phase.LOBBY) { // a clean screen: nothing of the arena exists yet
+            hudView.apply(); shapes.projectionMatrix = hudCam.combined; batch.projectionMatrix = hudCam.combined
+            shapes.begin(ShapeRenderer.ShapeType.Line); shapes.color = Color(1f, 0.35f, 0.5f, 0.35f)
+            for (r in 1..4) shapes.circle(W / 2, H / 2 - 40f, r * 90f, 64)
+            shapes.end()
+            batch.begin(); font.color = Color.WHITE; lobbyText(s); batch.end()
+            if (client != null && !client.connected) { batch.begin(); font.color = Color.RED; text("Disconnected from host. Tap to go back.", W / 2, H / 2 - 60f, 1.2f); batch.end() }
+            return
+        }
         view.apply()
         shapes.projectionMatrix = cam.combined; batch.projectionMatrix = cam.combined
         val x0 = cam.position.x - W / 2 - 60f; val x1 = cam.position.x + W / 2 + 60f; val y0 = cam.position.y - H / 2 - 60f; val y1 = cam.position.y + H / 2 + 60f
@@ -311,6 +320,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         val mm = 170f; val mx = W - mm - 16f; val my = H - mm - 16f; val sc = mm / BrConst.SIZE
         shapes.begin(ShapeRenderer.ShapeType.Filled)
         shapes.color = Color(0f, 0f, 0f, 0.55f); shapes.rect(mx, my, mm, mm)
+        map?.pois?.forEach { shapes.color = Color(0.2f, 0.22f, 0.3f, 1f); shapes.circle(mx + it.x * sc, my + it.y * sc, 330f * sc, 16) }
         s.airdrops.forEach { shapes.color = Color(1f, 0.8f, 0.2f, 1f); shapes.rect(mx + it.x * sc - 2, my + it.y * sc - 2, 4f, 4f) }
         s.fighters.forEach { if (it.alive) { shapes.color = if (it.id == s.meId) Color(0.1f, 0.95f, 1f, 1f) else Color(1f, 0.4f, 0.4f, 1f); shapes.circle(mx + it.x * sc, my + it.y * sc, if (it.id == s.meId) 3.5f else 2.2f) } }
         if (me == null || !me.alive) { shapes.color = Color.WHITE; shapes.circle(mx + s.camX * sc, my + s.camY * sc, 3f) }
@@ -377,7 +387,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
 
     private fun lobbyText(s: BrSnapshot) {
         font.color = Color(1f, 0.9f, 0.4f, 1f); text("BLACKOUT ROYALE", W / 2, H - 120f, 3f); font.color = Color.WHITE
-        text("${s.field} fighters. Last one standing wins. Stay inside the Dead Zone.", W / 2, H - 200f, 1.1f)
+        text("${s.field} fighters  -  last one standing wins. Stay inside the Dead Zone.", W / 2, H - 200f, 1.1f)
         var y = H - 260f
         text("Players", W / 2, y, 1.2f); y -= 28f
         s.lobby.forEach { text(it, W / 2, y, 1f); y -= 20f }
