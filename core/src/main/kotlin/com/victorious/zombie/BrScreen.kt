@@ -42,7 +42,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     private val tmp3 = Vector3()
 
     private val host: HostSession? = when (mode) {
-        is Mode.Solo -> HostSession.createRoyale(character)
+        is Mode.Solo -> { BrPrefs.load(); HostSession.createRoyale(character, squadSize = BrPrefs.squadSize) }
         is Mode.Host -> mode.session
         is Mode.Client -> null
     }
@@ -56,6 +56,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     init { font.data.setScale(ui) }
     private val moveC = Vector2(150f, 150f); private val aimC = Vector2(W - 170f, 150f)
     private val useB = Vector2(W - 95f, 330f); private val healB = Vector2(W - 205f, 340f); private val skillB = Vector2(W - 325f, 310f); private val reloadB = Vector2(W - 345f, 190f)
+    private val squadOpt = floatArrayOf(W / 2 - 270f, 150f, 540f, 62f) // lobby: x, y, w, h (the host taps it to change the squad size)
     private val moveV = Vector2(); private val aimV = Vector2()
     private var aimDir = Vector2(1f, 0f)
 
@@ -143,8 +144,13 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
                 if (fire && me != null) assist(s, me)?.let { ax = it.x; ay = it.y }
             }
         }
-        // tap / Enter starts or restarts (host) in the lobby and after a match
-        if (s != null && (s.phase == Phase.LOBBY.ordinal || s.phase == Phase.ENDED.ordinal) && host != null && (k.justTouched() || k.isKeyJustPressed(Input.Keys.ENTER))) use = true
+        // tap / Enter starts or restarts (host) in the lobby and after a match; in the lobby the squad button and T change the squad size instead
+        if (s != null && s.phase == Phase.LOBBY.ordinal && host != null) {
+            var cycle = k.isKeyJustPressed(Input.Keys.T); var tapped = k.justTouched()
+            if (tapped) { hudView.unproject(tmp3.set(k.x.toFloat(), k.y.toFloat(), 0f)); if (tmp3.x in squadOpt[0]..squadOpt[0] + squadOpt[2] && tmp3.y in squadOpt[1]..squadOpt[1] + squadOpt[3]) { cycle = true; tapped = false } }
+            if (cycle) world?.let { BrPrefs.squadSize = BrPrefs.next(it.squadSize); it.setSquadSize(BrPrefs.squadSize) }
+            if (tapped || k.isKeyJustPressed(Input.Keys.ENTER)) use = true
+        } else if (s != null && s.phase == Phase.ENDED.ordinal && host != null && (k.justTouched() || k.isKeyJustPressed(Input.Keys.ENTER))) use = true
         return PlayerInput(dx, dy, use, ability, ax, ay, fire, heal, reload)
     }
 
@@ -159,7 +165,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             val off = abs(angleDiff(cur, atan2(y - me.y, x - me.x)))
             if (off < bestOff) { bestOff = off; best = Vector2((x - me.x) / d, (y - me.y) / d) }
         }
-        s.fighters.forEach { if (it.id != me.id && it.alive) consider(it.x, it.y) }
+        s.fighters.forEach { if (it.id != me.id && it.alive && !(s.squadSize > 1 && it.squad == me.squad)) consider(it.x, it.y) }
         s.zombies.forEach { consider(it.x, it.y) }
         return best
     }
@@ -198,6 +204,10 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
     private fun gunColor(r: Int) = when (r) { 2 -> Color(0.78f, 0.38f, 1f, 1f); 1 -> Color(0.3f, 0.65f, 1f, 1f); else -> Color(0.82f, 0.82f, 0.85f, 1f) }
     private val fighterColors = listOf(Color(0.1f, 0.95f, 1f, 1f), Color(1f, 0.6f, 0.2f, 1f), Color(0.5f, 1f, 0.4f, 1f), Color(1f, 0.4f, 0.9f, 1f), Color(1f, 0.85f, 0.3f, 1f), Color(0.6f, 0.6f, 1f, 1f))
     private fun colorOf(id: Int) = fighterColors[id % fighterColors.size]
+    /** Squad rings: my own squad is always green, the others get a colour each. */
+    private val squadColors = listOf(Color(1f, 0.62f, 0.15f, 1f), Color(1f, 0.3f, 0.8f, 1f), Color(1f, 0.92f, 0.2f, 1f), Color(0.45f, 0.65f, 1f, 1f), Color(1f, 0.4f, 0.4f, 1f), Color(0.7f, 0.5f, 1f, 1f))
+    private val mySquadColor = Color(0.3f, 1f, 0.45f, 1f)
+    private fun squadColor(sq: Int, mine: Int) = if (sq == mine) mySquadColor else squadColors[(if (sq > mine) sq - 1 else sq) % squadColors.size]
 
     /** Starts a shape pass with alpha blending on: [SpriteBatch.end] switches blending off, which made every translucent shape drawn after text opaque. */
     private fun beginShapes(type: ShapeRenderer.ShapeType) {
@@ -222,6 +232,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             beginShapes(ShapeRenderer.ShapeType.Line); shapes.color = Color(1f, 0.35f, 0.5f, 0.35f)
             for (r in 1..4) shapes.circle(W / 2, H / 2 - 40f, r * 90f, 64)
             shapes.end()
+            lobbyButton(s)
             batch.begin(); font.color = Color.WHITE; lobbyText(s); batch.end()
             if (client != null && !client.connected) { batch.begin(); font.color = Color.RED; text("Disconnected from host. Tap to go back.", W / 2, H / 2 - 60f, 1.2f); batch.end() }
             return
@@ -255,17 +266,34 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
             shapes.color = Color(1f, 0.95f, 0.5f, 0.45f); shapes.rectLine(it.x, it.y, it.x - cos(it.angle) * 16f, it.y - sin(it.angle) * 16f, 2f)
             shapes.color = Color(1f, 0.95f, 0.5f, 1f); shapes.circle(it.x, it.y, 3f)
         }
+        val squads = s.squadSize > 1
+        val mySquad = me?.squad ?: -1
         for (f in s.fighters) {
             if (!f.alive) continue
             val p = smooth(f.id, f.x, f.y, dt)
-            shapes.color = if (f.id == s.meId) Color(0.1f, 0.95f, 1f, 1f) else colorOf(f.id)
+            if (squads) { // squad ring: a solid halo under the body (thin outlines vanish on a phone)
+                if (f.downed) { // revive clock: a dark disc with a green wedge that fills as the mate works
+                    shapes.color = Color(0f, 0f, 0f, 0.55f); shapes.circle(p.x, p.y, BrConst.BODY_R + 15f, 24)
+                    if (f.reviveP > 0.01f) { shapes.color = Color(0.4f, 1f, 0.5f, 0.95f); shapes.arc(p.x, p.y, BrConst.BODY_R + 15f, 90f, -360f * f.reviveP, 24) }
+                }
+                shapes.color = squadColor(f.squad, mySquad); shapes.circle(p.x, p.y, BrConst.BODY_R + 5f, 20)
+            }
+            val base = if (f.id == s.meId) Color(0.1f, 0.95f, 1f, 1f) else colorOf(f.id)
+            shapes.color = if (f.downed) Color(base.r * 0.45f + 0.15f, base.g * 0.45f + 0.15f, base.b * 0.45f + 0.15f, 1f) else base
             shapes.circle(p.x, p.y, BrConst.BODY_R)
-            shapes.color = Color(0.1f, 0.1f, 0.12f, 1f); shapes.rectLine(p.x, p.y, p.x + cos(f.aim) * 24f, p.y + sin(f.aim) * 24f, 5f)
-            shapes.color = gunColor(f.rarity); shapes.rectLine(p.x + cos(f.aim) * 10f, p.y + sin(f.aim) * 10f, p.x + cos(f.aim) * 22f, p.y + sin(f.aim) * 22f, 3f)
-            // bars
+            if (f.downed) { // red cross: "needs help"
+                shapes.color = Color(1f, 0.15f, 0.2f, 1f); shapes.rect(p.x - 8f, p.y - 2.5f, 16f, 5f); shapes.rect(p.x - 2.5f, p.y - 8f, 5f, 16f)
+            } else {
+                shapes.color = Color(0.1f, 0.1f, 0.12f, 1f); shapes.rectLine(p.x, p.y, p.x + cos(f.aim) * 24f, p.y + sin(f.aim) * 24f, 5f)
+                shapes.color = gunColor(f.rarity); shapes.rectLine(p.x + cos(f.aim) * 10f, p.y + sin(f.aim) * 10f, p.x + cos(f.aim) * 22f, p.y + sin(f.aim) * 22f, 3f)
+            }
+            // bars (a downed fighter shows the bleed-out clock instead of health)
             shapes.color = Color(0f, 0f, 0f, 0.6f); shapes.rect(p.x - 17, p.y + 21, 34f, 9f)
-            shapes.color = Color(0.9f, 0.2f, 0.25f, 1f); shapes.rect(p.x - 16, p.y + 22, 32f * (f.hp / f.maxHp).coerceIn(0f, 1f), 3f)
-            shapes.color = Color(0.3f, 0.7f, 1f, 1f); shapes.rect(p.x - 16, p.y + 26, 32f * (f.shield / BrWorld.MAX_SHIELD).coerceIn(0f, 1f), 3f)
+            if (f.downed) { shapes.color = Color(1f, 0.55f, 0.1f, 1f); shapes.rect(p.x - 16, p.y + 22, 32f * f.bleed.coerceIn(0f, 1f), 7f) }
+            else {
+                shapes.color = Color(0.9f, 0.2f, 0.25f, 1f); shapes.rect(p.x - 16, p.y + 22, 32f * (f.hp / f.maxHp).coerceIn(0f, 1f), 3f)
+                shapes.color = Color(0.3f, 0.7f, 1f, 1f); shapes.rect(p.x - 16, p.y + 26, 32f * (f.shield / BrWorld.MAX_SHIELD).coerceIn(0f, 1f), 3f)
+            }
             if (f.reloading) { shapes.color = Color(1f, 1f, 1f, 0.7f); shapes.rect(p.x - 10, p.y - 22, 20f, 2f) }
             if (f.healing) { shapes.color = Color(0.4f, 1f, 0.5f, 0.9f); shapes.rect(p.x - 10, p.y - 26, 20f, 2f) }
         }
@@ -279,7 +307,11 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         m?.pois?.forEach { font.color = Color(1f, 1f, 1f, 0.22f); font.data.setScale(2f * ui); layout.setText(font, it.name); font.draw(batch, it.name, it.x - layout.width / 2, it.y + 12); font.data.setScale(ui) }
         for (f in s.fighters) {
             if (!f.alive || f.id == s.meId) continue
-            val p = smooth(f.id, f.x, f.y, dt); font.color = Color(1f, 1f, 1f, 0.85f); layout.setText(font, f.name); font.draw(batch, f.name, p.x - layout.width / 2, p.y + 44)
+            val p = smooth(f.id, f.x, f.y, dt)
+            val mate = s.squadSize > 1 && f.squad == me?.squad
+            font.color = if (mate) mySquadColor else Color(1f, 1f, 1f, 0.85f)
+            val label = if (f.downed) "${f.name}  DOWN" else f.name
+            layout.setText(font, label); font.draw(batch, label, p.x - layout.width / 2, p.y + 44)
         }
         for (a in s.airdrops) { font.color = Color(1f, 0.85f, 0.3f, 1f); font.draw(batch, "SUPPLY ${max(0, a.t.toInt())}s", a.x - 34, a.y - 8) }
         for (f in floaters) { val k = f.age / 0.9f; font.color = Color(f.color.r, f.color.g, f.color.b, 1f - k * k); font.data.setScale(1.2f * ui); font.draw(batch, f.text, f.x - 8, f.y + 30 + 40 * k); font.data.setScale(ui) }
@@ -298,6 +330,7 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
                 shapes.line(p.x + cos(a) * 30f, p.y + sin(a) * 30f, ex, ey); shapes.line(ex, ey, ex - cos(a - 0.5f) * 14f, ey - sin(a - 0.5f) * 14f); shapes.line(ex, ey, ex - cos(a + 0.5f) * 14f, ey - sin(a + 0.5f) * 14f)
             }
         }
+        for (f in s.fighters) if (f.alive && f.reviving) { val p = smooth(f.id, f.x, f.y, dt); shapes.color = Color(0.4f, 1f, 0.5f, 0.6f + 0.4f * sin(time * 10f)); shapes.circle(p.x, p.y, BrConst.BODY_R + 9f, 24) }
         for (f in s.fighters) if (f.alive && (f.protectedNow || f.reduced)) { val p = smooth(f.id, f.x, f.y, dt); shapes.color = if (f.reduced) Color(0.4f, 0.8f, 1f, 1f) else Color(1f, 1f, 1f, 0.6f + 0.4f * sin(time * 8f)); shapes.circle(p.x, p.y, BrConst.BODY_R + 5f, 24) }
         shapes.end()
 
@@ -331,7 +364,14 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         shapes.color = Color(0f, 0f, 0f, 0.55f); shapes.rect(mx, my, mm, mm)
         map?.pois?.forEach { shapes.color = Color(0.2f, 0.22f, 0.3f, 1f); shapes.circle(mx + it.x * sc, my + it.y * sc, 330f * sc, 16) }
         s.airdrops.forEach { shapes.color = Color(1f, 0.8f, 0.2f, 1f); shapes.rect(mx + it.x * sc - 2, my + it.y * sc - 2, 4f, 4f) }
-        s.fighters.forEach { if (it.alive) { shapes.color = if (it.id == s.meId) Color(0.1f, 0.95f, 1f, 1f) else Color(1f, 0.4f, 0.4f, 1f); shapes.circle(mx + it.x * sc, my + it.y * sc, if (it.id == s.meId) 3.5f else 2.2f) } }
+        val mateColor = Color(0.3f, 1f, 0.45f, 1f)
+        s.fighters.forEach {
+            if (it.alive) {
+                val mate = s.squadSize > 1 && it.id != s.meId && it.squad == me?.squad
+                shapes.color = if (it.id == s.meId) Color(0.1f, 0.95f, 1f, 1f) else if (mate) (if (it.downed) Color(1f, 0.6f, 0.1f, 1f) else mateColor) else Color(1f, 0.4f, 0.4f, 1f)
+                shapes.circle(mx + it.x * sc, my + it.y * sc, if (it.id == s.meId) 3.5f else if (mate) 3f else 2.2f)
+            }
+        }
         if (me == null || !me.alive) { shapes.color = Color.WHITE; shapes.circle(mx + s.camX * sc, my + s.camY * sc, 3f) }
         if (phase == Phase.LIVE || phase == Phase.DEPLOY) {
             // bars
@@ -341,12 +381,14 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
                 shapes.color = Color(0.3f, 0.7f, 1f, 1f); shapes.rect(22f, H - 46f, 236f * (me.shield / BrWorld.MAX_SHIELD).coerceIn(0f, 1f), 7f)
             }
             if (self != null && self.healProgress > 0f) { shapes.color = Color(0.4f, 1f, 0.5f, 0.9f); shapes.rect(W / 2 - 60, 150f, 120f * self.healProgress, 6f) }
+            if (self != null && phase == Phase.LIVE && s.squadSize > 1) drawSquadShapes(s, me, self)
         }
         if (isTouch && phase == Phase.LIVE) {
             shapes.color = Color(1f, 1f, 1f, 0.12f); shapes.circle(moveC.x, moveC.y, 90f); shapes.circle(aimC.x, aimC.y, 90f)
             shapes.color = Color(0.1f, 0.95f, 1f, 0.45f); shapes.circle(moveC.x + moveV.x, moveC.y + moveV.y, 34f)
             shapes.color = Color(1f, 0.5f, 0.2f, if (aimV.len() > 32f) 0.65f else 0.35f); shapes.circle(aimC.x + aimV.x, aimC.y + aimV.y, 34f)
-            shapes.color = Color(1f, 0.15f, 0.85f, 0.35f); shapes.circle(useB.x, useB.y, 40f)
+            val reviveHint = self != null && (self.prompt.startsWith("REVIVE") || self.reviveProgress > 0.01f && !self.downed)
+            shapes.color = if (reviveHint) Color(0.4f, 1f, 0.5f, 0.55f + 0.3f * sin(time * 8f)) else Color(1f, 0.15f, 0.85f, 0.35f); shapes.circle(useB.x, useB.y, if (reviveHint) 46f else 40f)
             shapes.color = Color(0.4f, 1f, 0.5f, 0.35f); shapes.circle(healB.x, healB.y, 40f)
             shapes.color = Color(1f, 0.8f, 0.1f, if (self != null && self.abilityCd <= 0f) 0.5f else 0.15f); shapes.circle(skillB.x, skillB.y, 42f)
             shapes.color = Color(1f, 1f, 1f, 0.25f); shapes.circle(reloadB.x, reloadB.y, 34f)
@@ -376,12 +418,17 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
                 font.draw(batch, "MEDKIT x${self.medkits}   CELL x${self.cells}   KILLS ${self.kills}", 22f, H - 58f - 2 * lh)
                 font.draw(batch, characterAbility(me) + if (self.abilityCd <= 0f) ": READY [Q]" else ": ${self.abilityCd.toInt()}s", 22f, H - 58f - 3 * lh)
             }
-            text("ALIVE ${s.alive}", W / 2, H - 18f, 1.5f)
+            text(if (s.squadSize > 1) "SQUADS ${s.squadsAlive}   ALIVE ${s.alive}" else "ALIVE ${s.alive}", W / 2, H - 18f, 1.5f)
             val zl = if (s.zone.stage >= BrWorld.ZONES.size) "FINAL ZONE" else if (s.zone.shrinking) "ZONE CLOSING  ${s.zone.timeLeft.toInt()}s" else "NEXT ZONE IN  ${s.zone.timeLeft.toInt()}s"
             text(zl, W / 2, H - 24f - 22.5f * ui, 1f)
             if (me != null && me.alive && hypot(me.x - s.zone.cx, me.y - s.zone.cy) > s.zone.r) { font.color = Color(1f, 0.35f, 0.4f, 1f); text("IN THE DEAD ZONE  -${s.zone.dps.toInt()}/s  GET INSIDE", W / 2, 190f, 1.2f); font.color = Color.WHITE }
-            if (self != null && self.prompt.isNotEmpty()) text(self.prompt + if (isTouch) "  (tap USE)" else "  (press E)", W / 2, 120f, 1f)
-            if (self != null && !self.alive) { font.color = Color(1f, 0.5f, 0.5f, 1f); text("ELIMINATED  -  #${self.placement}   spectating ${self.spectating}", W / 2, 150f, 1.2f); font.color = Color.WHITE }
+            if (self != null && self.prompt.isNotEmpty()) {
+                val hold = self.prompt.startsWith("REVIVE")
+                if (hold) font.color = Color(0.4f, 1f, 0.5f, 1f)
+                text(self.prompt + if (hold) (if (isTouch) "  (hold USE)" else "  (hold E)") else if (isTouch) "  (tap USE)" else "  (press E)", W / 2, 120f, if (hold) 1.2f else 1f); font.color = Color.WHITE
+            }
+            if (self != null && !self.alive) { font.color = Color(1f, 0.5f, 0.5f, 1f); text((if (s.squadSize > 1) "SQUAD OUT  -  #${self.placement}" else "ELIMINATED  -  #${self.placement}") + "   spectating ${self.spectating}", W / 2, 150f, 1.2f); font.color = Color.WHITE }
+            if (self != null && phase == Phase.LIVE && s.squadSize > 1) drawSquadText(s, me, self)
             var fy = H - mm - 30f
             font.data.setScale(0.9f * ui); for (line in s.feed.asReversed()) { layout.setText(font, line); font.draw(batch, line, W - 16f - layout.width, fy); fy -= 16f * ui }; font.data.setScale(ui)
             if (isTouch) { label("USE", useB); label("HEAL", healB); label(if (self == null || self.abilityCd <= 0f) "SKILL" else self.abilityCd.toInt().toString(), skillB); label("R", reloadB) }
@@ -404,20 +451,100 @@ class BrScreen(private val character: Character = Characters.DEFAULT, private va
         font.color = Color(1f, 0.9f, 0.4f, 1f); y = line("BLACKOUT ROYALE", y, 3f, 18f); font.color = Color.WHITE
         y = line("${s.field} fighters  -  last one standing wins. Stay inside the Dead Zone.", y, 1.1f, 30f)
         y = line("Players", y, 1.2f, 8f)
-        s.lobby.forEach { y = line(it, y, 1f, 6f) }
+        s.lobby.forEachIndexed { i, n -> y = line(if (s.squadSize > 1) "Squad ${i / s.squadSize + 1}   $n" else n, y, 1f, 6f) }
         y -= 14f
         line(if (host != null) "Bots fill the rest. Starts in ${s.timer.toInt()}s  -  ${if (isTouch) "tap" else "press Enter / tap"} to start now" else "Waiting for the host to start...  (${s.timer.toInt()}s)", y, 1.2f)
-        if (!isTouch) text("WASD move   Mouse aim   Click fire   E swap gun   F heal (hold)   Q skill   R reload   Esc leave", W / 2, 70f, 0.95f)
+        if (!isTouch) text("WASD move   Mouse aim   Click fire   E swap gun / hold to revive   F heal (hold)   Q skill   R reload   Esc leave", W / 2, 70f, 0.95f)
+        if (s.squadSize > 1) text("Hold USE next to a downed squad mate to revive them. Mates cannot hurt each other.", W / 2, 118f, 0.95f)
+        val label = BrPrefs.label(s.squadSize, s.field) + if (host != null) "   (${if (isTouch) "tap" else "T / click"} to change)" else ""
+        text(label, W / 2, squadOpt[1] + squadOpt[3] / 2 + 8f * ui, 1.2f)
+    }
+
+    /** Lobby button background (drawn with the shapes before the text). */
+    private fun lobbyButton(s: BrSnapshot) {
+        if (host == null) return
+        beginShapes(ShapeRenderer.ShapeType.Filled)
+        shapes.color = if (s.squadSize > 1) Color(0.08f, 0.34f, 0.26f, 0.95f) else Color(0.2f, 0.2f, 0.26f, 0.95f)
+        shapes.rect(squadOpt[0], squadOpt[1], squadOpt[2], squadOpt[3])
+        shapes.end()
+    }
+
+    private fun squadMates(s: BrSnapshot, me: BrFighterSnap?) = if (me == null) emptyList() else s.fighters.filter { it.squad == me.squad && it.id != me.id }
+
+    private val squadRowH get() = 1.25f * lh
+    private val squadTop get() = H - 58f - 4 * lh - 14f
+
+    /** Squad panel bars, edge arrows to downed mates, and the downed overlay (shapes; the text goes with [drawSquadText]). */
+    private fun drawSquadShapes(s: BrSnapshot, me: BrFighterSnap?, self: BrSelf) {
+        val mates = squadMates(s, me)
+        val barX = 22f + 78f * ui
+        mates.forEachIndexed { i, m ->
+            val top = squadTop - i * squadRowH
+            shapes.color = Color(0f, 0f, 0f, 0.55f); shapes.rect(14f, top - squadRowH + 2f, 214f + 156f * ui, squadRowH - 2f)
+            shapes.color = mySquadColor; shapes.rect(18f, top - squadRowH + 6f, 5f, squadRowH - 10f)
+            if (!m.alive) return@forEachIndexed
+            if (m.downed) {
+                shapes.color = Color(0.25f, 0.1f, 0.05f, 1f); shapes.rect(barX, top - 0.8f * lh, 100f, 9f)
+                shapes.color = Color(1f, 0.55f, 0.1f, 1f); shapes.rect(barX, top - 0.8f * lh, 100f * m.bleed.coerceIn(0f, 1f), 9f)
+                if (m.reviveP > 0.01f) { shapes.color = Color(0.4f, 1f, 0.5f, 1f); shapes.rect(barX, top - 0.8f * lh - 6f, 100f * m.reviveP, 4f) }
+            } else {
+                shapes.color = Color(0.25f, 0.06f, 0.08f, 1f); shapes.rect(barX, top - 0.8f * lh, 100f, 9f)
+                shapes.color = Color(0.9f, 0.2f, 0.25f, 1f); shapes.rect(barX, top - 0.8f * lh, 100f * (m.hp / m.maxHp).coerceIn(0f, 1f), 9f)
+                shapes.color = Color(0.3f, 0.7f, 1f, 1f); shapes.rect(barX, top - 0.8f * lh - 6f, 100f * (m.shield / BrWorld.MAX_SHIELD).coerceIn(0f, 1f), 4f)
+            }
+        }
+        // arrows at the screen edge toward downed mates who are off screen (a phone shows little of the map)
+        for (m in mates) if (m.alive && m.downed) {
+            val sx = W / 2 + (m.x - cam.position.x); val sy = H / 2 + (m.y - cam.position.y)
+            if (sx in 40f..W - 40f && sy in 40f..H - 40f) continue
+            val a = atan2(sy - H / 2, sx - W / 2)
+            val k = min((W / 2 - 34f) / max(0.001f, abs(cos(a))), (H / 2 - 34f) / max(0.001f, abs(sin(a))))
+            val ex = W / 2 + cos(a) * k; val ey = H / 2 + sin(a) * k
+            shapes.color = Color(1f, 0.3f, 0.2f, 0.4f + 0.5f * abs(sin(time * 5f)))
+            shapes.triangle(ex + cos(a) * 16f, ey + sin(a) * 16f, ex + cos(a + 2.5f) * 14f, ey + sin(a + 2.5f) * 14f, ex + cos(a - 2.5f) * 14f, ey + sin(a - 2.5f) * 14f)
+        }
+        if (self.downed) { // red wash and the bleed-out clock
+            shapes.color = Color(0.6f, 0f, 0.05f, 0.16f); shapes.rect(0f, 0f, W, H)
+            shapes.color = Color(0f, 0f, 0f, 0.6f); shapes.rect(W / 2 - 160f, H / 2 + 52f, 320f, 14f)
+            shapes.color = Color(1f, 0.55f, 0.1f, 1f); shapes.rect(W / 2 - 158f, H / 2 + 54f, 316f * self.bleed.coerceIn(0f, 1f), 10f)
+            if (self.reviveProgress > 0.01f) { shapes.color = Color(0.4f, 1f, 0.5f, 1f); shapes.rect(W / 2 - 158f, H / 2 + 44f, 316f * self.reviveProgress, 6f) }
+        } else if (self.reviveProgress > 0.01f) { // my own revive channel
+            shapes.color = Color(0f, 0f, 0f, 0.6f); shapes.rect(W / 2 - 100f, 142f, 200f, 14f)
+            shapes.color = Color(0.4f, 1f, 0.5f, 1f); shapes.rect(W / 2 - 98f, 144f, 196f * self.reviveProgress, 10f)
+        }
+    }
+
+    private fun drawSquadText(s: BrSnapshot, me: BrFighterSnap?, self: BrSelf) {
+        val mates = squadMates(s, me)
+        val barX = 22f + 78f * ui
+        font.data.setScale(0.95f * ui)
+        mates.forEachIndexed { i, m ->
+            val top = squadTop - i * squadRowH
+            font.color = if (m.alive) Color.WHITE else Color(0.6f, 0.6f, 0.65f, 1f)
+            font.draw(batch, m.name, 28f, top - 4f)
+            font.color = if (!m.alive) Color(0.6f, 0.6f, 0.65f, 1f) else if (m.downed) Color(1f, 0.6f, 0.2f, 1f) else Color.WHITE
+            val st = if (!m.alive) "OUT" else if (m.downed) (if (m.reviveP > 0.01f) "REVIVING ${(m.reviveP * 100).toInt()}%" else "DOWN ${(m.bleed * BrWorld.BLEED_TIME).toInt()}s") else "${m.hp.toInt()}+${m.shield.toInt()}"
+            font.draw(batch, st, barX + 106f, top - 4f)
+        }
+        font.data.setScale(ui)
+        if (self.downed) {
+            font.color = Color(1f, 0.4f, 0.35f, 1f); text("YOU ARE DOWN", W / 2, H / 2 + 118f, 2f)
+            font.color = Color.WHITE
+            text(if (self.reviveProgress > 0.01f) "BEING REVIVED  ${(self.reviveProgress * 100).toInt()}%" else "Bleeding out in ${(self.bleed * BrWorld.BLEED_TIME).toInt()}s  -  a mate can revive you", W / 2, H / 2 + 32f, 1f)
+        } else if (self.reviveProgress > 0.01f) {
+            font.color = Color(0.4f, 1f, 0.5f, 1f); text("REVIVING ${(self.reviveProgress * 100).toInt()}%", W / 2, 176f, 1.1f); font.color = Color.WHITE
+        }
     }
 
     private fun resultText(s: BrSnapshot, self: BrSelf?) {
-        val won = self != null && self.alive
+        val won = self != null && self.placement == 1
         var y = H / 2 + 190f
         font.color = if (won) Color(1f, 0.9f, 0.3f, 1f) else Color(1f, 0.6f, 0.6f, 1f)
         y = line(if (won) "VICTORY!" else "GAME OVER", y, 3f, 14f)
         font.color = Color.WHITE
         y = line(s.banner, y, 1.3f, 12f)
-        if (self != null) y = line("Placed #${self.placement} of ${s.field}   -   ${self.kills} eliminations", y, 1.2f, 14f)
+        if (self != null && s.squadSize > 1) { y = line("Placed #${self.placement} of ${s.squads} squads", y, 1.4f, 10f); y = line("${self.kills} eliminations   -   ${self.squadKills} for the squad", y, 1.1f, 14f) }
+        else if (self != null) y = line("Placed #${self.placement} of ${s.field}   -   ${self.kills} eliminations", y, 1.2f, 14f)
         line(if (host != null) "Tap / Enter to play again" else "Waiting for host to restart", y, 1f)
     }
 

@@ -9,14 +9,14 @@ import kotlin.math.hypot
 import kotlin.random.Random
 import kotlin.test.*
 
-private const val DT = 1 / 30f
+internal const val DT = 1 / 30f
 
 /**
  * Humans only, no bots, match started and past the deploy countdown, protection switched off. A match with a single
  * fighter ends at once, so a lone human gets an invulnerable parked dummy (id 9) as company.
  */
-private fun liveWorld(vararg chars: String, seed: Long = 5): BrWorld {
-    val w = BrWorld(seed, autoStartS = 0f, withBots = false)
+internal fun liveWorld(vararg chars: String, seed: Long = 5, squadSize: Int = 1): BrWorld {
+    val w = BrWorld(seed, autoStartS = 0f, withBots = false, squadSize = squadSize)
     chars.forEachIndexed { i, c -> assertTrue(w.join(i, c)) }
     if (chars.size == 1) assertTrue(w.join(9, "martha"))
     w.startMatch()
@@ -28,11 +28,11 @@ private fun liveWorld(vararg chars: String, seed: Long = 5): BrWorld {
     return w
 }
 
-private fun BrWorld.place(id: Int, x: Float, y: Float) { fighters.getValue(id).apply { this.x = x; this.y = y } }
-private fun BrWorld.run(seconds: Float) { repeat((seconds / DT).toInt()) { update(DT) } }
+internal fun BrWorld.place(id: Int, x: Float, y: Float) { fighters.getValue(id).apply { this.x = x; this.y = y } }
+internal fun BrWorld.run(seconds: Float) { repeat((seconds / DT).toInt()) { update(DT) } }
 
 /** Open ground (no wall within 110) close to the middle of the map, found by scanning rings outward. */
-private fun BrWorld.openSpot(): Pair<Float, Float> {
+internal fun BrWorld.openSpot(): Pair<Float, Float> {
     for (r in 0..1000 step 50) for (k in 0 until 24) {
         val a = k * 2 * Math.PI.toFloat() / 24
         val x = BrConst.CENTER + kotlin.math.cos(a) * r; val y = BrConst.CENTER + kotlin.math.sin(a) * r
@@ -459,18 +459,19 @@ class BrNetTest {
 }
 
 class BrBotMatchTest {
-    private class Stats(val world: BrWorld, val firstKill: Float, val stuckBots: Int, val oscillations: Int, val botSeconds: Int, val notes: List<String>)
+    private class Stats(val world: BrWorld, val firstKill: Float, val stuckBots: Int, val oscillations: Int, val botSeconds: Int, val notes: List<String>, val firstDown: Float = -1f)
 
     /** Plays a bot-only match, checking invariants every tick and measuring whether any bot "wants to move but cannot". */
-    private fun match(seed: Long, skill: BotSkill, maxSeconds: Float = 700f): Stats {
-        val w = BrWorld(seed, autoStartS = 0f, botSkill = skill)
-        var t = 0f; var firstKill = -1f; var lastAlive = BrConst.FIELD
+    private fun match(seed: Long, skill: BotSkill, maxSeconds: Float = 700f, squadSize: Int = 1): Stats {
+        val w = BrWorld(seed, autoStartS = 0f, botSkill = skill, squadSize = squadSize)
+        var t = 0f; var firstKill = -1f; var firstDown = -1f; var lastAlive = BrConst.FIELD
         val lastPos = HashMap<Int, Pair<Float, Float>>(); val still = HashMap<Int, Float>()
         val flips = HashMap<Int, Int>(); val prevDir = HashMap<Int, Pair<Float, Float>>(); var oscillations = 0; var stuck = 0; var botSeconds = 0; val notes = ArrayList<String>()
         while (w.phase != Phase.ENDED && t < maxSeconds) {
             w.update(DT); t += DT
             if (w.phase != Phase.LIVE) continue
             if (firstKill < 0f && w.aliveCount() < lastAlive) firstKill = w.matchTime
+            if (firstDown < 0f && w.statDowns > 0) firstDown = w.matchTime
             lastAlive = w.aliveCount()
             val sample = (w.matchTime * 30).toInt() % 30 == 0 // once per second
             for (f in w.fighters.values) if (f.alive) {
@@ -479,6 +480,7 @@ class BrBotMatchTest {
                 assertTrue(f.shield in 0f..BrWorld.MAX_SHIELD + 0.01f && f.hp <= f.maxHp + 0.01f, "seed $seed: bad hp/shield ${f.hp}/${f.shield}")
                 assertTrue(f.medkits in 0..BrWorld.CARRY && f.cells in 0..BrWorld.CARRY)
                 assertTrue(f.rounds in 0..f.weapon.mag)
+                assertTrue(!f.downed || (f.hp == 0f && f.downedT <= BrWorld.BLEED_TIME + 0.01f), "seed $seed: bad downed state")
                 // walking back and forth every tick (a goal flip-flop) shows up as the movement vector repeatedly reversing
                 val len = kotlin.math.hypot(f.input.dx, f.input.dy)
                 if (len > 0.3f) {
@@ -500,7 +502,7 @@ class BrBotMatchTest {
             }
             assertTrue(w.zombies.size <= BrWorld.ZOMBIE_CAP)
         }
-        return Stats(w, firstKill, stuck, oscillations, botSeconds, notes)
+        return Stats(w, firstKill, stuck, oscillations, botSeconds, notes, firstDown)
     }
 
     private fun abs(v: Float) = kotlin.math.abs(v)
@@ -534,6 +536,43 @@ class BrBotMatchTest {
         assertTrue(avg in 150.0..330.0, "average match length $avg s")
         assertTrue(runs.all { it.world.matchTime > 90f }, "a match was over in under 90 s")
         assertTrue(runs.map { it.firstKill }.average() > 20.0, "first blood is too early: opening should be a loot phase")
+    }
+
+    @Test fun squadMatchesAlwaysFinishWithCleanSquadPlacements() {
+        for (size in 2..4) for (seed in 1L..4L) {
+            val w = match(seed, BotSkill.NORMAL, squadSize = size).world
+            assertEquals(Phase.ENDED, w.phase, "size $size seed $seed did not finish")
+            assertTrue(w.matchTime < 650f, "size $size seed $seed took ${w.matchTime}s")
+            assertTrue(w.squadsAlive() <= 1)
+            val bySquad = w.fighters.values.groupBy { it.squad }
+            assertEquals(BrConst.FIELD / size, bySquad.size)
+            bySquad.forEach { (sq, m) ->
+                assertEquals(size, m.size, "squad $sq size")
+                assertEquals(1, m.map { it.placement }.toSet().size, "size $size seed $seed: squad $sq members must share one placement: ${m.map { it.placement }}")
+            }
+            assertEquals((1..bySquad.size).toList(), bySquad.values.map { it.first().placement }.sorted(), "size $size seed $seed: squad placements must be a clean 1..n")
+            assertTrue(w.winnerSquad >= 0, "size $size seed $seed: no winning squad"); assertEquals(1, bySquad.getValue(w.winnerSquad).first().placement)
+        }
+    }
+
+    @Test fun squadBotsNeverGetStuckOrFlipFlop() {
+        var stuck = 0; var osc = 0; var seconds = 0; val notes = ArrayList<String>()
+        for (size in 2..4) for (seed in 1L..(if (size == 3) 8L else 4L)) { val s = match(seed, BotSkill.NORMAL, squadSize = size); stuck += s.stuckBots; osc += s.oscillations; seconds += s.botSeconds; notes += s.notes }
+        assertEquals(0, stuck, "squad bots that wanted to move but did not for 15 s: $notes")
+        println("BR squad jitter: $osc of $seconds bot-seconds")
+        assertTrue(osc <= seconds * 0.005, "$osc of $seconds bot-seconds spent reversing direction 12+ times a second")
+    }
+
+    @Test fun squadPacingStaysInABandAndRevivesActuallyHappen() {
+        val runs = (1L..12L).map { match(it, BotSkill.NORMAL, squadSize = 3) }
+        val avg = runs.map { it.world.matchTime }.average()
+        val downs = runs.sumOf { it.world.statDowns }; val started = runs.sumOf { it.world.statRevivesStarted }; val ok = runs.sumOf { it.world.statRevives }
+        println("BR squad pacing: avg ${"%.0f".format(avg)}s, shortest ${runs.minOf { it.world.matchTime }.toInt()}s, avg first down ${"%.0f".format(runs.map { it.firstDown }.average())}s, avg first kill ${"%.0f".format(runs.map { it.firstKill }.average())}s; per match: downs ${"%.1f".format(downs / 12.0)}, revives started ${"%.1f".format(started / 12.0)}, succeeded ${"%.1f".format(ok / 12.0)}")
+        assertTrue(avg in 150.0..330.0, "average squad match length $avg s")
+        assertTrue(runs.all { it.world.matchTime > 90f }, "a squad match was over in under 90 s")
+        assertTrue(runs.map { it.firstKill }.average() > 20.0, "first blood is too early")
+        assertTrue(downs >= 12, "downs should be common in squad matches ($downs in 12)")
+        assertTrue(started >= 12 && ok >= 6, "bots must actually try and manage revives (started $started, succeeded $ok in 12 matches)")
     }
 
     @Test fun skillLevelsAreOrdered() {
