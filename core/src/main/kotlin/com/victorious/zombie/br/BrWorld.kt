@@ -34,6 +34,17 @@ class Fighter(val id: Int, val name: String, val characterId: String, val bot: B
     var input = PlayerInput()
     var spectate = -1
 
+    // squads: -1 until the match starts
+    var squad = -1
+    /** Down but not out: crawls, cannot act, bleeds out in [downedT] seconds unless a teammate revives them. Still [alive]. */
+    var downed = false; var downedT = 0f
+    /** Revive progress 0..1 on a downed fighter. */
+    var reviveP = 0f
+    /** Id of the downed teammate this fighter is reviving this tick, or -1. [reviveBreakT] > 0: damage broke the channel. */
+    var reviveTarget = -1; var reviveBreakT = 0f; var revives = 0
+    /** A mate is working on this downed fighter right now (they hold still so the reviver does not have to chase them). */
+    var beingRevived = false
+
     val reloading get() = reloadLeft > 0f
     val healDuration get() = if (healKind == 1) BrWorld.MEDKIT_TIME else BrWorld.CELL_TIME
 }
@@ -61,6 +72,7 @@ class BrWorld(
     val botSkill: BotSkill = BotSkill.NORMAL,
     val field: Int = BrConst.FIELD,
     private val withBots: Boolean = true,
+    squadSize: Int = 1,
 ) : Sim {
     companion object {
         const val MAX_HUMANS = 4
@@ -79,6 +91,13 @@ class BrWorld(
         const val BASS_RADIUS = 220f; const val BASS_KNOCK = 170f; const val BASS_DAMAGE = 20f
         const val FORTIFY_SHIELD = 35f; const val FORTIFY_TIME = 3f
         const val HOST_ID = 0
+        const val MAX_SQUAD = 4
+        const val BLEED_TIME = 30f
+        const val CRAWL_SPEED = 0.25f
+        const val REVIVE_TIME = 4f; const val REVIVE_RANGE = 60f; const val REVIVE_HP = 0.4f
+        const val REVIVE_SLOW = 0.5f; const val REVIVE_DECAY = 0.5f; const val REVIVE_BREAK = 0.8f
+        /** Seconds of bleed-out an enemy hit or zone/horde damage costs per point of damage. */
+        const val BLEED_PER_DMG = 0.25f
         const val BOT_ID_BASE = 100
         val ZONES = listOf(
             ZoneStep(40f, 40f, 1450f, 1.5f), ZoneStep(35f, 35f, 920f, 3f), ZoneStep(30f, 30f, 540f, 5f),
@@ -98,6 +117,20 @@ class BrWorld(
     var banner = ""; private set
     private var bannerT = 0f
     var winnerId = -1; private set
+    var winnerSquad = -1; private set
+
+    /** Fighters per squad: 1 = free-for-all (the original mode), 2..4 = squads with downed state and revives. Host sets it in the lobby. */
+    var squadSize = squadSize.coerceIn(1, MAX_SQUAD); private set
+    fun setSquadSize(n: Int) { if (phase == Phase.LOBBY) squadSize = n.coerceIn(1, MAX_SQUAD) }
+    /** Number of squads in the match (valid once it started). */
+    var squadCount = 0; private set
+
+    // measurements for tests and tuning
+    var statDowns = 0; private set
+    var statRevivesStarted = 0; private set
+    var statRevivesInterrupted = 0; private set
+    var statRevives = 0; private set
+    var statBleedOuts = 0; private set
     var matchTime = 0f; private set
     private var phaseT = autoStartS
 
@@ -164,12 +197,16 @@ class BrWorld(
                 brains[id] = BrBrain(botSkill, rng.nextInt()); i++
             }
         }
+        assignSquads()
         val spots = map.spawnPoints.shuffled(rng)
-        fighters.values.forEachIndexed { i, f ->
-            val p = spots[i % spots.size]
-            f.x = p.x; f.y = p.y; f.aim = atan2(BrConst.CENTER - p.y, BrConst.CENTER - p.x)
-            f.protectedT = DEPLOY_TIME + 3f
-        }
+        if (squadSize <= 1) {
+            fighters.values.forEachIndexed { i, f ->
+                val p = spots[i % spots.size]
+                f.x = p.x; f.y = p.y; f.aim = atan2(BrConst.CENTER - p.y, BrConst.CENTER - p.x)
+            }
+        } else landSquads(spots)
+        for (f in fighters.values) f.protectedT = DEPLOY_TIME + 3f
+        statDowns = 0; statRevivesStarted = 0; statRevivesInterrupted = 0; statRevives = 0; statBleedOuts = 0; winnerSquad = -1
         placeLoot()
         assignLandingAreas()
         zoneCx = BrConst.CENTER; zoneCy = BrConst.CENTER; zoneR = START_RADIUS; zoneIdx = 0; zoneShrinking = false; zoneT = 0f
@@ -180,12 +217,49 @@ class BrWorld(
     }
 
     /**
+     * Humans fill squads in join order (squad 0 first, spilling into the next), bots fill the gaps. With [squadSize] 1
+     * every fighter is its own squad, so the free-for-all is just the special case.
+     */
+    private fun assignSquads() {
+        val size = squadSize
+        val counts = IntArray(fighters.size + 1)
+        for ((i, h) in humans().withIndex()) { h.squad = i / size; counts[h.squad]++ }
+        for (f in fighters.values) {
+            if (!f.bot) continue
+            var s = 0
+            while (counts[s] >= size) s++
+            f.squad = s; counts[s]++
+        }
+        squadCount = (fighters.values.maxOfOrNull { it.squad } ?: -1) + 1
+    }
+
+    /** Squads land together at one anchor, different squads as far apart as the spawn ring allows. */
+    private fun landSquads(spots: List<Pt>) {
+        val anchors = ArrayList<Pt>()
+        anchors += spots[0]
+        while (anchors.size < squadCount) {
+            val next = spots.filter { c -> anchors.none { it === c } }.maxByOrNull { c -> anchors.minOf { hypot(it.x - c.x, it.y - c.y) } } ?: spots[anchors.size % spots.size]
+            anchors += next
+        }
+        for (sq in 0 until squadCount) {
+            val a = anchors[sq]
+            val base = rng.nextFloat() * 2 * PI.toFloat()
+            fighters.values.filter { it.squad == sq }.forEachIndexed { k, f ->
+                val ang = base + k * 2 * PI.toFloat() / MAX_SQUAD
+                val p = if (k == 0) a else map.nearestFree(a.x + cos(ang) * 70f, a.y + sin(ang) * 70f, BrConst.BODY_R + 4f)
+                f.x = p.x; f.y = p.y; f.aim = atan2(BrConst.CENTER - p.y, BrConst.CENTER - p.x)
+            }
+        }
+    }
+
+    /**
      * Gives every bot its own area to loot first, spread out so neighbours do not all pick the same building. Humans
      * claim the spot nearest their landing so bots keep clear of them too.
      */
     private fun assignLandingAreas() {
         val taken = ArrayList<Pt>()
         for (h in fighters.values.filter { !it.bot }) map.lootSpots.minByOrNull { hypot(it.x - h.x, it.y - h.y) }?.let { taken += Pt(it.x, it.y) }
+        if (squadSize > 1) { assignSquadAreas(taken); return }
         for (f in fighters.values.filter { it.bot }.shuffled(rng)) {
             val brain = brains[f.id] ?: continue
             val near = map.lootSpots.sortedBy { hypot(it.x - f.x, it.y - f.y) }.take(16)
@@ -200,12 +274,39 @@ class BrWorld(
         }
     }
 
+    /**
+     * One area per squad (a squad with a human uses the spot nearest that human), and each member gets one of the three
+     * nearest loot spots, so a squad loots one neighbourhood together instead of three corners of the map.
+     */
+    private fun assignSquadAreas(taken: ArrayList<Pt>) {
+        for (sq in (0 until squadCount).shuffled(rng)) {
+            val members = fighters.values.filter { it.squad == sq }
+            val bots = members.filter { it.bot }
+            if (bots.isEmpty()) continue
+            val human = members.firstOrNull { !it.bot }
+            val lead = human ?: members.first()
+            val aggression = bots.mapNotNull { brains[it.id]?.aggression }.average().toFloat()
+            val near = map.lootSpots.sortedBy { hypot(it.x - lead.x, it.y - lead.y) }.take(16)
+            val ordered = if (aggression > 0.65f) near.sortedBy { if (it.tier > 0) 0 else 1 } else near.sortedBy { if (it.tier > 0) 1 else 0 }
+            var pick: LootSpot? = null
+            if (human != null) pick = near.first()
+            else for (sep in listOf(700f, 520f, 360f, 0f)) {
+                pick = ordered.firstOrNull { c -> taken.none { hypot(it.x - c.x, it.y - c.y) < sep } }
+                if (pick != null) break
+            }
+            val p = pick ?: near.first()
+            if (human == null) taken += Pt(p.x, p.y)
+            val around = map.lootSpots.sortedBy { hypot(it.x - p.x, it.y - p.y) }.take(3)
+            bots.forEachIndexed { k, b -> val h = around[k % around.size]; brains[b.id]?.setHome(h.x, h.y) }
+        }
+    }
+
     /** Back to the lobby with the same humans (rematch). */
     fun resetToLobby(waitS: Float = 6f) {
         fighters.values.removeAll { it.bot }
         for (f in fighters.values.toList()) fighters[f.id] = Fighter(f.id, f.name, f.characterId, false)
         brains.clear(); bullets.clear(); zombies.clear(); loot.clear(); airdrops.clear(); hitFx.clear(); feed.clear()
-        phase = Phase.LOBBY; phaseT = waitS; winnerId = -1; banner = ""; matchTime = 0f
+        phase = Phase.LOBBY; phaseT = waitS; winnerId = -1; winnerSquad = -1; banner = ""; matchTime = 0f
     }
 
     private fun say(text: String, secs: Float) { banner = text; bannerT = secs }
@@ -241,6 +342,7 @@ class BrWorld(
             tickFighter(f, dt)
         }
         separate()
+        updateRevives(dt)
         updateBullets(dt)
         updateZombies(dt)
         zoneDamage(dt)
@@ -294,32 +396,46 @@ class BrWorld(
     private fun tickFighter(f: Fighter, dt: Float) {
         val inp = f.input
         f.abilityCd -= dt; f.useCd -= dt; f.fireCd -= dt; if (f.reduceT > 0f) f.reduceT -= dt
+        if (f.reviveBreakT > 0f) f.reviveBreakT -= dt
+        val canAct = !f.downed
+        // reviving: hold USE next to a downed teammate (it also means "swap weapon", but never while a teammate needs you)
+        val mate = if (canAct) reviveCandidate(f) else null
+        val prevRev = f.reviveTarget
+        f.reviveTarget = if (mate != null && inp.use && f.reviveBreakT <= 0f) mate.id else -1
+        if (f.reviveTarget >= 0 && f.reviveTarget != prevRev) statRevivesStarted++
+        else if (f.reviveTarget < 0 && prevRev >= 0 && fighters[prevRev]?.downed == true) statRevivesInterrupted++
+        if (f.reviveTarget >= 0 && f.healKind != 0) cancelHeal(f)
         // aim
         val al = hypot(inp.aimX, inp.aimY)
         if (al > 0.2f) f.aim = atan2(inp.aimY, inp.aimX)
         // reload
         if (f.reloading) { f.reloadLeft -= dt; if (f.reloadLeft <= 0f) { f.reloadLeft = 0f; f.rounds = f.weapon.mag } }
-        else if (inp.reload && f.rounds < f.weapon.mag) f.reloadLeft = f.weapon.reload
+        else if (canAct && inp.reload && f.rounds < f.weapon.mag) f.reloadLeft = f.weapon.reload
         // heal channel
         if (f.healKind != 0) {
             if (!inp.heal || inp.fire) cancelHeal(f)
             else { f.healT += dt; if (f.healT >= f.healDuration) finishHeal(f) }
-        } else if (inp.heal && !inp.fire) {
+        } else if (canAct && inp.heal && !inp.fire && f.reviveTarget < 0) {
             val k = chooseHeal(f)
             if (k != 0) { f.healKind = k; f.healT = 0f }
         }
         // movement
         var dx = inp.dx; var dy = inp.dy
         val len = hypot(dx, dy); if (len > 1f) { dx /= len; dy /= len }
-        val speed = SPEED * f.character.speedMult * (if (f.healKind != 0) 0.55f else 1f)
+        val speed = SPEED * f.character.speedMult * when {
+            f.downed -> if (f.beingRevived) 0f else CRAWL_SPEED
+            f.reviveTarget >= 0 -> REVIVE_SLOW
+            f.healKind != 0 -> 0.55f
+            else -> 1f
+        }
         f.kvx -= f.kvx * min(1f, 9f * dt); f.kvy -= f.kvy * min(1f, 9f * dt)
         val out = tmp
         map.resolve(f.x + (dx * speed + f.kvx) * dt, f.y + (dy * speed + f.kvy) * dt, BrConst.BODY_R, out)
         f.x = out[0]; f.y = out[1]
         // actions
-        if (inp.ability && f.abilityCd <= 0f) useAbility(f)
-        if (inp.use && f.useCd <= 0f) { f.useCd = 0.35f; swapWeapon(f) }
-        if (inp.fire && al > 0.2f && f.fireCd <= 0f && !f.reloading && f.healKind == 0) {
+        if (canAct && inp.ability && f.abilityCd <= 0f) useAbility(f)
+        if (canAct && inp.use && f.useCd <= 0f && mate == null) { f.useCd = 0.35f; swapWeapon(f) }
+        if (canAct && inp.fire && al > 0.2f && f.fireCd <= 0f && !f.reloading && f.healKind == 0) {
             if (f.rounds <= 0) f.reloadLeft = f.weapon.reload else shoot(f)
         }
     }
@@ -368,7 +484,7 @@ class BrWorld(
         when (f.character.ability) {
             Ability.BASS_DROP -> {
                 for (o in fighters.values) {
-                    if (o === f || !o.alive) continue
+                    if (o === f || !o.alive || sameSquad(f, o)) continue
                     val d = hypot(o.x - f.x, o.y - f.y); if (d > BASS_RADIUS) continue
                     if (d > 0.01f) { o.kvx += (o.x - f.x) / d * BASS_KNOCK * 9f; o.kvy += (o.y - f.y) / d * BASS_KNOCK * 9f }
                     damage(o, BASS_DAMAGE, f.id, "Bass Drop")
@@ -389,6 +505,7 @@ class BrWorld(
         val list = fighters.values.filter { it.alive }
         for (i in list.indices) for (j in i + 1 until list.size) {
             val a = list[i]; val b = list[j]
+            if (sameSquad(a, b)) continue // teammates never block or push each other
             val dx = b.x - a.x; val dy = b.y - a.y; val d = hypot(dx, dy); val min = BrConst.BODY_R * 2f
             if (d >= min) continue
             val nx = if (d > 0.01f) dx / d else 1f; val ny = if (d > 0.01f) dy / d else 0f
@@ -399,25 +516,96 @@ class BrWorld(
     }
 
     // ---- Damage -------------------------------------------------------------------------------------------------
-    /** Applies damage. Source id < 0 is the environment ([-1] zone, [-2] horde). Returns true if it killed. */
+    fun sameSquad(a: Fighter?, b: Fighter?) = a != null && b != null && a.squad >= 0 && a.squad == b.squad
+
+    /** Applies damage. Source id < 0 is the environment ([-1] zone, [-2] horde). Returns true if it eliminated the target (going down is not a kill). */
     fun damage(t: Fighter, amount: Float, src: Int, srcName: String, ignoreShield: Boolean = false, interrupt: Boolean = true, fx: Boolean = true): Boolean {
         if (!t.alive || t.protectedT > 0f || amount <= 0f || phase != Phase.LIVE) return false
+        if (src >= 0 && src != t.id && sameSquad(fighters[src], t)) return false // no friendly fire, whatever the weapon
+        if (t.downed) return hurtDowned(t, amount, src, srcName, fx)
         var a = amount * (if (t.reduceT > 0f) 0.5f else 1f)
         val dealt = a
         if (!ignoreShield && t.shield > 0f) { val s = min(t.shield, a); t.shield -= s; a -= s }
         t.hp -= a
-        if (interrupt && t.healKind != 0) cancelHeal(t)
+        if (interrupt) { if (t.healKind != 0) cancelHeal(t); t.reviveBreakT = REVIVE_BREAK }
         t.killerId = src; t.killedBy = srcName
         val dead = t.hp <= 0f
-        if (fx && dealt >= 1f) hitFx += HitFx(hitSeq++, t.x, t.y, dealt.toInt(), src, t.id, dead)
-        if (dead) eliminate(t, src, srcName, null)
+        val goesDown = dead && canGoDown(t)
+        if (fx && dealt >= 1f) hitFx += HitFx(hitSeq++, t.x, t.y, dealt.toInt(), src, t.id, dead && !goesDown)
+        if (goesDown) goDown(t, src) else if (dead) eliminate(t, src, srcName, null)
+        return dead && !goesDown
+    }
+
+    /** A hit on a downed fighter shortens their bleed-out instead of costing health, so reviving under fire is a real risk. */
+    private fun hurtDowned(t: Fighter, amount: Float, src: Int, srcName: String, fx: Boolean): Boolean {
+        t.downedT -= amount * BLEED_PER_DMG
+        if (src >= 0) { t.killerId = src; t.killedBy = srcName }
+        val dead = t.downedT <= 0f
+        if (fx && amount >= 1f) hitFx += HitFx(hitSeq++, t.x, t.y, amount.toInt(), src, t.id, dead)
+        if (dead) { statBleedOuts++; eliminate(t, t.killerId, t.killedBy, null) }
         return dead
+    }
+
+    /** Going down needs a teammate who can still move (a downed one cannot revive anybody). */
+    private fun canGoDown(t: Fighter) = squadSize > 1 && fighters.values.any { it !== t && it.alive && !it.downed && sameSquad(it, t) }
+
+    private fun goDown(t: Fighter, src: Int) {
+        t.downed = true; t.hp = 0f; t.shield = 0f; t.downedT = BLEED_TIME; t.reviveP = 0f; t.reviveTarget = -1; t.reviveBreakT = 0f
+        cancelHeal(t); statDowns++
+        val by = fighters[src]?.takeIf { it !== t }
+        announce(if (by != null) "${t.name} was downed by ${by.name}" else "${t.name} is down")
+    }
+
+    /** The nearest downed teammate within reach, or null. */
+    private fun reviveCandidate(f: Fighter): Fighter? {
+        var best: Fighter? = null; var bd = REVIVE_RANGE
+        for (o in fighters.values) {
+            if (o === f || !o.alive || !o.downed || !sameSquad(f, o)) continue
+            val d = hypot(o.x - f.x, o.y - f.y); if (d <= bd) { bd = d; best = o }
+        }
+        return best
+    }
+
+    /** Revive progress (and the bleed-out clock, which pauses while somebody is working on the downed fighter). */
+    private fun updateRevives(dt: Float) {
+        for (d in fighters.values) {
+            if (!d.alive || !d.downed) continue
+            val rv = fighters.values.firstOrNull { it.alive && !it.downed && it.reviveTarget == d.id && it.reviveBreakT <= 0f }
+            d.beingRevived = rv != null
+            if (rv != null) {
+                d.reviveP += dt / REVIVE_TIME
+                if (d.reviveP >= 1f) revive(d, rv)
+            } else {
+                d.reviveP = max(0f, d.reviveP - dt / REVIVE_TIME * REVIVE_DECAY)
+                d.downedT -= dt
+                if (d.downedT <= 0f) { statBleedOuts++; eliminate(d, d.killerId, d.killedBy, null) }
+            }
+        }
+    }
+
+    private fun revive(d: Fighter, by: Fighter) {
+        d.downed = false; d.beingRevived = false; d.hp = d.maxHp * REVIVE_HP; d.shield = 0f; d.reviveP = 0f; d.downedT = 0f; d.killerId = -1; d.killedBy = ""
+        by.reviveTarget = -1; by.revives++; statRevives++
+        announce("${by.name} revived ${d.name}")
+    }
+
+    /** Squads that still have a fighter in the match (downed counts). */
+    fun squadsAlive(): Int {
+        var n = 0
+        for (f in fighters.values) {
+            if (!f.alive) continue
+            var seen = false
+            for (o in fighters.values) { if (o === f) break; if (o.alive && o.squad == f.squad) { seen = true; break } }
+            if (!seen) n++
+        }
+        return n
     }
 
     private fun eliminate(t: Fighter, src: Int, srcName: String, text: String?) {
         if (!t.alive) return
-        t.placement = aliveCount()
-        t.alive = false; t.hp = 0f; cancelHeal(t)
+        val place = squadsAlive() // the squad's placement if this wipes it: squads still in the match right now
+        t.alive = false; t.hp = 0f; t.downed = false; t.reviveTarget = -1; cancelHeal(t)
+        t.placement = place
         val killer = fighters[src]
         if (killer != null && killer !== t) killer.kills++
         dropWeapon(t)
@@ -426,8 +614,17 @@ class BrWorld(
             killer != null && killer !== t -> "${killer.name} eliminated ${t.name} (${srcName})"
             src == -1 -> "${t.name} was claimed by the Dead Zone"
             src == -2 -> "${t.name} was eaten by the horde"
-            else -> "${t.name} is out"
+            else -> if (squadSize > 1) "${t.name} bled out" else "${t.name} is out"
         })
+        squadCheck(t.squad, place)
+    }
+
+    /** A squad with nobody left who can move cannot revive anyone: its downed fighters are out, and a wiped squad shares one placement. */
+    private fun squadCheck(sq: Int, place: Int) {
+        if (fighters.values.none { it.alive && !it.downed && it.squad == sq }) {
+            for (m in fighters.values.toList()) if (m.alive && m.downed && m.squad == sq) eliminate(m, m.killerId, m.killedBy, null)
+        }
+        if (fighters.values.none { it.alive && it.squad == sq }) for (m in fighters.values) if (m.squad == sq) m.placement = place
     }
 
     // ---- Bullets ------------------------------------------------------------------------------------------------
@@ -443,8 +640,9 @@ class BrWorld(
             val wallT = map.firstWallT(x0, y0, x1, y1)
             val tWall = if (wallT < 0f) 2f else wallT
             cands.clear()
+            val shooter = fighters[b.owner]
             for (f in fighters.values) {
-                if (!f.alive || f.id == b.owner || f.id in b.hit) continue
+                if (!f.alive || f.id == b.owner || f.id in b.hit || sameSquad(shooter, f)) continue
                 val t = Geo.segCircleT(x0, y0, x1, y1, f.x, f.y, BrConst.BODY_R + 2f); if (t >= 0f && t < tWall) cands += Cand(t, f, null)
             }
             for (z in zombies) {
@@ -471,8 +669,9 @@ class BrWorld(
 
     private fun explode(x: Float, y: Float, b: Bullet) {
         val base = b.dmg * 0.6f
+        val shooter = fighters[b.owner]
         for (f in fighters.values) {
-            if (!f.alive || f.id == b.owner || f.id in b.hit) continue
+            if (!f.alive || f.id == b.owner || f.id in b.hit || sameSquad(shooter, f)) continue
             val d = hypot(f.x - x, f.y - y); if (d > b.splash) continue
             damage(f, base * (1f - 0.6f * d / b.splash), b.owner, b.weaponName)
         }
@@ -564,7 +763,7 @@ class BrWorld(
         while (it.hasNext()) {
             val l = it.next()
             if (l.kind == LootKind.WEAPON) continue
-            val f = fighters.values.firstOrNull { o -> o.alive && hypot(o.x - l.x, o.y - l.y) < AUTO_PICKUP && (if (l.kind == LootKind.MEDKIT) o.medkits < CARRY else o.cells < CARRY) } ?: continue
+            val f = fighters.values.firstOrNull { o -> o.alive && !o.downed && hypot(o.x - l.x, o.y - l.y) < AUTO_PICKUP && (if (l.kind == LootKind.MEDKIT) o.medkits < CARRY else o.cells < CARRY) } ?: continue
             if (l.kind == LootKind.MEDKIT) f.medkits++ else f.cells++
             it.remove()
         }
@@ -575,12 +774,20 @@ class BrWorld(
         val alive = fighters.values.filter { it.alive }
         val humansLeft = alive.any { !it.bot }
         val hadHumans = fighters.values.any { !it.bot }
-        if (alive.size > 1 && (humansLeft || !hadHumans)) return
+        val squadsLeft = squadsAlive()
+        if (squadsLeft > 1 && (humansLeft || !hadHumans)) return
         phase = Phase.ENDED; phaseT = 3f
-        val winner = alive.singleOrNull()
-        winnerId = winner?.id ?: -1
-        winner?.placement = 1
-        say(if (winner != null) "${winner.name} is the last one standing!" else "Nobody survived the Blackout", 999f)
+        if (squadsLeft == 1) {
+            val sq = alive.first().squad
+            winnerSquad = sq
+            for (m in fighters.values) if (m.squad == sq) m.placement = 1
+            val winner = alive.firstOrNull { !it.bot } ?: alive.first()
+            winnerId = winner.id
+            say(if (squadSize > 1) "${winner.name}'s squad is the last one standing!" else "${winner.name} is the last one standing!", 999f)
+        } else {
+            winnerId = -1
+            say(if (squadsLeft == 0 || squadSize <= 1) "Nobody survived the Blackout" else "Every human squad was wiped out", 999f)
+        }
     }
 
     // ---- Snapshot -----------------------------------------------------------------------------------------------
@@ -588,17 +795,24 @@ class BrWorld(
         val me = fighters[viewerId]
         var focus = me
         if (me != null && !me.alive && phase == Phase.LIVE) {
-            focus = fighters[me.spectate]?.takeIf { it.alive } ?: fighters[me.killerId]?.takeIf { it.alive } ?: fighters.values.firstOrNull { it.alive && !it.bot } ?: fighters.values.firstOrNull { it.alive }
+            focus = fighters[me.spectate]?.takeIf { it.alive } ?: followMate(me) ?: fighters[me.killerId]?.takeIf { it.alive } ?: fighters.values.firstOrNull { it.alive && !it.bot } ?: fighters.values.firstOrNull { it.alive }
             me.spectate = focus?.id ?: -1
         }
         val camX = focus?.x ?: me?.x ?: BrConst.CENTER; val camY = focus?.y ?: me?.y ?: BrConst.CENTER
         fun near(x: Float, y: Float) = hypot(x - camX, y - camY) <= BrConst.VIEW_RANGE
-        val fs = fighters.values.filter { phase == Phase.LOBBY || it.id == viewerId || it === focus || (it.alive && near(it.x, it.y)) }
-            .map { f -> BrFighterSnap(f.id, f.name, f.characterId, f.x, f.y, f.aim, f.hp, f.maxHp, f.shield, BrGuns.index(f.weapon.gun), f.weapon.rarity.ordinal, f.rounds, f.reloading, f.healKind != 0, f.alive, f.protectedT > 0f, f.reduceT > 0f) }
+        // squad mates are always sent (the squad panel and the minimap show them wherever they are)
+        val fs = fighters.values.filter { phase == Phase.LOBBY || it.id == viewerId || it === focus || (it.alive && (near(it.x, it.y) || (squadSize > 1 && sameSquad(it, me)))) }
+            .map { f ->
+                BrFighterSnap(
+                    f.id, f.name, f.characterId, f.x, f.y, f.aim, f.hp, f.maxHp, f.shield, BrGuns.index(f.weapon.gun), f.weapon.rarity.ordinal, f.rounds, f.reloading, f.healKind != 0, f.alive, f.protectedT > 0f, f.reduceT > 0f,
+                    f.squad, f.downed, if (f.downed) (f.downedT / BLEED_TIME).coerceIn(0f, 1f) else 0f, f.reviveP.coerceIn(0f, 1f), f.reviveTarget >= 0,
+                )
+            }
         val lobbyNames = if (phase == Phase.LOBBY) humans().map { it.name } else emptyList()
         val self = if (me == null) null else BrSelf(
             me.alive, me.kills, me.placement, me.medkits, me.cells, max(0f, me.abilityCd), if (me.healKind != 0) me.healT / me.healDuration else 0f,
             prompt(me), if (!me.alive) (focus?.name ?: "") else "", me.weapon.mag, max(0f, me.reloadLeft / max(0.01f, me.weapon.reload)),
+            me.squad, me.downed, selfRevive(me), if (me.downed) (me.downedT / BLEED_TIME).coerceIn(0f, 1f) else 0f, fighters.values.filter { sameSquad(it, me) }.sumOf { it.kills },
         )
         val hits = hitFx.filter { it.src == viewerId || it.dst == viewerId }.map { BrHitSnap(it.seq, it.x, it.y, it.amount, it.src == viewerId, it.dst == viewerId, it.kill) }
         return BrSnapshot(
@@ -611,11 +825,27 @@ class BrWorld(
             loot.filter { near(it.x, it.y) }.map { BrLootSnap(it.id, it.kind.ordinal, it.x, it.y, it.weapon?.let { w -> BrGuns.index(w.gun) } ?: 0, it.weapon?.rarity?.ordinal ?: 0) },
             airdrops.map { BrAirdropSnap(it.x, it.y, it.t) }, hits, feed.map { it.text }.takeLast(5),
             if (bannerT > 0f || phase == Phase.ENDED) banner else "", fighters[winnerId]?.name ?: "", lobbyNames,
+            squadSize, squadsAlive(), if (phase == Phase.LOBBY) 0 else squadCount,
         )
     }
 
+    /** Progress bar value for the viewer: how far along their own revive of a mate is, or how far along their mate's revive of them is. */
+    private fun selfRevive(me: Fighter): Float {
+        if (me.downed) return me.reviveP.coerceIn(0f, 1f)
+        val t = fighters[me.reviveTarget] ?: return 0f
+        return t.reviveP.coerceIn(0f, 1f)
+    }
+
+    /** A living squad mate to watch after being eliminated: one who can still move first. */
+    private fun followMate(me: Fighter): Fighter? {
+        var best: Fighter? = null
+        for (o in fighters.values) if (o.alive && sameSquad(o, me) && (best == null || (best.downed && !o.downed))) best = o
+        return best
+    }
+
     private fun prompt(f: Fighter): String {
-        if (!f.alive) return ""
+        if (!f.alive || f.downed) return ""
+        reviveCandidate(f)?.let { return "REVIVE ${it.name}" }
         val l = loot.filter { it.kind == LootKind.WEAPON && hypot(it.x - f.x, it.y - f.y) < PICKUP_RANGE }.minByOrNull { hypot(it.x - f.x, it.y - f.y) } ?: return ""
         return "USE: swap to ${l.weapon!!.displayName}"
     }

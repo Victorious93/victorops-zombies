@@ -39,8 +39,8 @@ class HostSession(val sim: Sim, private val sendHz: Float = 15f) {
          * A fresh Blackout Royale lobby with the host in it. [autoStartS] is how long the lobby waits for the host to
          * start (solo play uses a short wait; hosting for friends a long one).
          */
-        fun createRoyale(hostCharacter: com.victorious.zombie.logic.Character, autoStartS: Float = 1.5f, skill: com.victorious.zombie.br.BotSkill = com.victorious.zombie.br.BotSkill.NORMAL): HostSession =
-            HostSession(com.victorious.zombie.br.BrWorld(autoStartS = autoStartS, botSkill = skill).also { it.join(HOST_ID, hostCharacter.id) })
+        fun createRoyale(hostCharacter: com.victorious.zombie.logic.Character, autoStartS: Float = 1.5f, skill: com.victorious.zombie.br.BotSkill = com.victorious.zombie.br.BotSkill.NORMAL, squadSize: Int = 1): HostSession =
+            HostSession(com.victorious.zombie.br.BrWorld(autoStartS = autoStartS, botSkill = skill, squadSize = squadSize).also { it.join(HOST_ID, hostCharacter.id) })
     }
 
     private class Peer(val id: Int, val link: NetLink)

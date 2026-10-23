@@ -48,6 +48,11 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
     private var clock = 0f
     private val badLoot = HashMap<Int, Float>() // loot id -> time until which we do not try it again
 
+    // squads. Every threshold has two values (enter/leave) or a cooldown so the bot never flips on a knife edge.
+    private var reviving = false; private var reviveSince = 0f; private var reviveCool = 0f
+    private var leashing = false; private var leashCool = 0f
+    private var hideT = 0f; private var hideLinger = 0f; private var hideX = 0f; private var hideY = 0f
+
     // personality and combat memory
     /** 0.35 cautious looter .. 1.0 hunter. Hunters prefer towns for their landing area. */
     val aggression = 0.35f + rng.nextFloat() * 0.65f
@@ -56,7 +61,7 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
     private var lastHealth = -1f; private var hurtT = 0f
 
     /** For tests and tuning: a one-line view of what the bot is trying to do. */
-    fun debug(): String = "branch=$branch goal=${if (hasGoal) "(${goalX.toInt()},${goalY.toInt()})" else "none"} loot=${goalIsLoot?.kind} path=${path.size}@$pathIdx[${path.drop(pathIdx).take(3).joinToString { "(${it.x.toInt()},${it.y.toInt()})" }}] stuckHits=$stuckHits tgt=${if (tgtKey == Int.MIN_VALUE) "-" else tgtKey}"
+    fun debug(): String = "branch=$branch goal=${if (hasGoal) "(${goalX.toInt()},${goalY.toInt()})" else "none"} loot=${goalIsLoot?.kind} path=${path.size}@$pathIdx[${path.drop(pathIdx).take(3).joinToString { "(${it.x.toInt()},${it.y.toInt()})" }}] stuckHits=$stuckHits rev=${if (reviving) 1 else 0}/${"%.1f".format(reviveCool)} leash=${if (leashing) 1 else 0} tgt=${if (tgtKey == Int.MIN_VALUE) "-" else tgtKey}"
 
     fun think(w: BrWorld, f: Fighter, dt: Float): PlayerInput {
         if (home == null) assignHome(w, f)
@@ -66,7 +71,10 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
         val health = f.hp + f.shield
         if (lastHealth >= 0f && health < lastHealth - 0.5f && w.inZone(f.x, f.y)) hurtT = 3f // someone is shooting us
         lastHealth = health
+        if (reviveCool > 0f) reviveCool -= dt
+        if (leashCool > 0f) leashCool -= dt
         if (scanT <= 0f) { scanT = 0.12f; scan(w, f) }
+        if (f.downed) return thinkDowned(w, f, dt)
         val tgt = currentTarget(w)
         val tx = tgt?.first ?: 0f; val ty = tgt?.second ?: 0f
         val dist = if (tgt != null) hypot(tx - f.x, ty - f.y) else 0f
@@ -97,6 +105,27 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
             // idle: keep facing the way we walk
         }
 
+        // ---- squad: revive a downed mate, or stay with the squad
+        val mate = downedMate(w, f)
+        if (mate == null) reviving = false
+        else if (!reviving) {
+            // start only when it is safe: nobody in sight, or the enemy is far away and cannot see the downed mate
+            val horde = tgtKey < 0
+            val safe = tgt == null || (hurtT <= 0f && (if (horde) dist > 200f else dist > 350f && !w.map.clearLine(tx, ty, mate.x, mate.y)))
+            if (reviveCool <= 0f && safe) { reviving = true; reviveSince = clock }
+        } else {
+            // leave only when it is clearly dangerous (wider than the entry test), and not again for a few seconds
+            val horde = tgtKey < 0
+            val danger = hurtT > 0f || (tgt != null && (if (horde) dist < 130f else dist < 300f || (dist < 450f && w.map.clearLine(tx, ty, mate.x, mate.y))))
+            if (danger || clock - reviveSince > 25f) { reviving = false; reviveCool = 2.5f }
+        }
+        val leader = leaderOf(w, f)
+        if (leader == null) leashing = false
+        else {
+            val ld = hypot(leader.x - f.x, leader.y - f.y)
+            if (!leashing && ld > LEASH_ON && leashCool <= 0f) leashing = true else if (leashing && ld < LEASH_OFF) leashing = false
+        }
+
         // ---- where to go
         var mx = 0f; var my = 0f
         var heal = false; var use = false; var reload = false; var ability = false
@@ -107,12 +136,21 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
         // over the edge for loot, gets burned, steps in again, and so on every tick.
         val edgeGapNow = w.zoneR - hypot(w.zoneCx - f.x, w.zoneCy - f.y)
         if (outside) burned = true else if (edgeGapNow > EDGE_MARGIN) burned = false
-        val unsafe = outside || rotating || burned
+        // an active revive beside the mate outranks the soft zone states (rotate, burned), but not standing in a deadly zone
+        val reviveFirst = reviving && mate != null && hypot(mate.x - f.x, mate.y - f.y) < 140f && !(outside && w.zoneDps >= 8f)
+        val unsafe = (outside || rotating || burned) && !reviveFirst
         if (unsafe) {
             branch = "unsafe"
             val p = rotateTarget(w, f)
             goalAt(p.x, p.y, 40f)
             val d = follow(w, f, dt); mx = d.first; my = d.second
+        } else if (reviving && mate != null) {
+            branch = "revive"
+            // walk to a standable point beside the mate (arrival radius 24 < hold-to-revive range), then hold USE
+            val stand = w.map.nearestFree(mate.x, mate.y, BrConst.BODY_R + 2f)
+            goalAt(stand.x, stand.y, 30f)
+            val d = follow(w, f, dt, 24f); mx = d.first; my = d.second
+            if (hypot(mate.x - f.x, mate.y - f.y) < BrWorld.REVIVE_RANGE - 6f) use = true
         } else if (engaged && weak && tgtKey >= 0) {
             branch = "flee"
             val ux = (tx - f.x) / max(dist, 1f); val uy = (ty - f.y) / max(dist, 1f)
@@ -137,6 +175,13 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
             branch = "heal"
             heal = true // stand still and patch up
             hasGoal = false
+        } else if (leader != null && leashing) {
+            branch = "leash"
+            goalIsLoot = null
+            val stand = w.map.nearestFree(leader.x, leader.y, BrConst.BODY_R + 6f)
+            goalAt(stand.x, stand.y, 80f)
+            val d = follow(w, f, dt, 40f); mx = d.first; my = d.second
+            if (!hasGoal) { leashing = false; leashCool = 3f } // no way to the leader right now: carry on alone for a bit
         } else {
             branch = "loot"
             if (f.rounds < f.weapon.mag / 2 && !f.reloading) reload = true
@@ -156,7 +201,7 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
         if (f.abilityCd <= 0f) {
             when (f.character.ability) {
                 Ability.BASS_DROP -> {
-                    val near = w.fighters.values.count { it !== f && it.alive && hypot(it.x - f.x, it.y - f.y) < BrWorld.BASS_RADIUS * 0.8f } + w.zombies.count { hypot(it.x - f.x, it.y - f.y) < 150f }
+                    val near = w.fighters.values.count { it !== f && it.alive && !w.sameSquad(f, it) && hypot(it.x - f.x, it.y - f.y) < BrWorld.BASS_RADIUS * 0.8f } + w.zombies.count { hypot(it.x - f.x, it.y - f.y) < 150f }
                     if (near >= 2 || (near >= 1 && f.hp < f.maxHp * 0.5f)) ability = true
                 }
                 Ability.FORTIFY -> if (engaged && dist < 400f && f.hp + f.shield < f.maxHp + 30f) ability = true
@@ -181,10 +226,11 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
     private fun scan(w: BrWorld, f: Fighter) {
         var bestKey = Int.MIN_VALUE; var bestScore = Float.MAX_VALUE; var bf: Fighter? = null; var bz: Zomb? = null
         for (o in w.fighters.values) {
-            if (o === f || !o.alive) continue
-            val d = hypot(o.x - f.x, o.y - f.y); if (d > min(sight, f.weapon.gun.range * 1.1f) || d * 0.8f >= bestScore) continue
+            if (o === f || !o.alive || w.sameSquad(f, o)) continue
+            val d = hypot(o.x - f.x, o.y - f.y); val score = d * 0.8f * (if (o.downed) 1.6f else 1f) // a downed enemy is the last thing to shoot
+            if (d > min(sight, f.weapon.gun.range * 1.1f) || score >= bestScore) continue
             if (!w.map.clearLine(f.x, f.y, o.x, o.y)) continue
-            bestScore = d * 0.8f; bestKey = o.id; bf = o; bz = null
+            bestScore = score; bestKey = o.id; bf = o; bz = null
         }
         for (z in w.zombies) {
             val d = hypot(z.x - f.x, z.y - f.y); if (d > 450f || d * 1.2f >= bestScore) continue
@@ -202,6 +248,70 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
         tgtF?.let { if (it.alive) return it.x to it.y else { tgtF = null; tgtKey = Int.MIN_VALUE } }
         tgtZ?.let { if (w.zombies.contains(it)) return it.x to it.y else { tgtZ = null; tgtKey = Int.MIN_VALUE } }
         return null
+    }
+
+    /** The nearest downed squad mate, or null. */
+    private fun downedMate(w: BrWorld, f: Fighter): Fighter? {
+        if (w.squadSize <= 1) return null
+        var best: Fighter? = null; var bd = 1500f
+        for (o in w.fighters.values) {
+            if (o === f || !o.alive || !o.downed || o.squad != f.squad) continue
+            val d = hypot(o.x - f.x, o.y - f.y); if (d < bd) { bd = d; best = o }
+        }
+        return best
+    }
+
+    /** Who the squad follows: the human if one can still move, otherwise the first bot that can. Null for the leader itself and in free-for-all. */
+    private fun leaderOf(w: BrWorld, f: Fighter): Fighter? {
+        if (w.squadSize <= 1) return null
+        var human: Fighter? = null; var bot: Fighter? = null
+        for (o in w.fighters.values) {
+            if (!o.alive || o.downed || o.squad != f.squad) continue
+            if (!o.bot) { human = o; break }
+            if (bot == null) bot = o
+        }
+        val l = human ?: bot
+        return if (l === f) null else l
+    }
+
+    /**
+     * A downed bot cannot fight. With an enemy in sight it crawls to a nearby spot the enemy cannot see (re-chosen at most
+     * every 1.5 s, and kept for 2 s after the enemy drops out of sight); otherwise it crawls toward a mate who can revive it.
+     */
+    private fun thinkDowned(w: BrWorld, f: Fighter, dt: Float): PlayerInput {
+        reviving = false; leashing = false; goalIsLoot = null
+        hideT -= dt; if (hideLinger > 0f) hideLinger -= dt
+        val tgt = currentTarget(w)
+        var mx = 0f; var my = 0f
+        if (tgt != null) {
+            if (hideLinger <= 0f) hideT = 0f
+            hideLinger = 2f
+            if (hideT <= 0f) {
+                hideT = 1.5f
+                var bestV = -1f
+                for (k in 0 until 8) {
+                    val a = k * PI.toFloat() / 4f; val cx = f.x + cos(a) * 90f; val cy = f.y + sin(a) * 90f
+                    if (!w.map.clearLine(f.x, f.y, cx, cy, BrConst.BODY_R)) continue
+                    val v = (if (w.map.clearLine(tgt.first, tgt.second, cx, cy)) 0f else 1000f) + hypot(cx - tgt.first, cy - tgt.second)
+                    if (v > bestV) { bestV = v; hideX = cx; hideY = cy }
+                }
+                if (bestV < 0f) { hideX = f.x; hideY = f.y }
+            }
+        }
+        if (hideLinger > 0f) {
+            hasGoal = false
+            if (hypot(hideX - f.x, hideY - f.y) > 12f) { val d = aimAt(f, hideX, hideY); mx = d.first; my = d.second }
+        } else {
+            var mate: Fighter? = null; var bd = Float.MAX_VALUE
+            for (o in w.fighters.values) {
+                if (o === f || !o.alive || o.downed || o.squad != f.squad) continue
+                val d = hypot(o.x - f.x, o.y - f.y); if (d < bd) { bd = d; mate = o }
+            }
+            if (mate != null && bd > 70f) { goalAt(mate.x, mate.y, 80f); val d = follow(w, f, dt, 50f); mx = d.first; my = d.second } else hasGoal = false
+        }
+        branch = "downed"
+        val l = hypot(mx, my); if (l > 1f) { mx /= l; my /= l }
+        return PlayerInput(mx, my, false, false, cos(aimAngle), sin(aimAngle), false, false, false)
     }
 
     private fun needsHeal(f: Fighter) = (f.medkits > 0 && f.hp < f.maxHp - 25f) || (f.cells > 0 && f.shield < 50f) || f.healKind != 0
@@ -240,10 +350,12 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
 
     private fun chooseLoot(w: BrWorld, f: Fighter) {
         val cur = weaponScore(f.weapon)
+        val leader = leaderOf(w, f)
         var best: Loot? = null; var bestV = 0f
         for (l in w.loot) {
             val d = hypot(l.x - f.x, l.y - f.y); if (d > 750f) continue
-            if (early(w) && home.let { h -> h != null && hypot(l.x - h.x, l.y - h.y) > 420f }) continue // first minute: stay in my own area
+            if (leader != null) { if (hypot(l.x - leader.x, l.y - leader.y) > LOOT_LEASH) continue } // squad mates loot around the leader
+            else if (early(w) && home.let { h -> h != null && hypot(l.x - h.x, l.y - h.y) > 420f }) continue // first minute: stay in my own area
             if ((badLoot[l.id] ?: 0f) > clock) continue
             if (w.zoneR - hypot(w.zoneCx - l.x, w.zoneCy - l.y) < EDGE_MARGIN * 0.7f) continue // not worth hugging the edge for
             val value = when (l.kind) {
@@ -294,9 +406,10 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
 
     private fun wander(w: BrWorld, f: Fighter) {
         val h = home
-        val useHome = early(w) && h != null
-        val cx = if (useHome) h!!.x else f.x; val cy = if (useHome) h!!.y else f.y
-        val r = if (useHome) 260f else 320f
+        val leader = leaderOf(w, f)
+        val useHome = leader == null && early(w) && h != null
+        val cx = if (leader != null) leader.x else if (useHome) h!!.x else f.x; val cy = if (leader != null) leader.y else if (useHome) h!!.y else f.y
+        val r = if (leader != null) 240f else if (useHome) 260f else 320f
         repeat(8) {
             val a = rng.nextFloat() * 2 * PI.toFloat(); val d = r * rng.nextFloat()
             val p = w.map.nearestFree(cx + cos(a) * d, cy + sin(a) * d, BrConst.BODY_R + 4f)
@@ -341,5 +454,9 @@ class BrBrain(private val skill: BotSkill, seed: Int) {
 }
 
 private const val EDGE_MARGIN = 120f
+/** Squad cohesion: start walking back to the leader beyond LEASH_ON, stop once within LEASH_OFF. Loot is only fetched within LOOT_LEASH of the leader (< LEASH_ON). */
+private const val LEASH_ON = 380f
+private const val LEASH_OFF = 220f
+private const val LOOT_LEASH = 330f
 
 private val STEER_FAN = floatArrayOf(0f, 0.5f, -0.5f, 1.0f, -1.0f, 1.6f, -1.6f, 2.2f, -2.2f)
