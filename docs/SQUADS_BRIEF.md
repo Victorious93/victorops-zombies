@@ -15,6 +15,16 @@ Every feature must therefore be designed and judged for a **phone**:
   yourself at the end with the recipe in `tools/dev/README.md` and report the path and size. Say plainly what you could not run
   on a device or emulator.
 
+## Rendering conventions already in `BrScreen` (use them, do not reinvent)
+- `beginShapes(type)` before every `ShapeRenderer` pass. `SpriteBatch.end()` switches GL blending off, so a plain `shapes.begin()`
+  after any text makes translucent shapes opaque (this was a real bug: solid white touch sticks).
+- Text scale: `ui` is 1.6 on touch devices and 1.0 on desktop. Use `text()`/`line()`/`lh` so layout stacks by line height.
+  Test touch layout on desktop with `-Dzombie.touch=1` at a phone-like window (for example 1170x540) using the screenshot launcher.
+- **Boundary with another workstream:** a separate effort restyles the game to a gritty Call of Duty Zombies-like look
+  (`docs/VISUAL_DIRECTION.md`). It owns `GameScreen.kt` and a new shared `Look.kt`, and will re-skin `BrScreen` later. Keep your HUD
+  additions in `BrScreen` small and functional (squad panel, revive prompt/progress, downed overlay, squad rings), and do not
+  restyle existing visuals or touch `GameScreen.kt`.
+
 ## Goal
 Add a **Squads** variant of Blackout Royale: fighters are grouped into squads, a fighter whose health hits zero is **downed**
 (not eliminated) while a teammate lives, and teammates can **revive** them. Last squad standing wins. The existing
