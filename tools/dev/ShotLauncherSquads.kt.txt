@@ -80,7 +80,7 @@ class ShotGame(private val outDir: String) : Game() {
             frames = 0
             if (sc.menu == 2) { setScreen(CharacterSelectScreen()); return }
             val ms = ModeSelectScreen(Characters.SNOOP)
-            if (sc.menu == 1) ModeSelectScreen::class.java.getDeclaredField("royale").apply { isAccessible = true }.setBoolean(ms, true)
+            if (sc.menu == 1) ModeSelectScreen::class.java.getDeclaredField("game").apply { isAccessible = true }.setInt(ms, 2)
             setScreen(ms); return
         }
         System.setProperty("zombie.touch", if (sc.touch) "1" else "0") // read when BrScreen is constructed

@@ -1,0 +1,103 @@
+package com.victorious.zombie.desktop
+
+import com.badlogic.gdx.Game
+import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration
+import com.badlogic.gdx.graphics.Pixmap
+import com.badlogic.gdx.graphics.PixmapIO
+import com.badlogic.gdx.utils.BufferUtils
+import com.badlogic.gdx.utils.ScreenUtils
+import com.victorious.zombie.FpsScreen
+import com.victorious.zombie.ModeSelectScreen
+import com.victorious.zombie.fps.*
+import com.victorious.zombie.logic.Characters
+import kotlin.math.atan2
+
+/** Throwaway: stages Zombies 3D scenes and writes PNGs. Not part of the repo. */
+class FpsShotGame(private val outDir: String, private val touch: Boolean) : Game() {
+    private val names = listOf("a_menu", "b_window", "c_inside", "d_wallbuy", "e_box", "f_power", "g_forge", "h_hurt", "i_over")
+    private var idx = -1; private var frames = 0
+    private val dt = 1 / 30f
+
+    override fun create() { next() }
+
+    private fun face(w: FpsWorld, x: Float, y: Float) { w.player.yaw = atan2(y - w.player.y, x - w.player.x) }
+    private fun stand(w: FpsWorld, p: Prop, back: Float = 1.9f) {
+        w.player.x = w.map.centre(p.tx) + p.fx * back; w.player.y = w.map.centre(p.ty) + p.fy * back
+        face(w, w.map.centre(p.tx), w.map.centre(p.ty))
+    }
+    private fun run(w: FpsWorld, s: Float) = repeat((s / dt).toInt()) { w.player.invulnT = 1e9f; w.update(dt, FpsInput(yaw = w.player.yaw)) }
+
+    private fun next() {
+        idx++
+        if (idx >= names.size) { Gdx.app.exit(); return }
+        System.setProperty("zombie.touch", if (touch) "1" else "0")
+        frames = 0
+        val n = names[idx]
+        if (n == "a_menu") { setScreen(ModeSelectScreen(Characters.SNOOP)); return }
+        val w = FpsWorld(42)
+        val p = w.player
+        when (n) {
+            "b_window" -> { // zombies tearing the west window of the start room
+                val win = w.map.windows.first { it.zone == 0 && it.inX > it.tx }
+                run(w, 16f)
+                p.x = w.map.centre(win.inX) + 3.5f; p.y = w.map.centre(win.inY) + 0.3f; face(w, w.map.centre(win.tx), w.map.centre(win.ty))
+                run(w, 0.1f)
+            }
+            "c_inside" -> {
+                var t = 0f
+                while (w.zombies.count { it.state == ZState.INSIDE } < 2 && t < 90f) { run(w, 0.5f); t += 0.5f }
+                w.zombies.firstOrNull { it.state == ZState.INSIDE }?.let { face(w, it.x, it.y) }
+                p.points = 1450; p.kills = 9
+                w.zombies.firstOrNull { it.state == ZState.INSIDE }?.let { w.damageZombie(it, 70f, false, false) }
+            }
+            "d_wallbuy" -> stand(w, w.map.props.first { it.gun == FpsGuns.RANGER }, 1.7f)
+            "e_box" -> {
+                w.zoneOpen[1] = true; w.map.doors.first { setOf(it.zoneA, it.zoneB) == setOf(0, 1) }.open = true
+                val b = w.map.props.first { it.kind == PropKind.BOX }
+                p.points = 5000; stand(w, b, 1.6f); run(w, 0.1f)
+                w.update(dt, FpsInput(yaw = p.yaw, use = true)); run(w, FpsWorld.ROLL_TIME + 0.5f)
+                stand(w, b, 3.6f)
+            }
+            "f_power" -> {
+                w.map.doors.forEach { it.open = true }; w.zoneOpen.fill(true)
+                val pw = w.map.props.first { it.kind == PropKind.POWER }
+                stand(w, pw, 1.5f); w.update(dt, FpsInput(yaw = p.yaw, use = true)); run(w, 0.2f)
+                p.x = w.map.centre(5); p.y = w.map.centre(5); face(w, w.map.centre(2), w.map.centre(2))
+            }
+            "g_forge" -> {
+                w.map.doors.forEach { it.open = true }; w.zoneOpen.fill(true)
+                p.points = 20000
+                stand(w, w.map.props.first { it.kind == PropKind.POWER }, 1.5f); w.update(dt, FpsInput(yaw = p.yaw, use = true)); run(w, 0.1f)
+                stand(w, w.map.props.first { it.gun == FpsGuns.RANGER }, 1.7f); w.update(dt, FpsInput(yaw = p.yaw, use = true)); run(w, 0.1f)
+                val f = w.map.props.first { it.kind == PropKind.FORGE }
+                stand(w, f, 1.7f); w.update(dt, FpsInput(yaw = p.yaw, use = true)); run(w, 0.6f)
+                stand(w, f, 3.2f)
+                p.perks += Perk.IRONHIDE; p.perks += Perk.QUICKHAND
+            }
+            "h_hurt" -> { run(w, 30f); p.invulnT = 0f; w.hurtPlayer(70f, p.x, p.y); w.zombies.firstOrNull { it.alive }?.let { face(w, it.x, it.y) } }
+            "i_over" -> { run(w, 5f); p.invulnT = 0f; w.hurtPlayer(500f, p.x, p.y) }
+        }
+        setScreen(FpsScreen(Characters.SNOOP, w))
+    }
+
+    override fun render() {
+        super.render()
+        frames++
+        if (frames == (if (names[idx] == "i_over") 110 else 14)) {
+            val w = Gdx.graphics.backBufferWidth; val h = Gdx.graphics.backBufferHeight
+            val px = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true)
+            for (i in 3 until px.size step 4) px[i] = 0xFF.toByte()
+            val pm = Pixmap(w, h, Pixmap.Format.RGBA8888); BufferUtils.copy(px, 0, pm.pixels, px.size)
+            PixmapIO.writePNG(Gdx.files.absolute("$outDir/${names[idx]}.png"), pm); pm.dispose()
+            println("SHOT ${names[idx]}")
+            screen.dispose(); next()
+        }
+    }
+}
+
+fun main(args: Array<String>) {
+    val cfg = Lwjgl3ApplicationConfiguration().apply { setTitle("shots"); setWindowedMode(args[1].toInt(), args[2].toInt()); useVsync(false); setForegroundFPS(30) }
+    Lwjgl3Application(FpsShotGame(args[0], args.getOrNull(3) == "touch"), cfg)
+}

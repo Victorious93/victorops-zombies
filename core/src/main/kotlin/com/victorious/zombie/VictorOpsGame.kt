@@ -26,7 +26,7 @@ class VictorOpsGame(private val entry: Entry = Entry.Menu) : Game() {
     override fun create() { setScreen(CharacterSelectScreen()) }
 
     /** [Game.dispose] only hides the screen; the game screen must also close its sockets (and free the host port). */
-    override fun dispose() { (screen as? GameScreen)?.dispose(); super.dispose() }
+    override fun dispose() { (screen as? GameScreen)?.dispose(); (screen as? FpsScreen)?.dispose(); super.dispose() }
 
     /** Called by [CharacterSelectScreen] once a survivor is picked. */
     internal fun onCharacterChosen(character: Character) {

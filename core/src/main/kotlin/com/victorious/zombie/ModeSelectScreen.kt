@@ -26,8 +26,11 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
     private val tmp = Vector3()
     @Volatile private var status = ""
     private var done = false // GL resources are disposed once we switch screens; never draw after that
-    private var royale = false // false = Zombie Survival, true = Blackout Royale
-    private val labels get() = if (royale)
+    /** 0 = Zombies 3D (default), 1 = Zombie Survival (2D), 2 = Blackout Royale. */
+    private var game = 0
+    private val royale get() = game == 2
+    private val fps get() = game == 0
+    private val labels get() = if (fps) listOf("1  PLAY  (solo, offline)") else if (royale)
         listOf("1  SOLO  (you + bots, offline)", "2  HOST  (Wi-Fi, up to 4 players + bots)", "3  JOIN  (Wi-Fi, enter host address)")
     else listOf("1  SOLO  (offline)", "2  HOST  (Wi-Fi, up to 4 players)", "3  JOIN  (Wi-Fi, enter host address)")
     private val gameBtn get() = if (royale) floatArrayOf(340f, 560f, 380f, 70f) else floatArrayOf(340f, 560f, 600f, 70f)
@@ -42,13 +45,13 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_1)) solo()
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_2)) hostGame()
         if (Gdx.input.isKeyJustPressed(Input.Keys.NUM_3)) joinGame()
-        if (Gdx.input.isKeyJustPressed(Input.Keys.G) || Gdx.input.isKeyJustPressed(Input.Keys.TAB)) royale = !royale
+        if (Gdx.input.isKeyJustPressed(Input.Keys.G) || Gdx.input.isKeyJustPressed(Input.Keys.TAB)) switchGame()
         if (royale && Gdx.input.isKeyJustPressed(Input.Keys.T)) BrPrefs.squadSize = BrPrefs.next(BrPrefs.squadSize)
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE) || Gdx.input.isKeyJustPressed(Input.Keys.BACKSPACE)) back()
         if (Gdx.input.justTouched()) {
             view.unproject(tmp.set(Gdx.input.x.toFloat(), Gdx.input.y.toFloat(), 0f))
             if (royale && tmp.x in squadBtn[0]..squadBtn[0] + squadBtn[2] && tmp.y in squadBtn[1]..squadBtn[1] + squadBtn[3]) BrPrefs.squadSize = BrPrefs.next(BrPrefs.squadSize)
-            else if (tmp.x in gameBtn[0]..gameBtn[0] + gameBtn[2] && tmp.y in gameBtn[1]..gameBtn[1] + gameBtn[3]) royale = !royale
+            else if (tmp.x in gameBtn[0]..gameBtn[0] + gameBtn[2] && tmp.y in gameBtn[1]..gameBtn[1] + gameBtn[3]) switchGame()
             for (i in labels.indices) { val b = btn(i); if (tmp.x in b[0]..b[0] + b[2] && tmp.y in b[1]..b[1] + b[3]) when (i) { 0 -> solo(); 1 -> hostGame(); else -> joinGame() } }
         }
         if (done) return
@@ -56,16 +59,17 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
         view.apply(); shapes.projectionMatrix = cam.combined; batch.projectionMatrix = cam.combined
         shapes.begin(ShapeRenderer.ShapeType.Filled)
         labels.indices.forEach { i -> val b = btn(i); shapes.color = Color(0.14f, 0.12f, 0.22f, 1f); shapes.rect(b[0], b[1], b[2], b[3]) }
-        shapes.color = if (royale) Color(0.45f, 0.1f, 0.2f, 1f) else Color(0.12f, 0.3f, 0.16f, 1f); shapes.rect(gameBtn[0], gameBtn[1], gameBtn[2], gameBtn[3])
+        shapes.color = if (fps) Color(0.5f, 0.06f, 0.06f, 1f) else if (royale) Color(0.45f, 0.1f, 0.2f, 1f) else Color(0.12f, 0.3f, 0.16f, 1f); shapes.rect(gameBtn[0], gameBtn[1], gameBtn[2], gameBtn[3])
         if (royale) { shapes.color = if (BrPrefs.squadSize > 1) Color(0.1f, 0.38f, 0.3f, 1f) else Color(0.2f, 0.2f, 0.26f, 1f); shapes.rect(squadBtn[0], squadBtn[1], squadBtn[2], squadBtn[3]) }
         shapes.end()
         batch.begin(); font.color = Color.WHITE
         font.data.setScale(2.2f); font.draw(batch, "${character.name} - how do you want to play?", 220f, H - 40f)
-        font.data.setScale(1.5f); font.draw(batch, if (royale) "BLACKOUT ROYALE  (switch)" else "GAME:  ZOMBIE SURVIVAL  (tap / G to switch)", gameBtn[0] + 24, gameBtn[1] + 45)
+        font.data.setScale(1.5f); font.draw(batch, if (fps) "GAME:  ZOMBIES 3D  (tap / G to switch)" else if (royale) "BLACKOUT ROYALE  (switch)" else "GAME:  ZOMBIE SURVIVAL 2D  (tap / G to switch)", gameBtn[0] + 24, gameBtn[1] + 45)
         if (royale) { font.data.setScale(1.3f); font.draw(batch, if (BrPrefs.squadSize > 1) "SQUADS OF ${BrPrefs.squadSize}" else "NO SQUADS", squadBtn[0] + 18, squadBtn[1] + 44); font.data.setScale(1.5f) }
         labels.forEachIndexed { i, t -> val b = btn(i); font.draw(batch, t, b[0] + 24, b[1] + 58) }
         font.data.setScale(1f)
         if (royale) font.draw(batch, "Squads: tap the green button (or press T) to cycle no squads / 2 / 3 / 4. Downed squad mates can be revived by holding USE next to them.", 120f, 140f)
+        if (fps) font.draw(batch, "First-person survival: board up windows, buy guns off the walls, open doors, find the power, survive the rounds.", 120f, 140f)
         font.draw(batch, "Solo needs no internet or Wi-Fi. Hosting and joining need both devices on the same network (no internet required).", 120f, 110f)
         if (status.isNotEmpty()) { font.color = Color.YELLOW; font.draw(batch, status, 120f, 80f) }
         font.color = Color.LIGHT_GRAY; font.draw(batch, "Esc / Backspace: change character", 120f, 50f)
@@ -74,7 +78,9 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
 
     private fun go(mode: Mode) { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(GameScreen(character, mode)); dispose() }
     private fun back() { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(CharacterSelectScreen()); dispose() }
-    private fun solo() = if (royale) goRoyale(Mode.Solo) else go(Mode.Solo)
+    private fun solo() = if (fps) goFps() else if (royale) goRoyale(Mode.Solo) else go(Mode.Solo)
+    private fun switchGame() { game = (game + 1) % 3; status = "" }
+    private fun goFps() { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(FpsScreen(character)); dispose() }
 
     private fun goRoyale(mode: Mode) { if (done) return; done = true; (Gdx.app.applicationListener as? VictorOpsGame)?.setScreen(BrScreen(character, mode)); dispose() }
 
@@ -86,6 +92,7 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
     }
 
     private fun hostGame() {
+        if (fps) { status = "Zombies 3D is solo for now: co-op is not built yet."; return }
         try {
             val session = if (royale) HostSession.createRoyale(character, autoStartS = 120f, squadSize = BrPrefs.squadSize) else HostSession.create(character)
             val server = TcpHost(TcpHost.DEFAULT_PORT) { session.attach(it) }
@@ -97,6 +104,7 @@ class ModeSelectScreen(private val character: Character) : ScreenAdapter() {
     }
 
     private fun joinGame() {
+        if (fps) { status = "Zombies 3D is solo for now: co-op is not built yet."; return }
         Gdx.input.getTextInput(object : Input.TextInputListener {
             override fun input(text: String) {
                 val host = text.trim().substringBefore(':'); val port = text.trim().substringAfter(':', "").toIntOrNull() ?: TcpHost.DEFAULT_PORT
