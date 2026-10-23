@@ -8,7 +8,8 @@ applicationId `com.victorious.zombie`, minSdk 24, target/compile 35, ARM only: a
 desktop dev harness only. `:core` holds all game code and the unit tests.
 
 Game modes (picked in `ModeSelectScreen`):
-- **Zombies 3D** (`core/.../fps/`, `FpsScreen`): first-person, round-based, Call-of-Duty-Zombies-style loop. Solo/offline. In progress.
+- **Zombies 3D** (`core/.../fps/`, `FpsScreen.kt`): the default. First-person, round-based zombie survival (windows, wall buys,
+  doors, box, power, perks, forge). Solo/offline. Design, numbers and what is unverified: `docs/ZOMBIES_3D.md`.
 - **Zombie Survival** (`sim/World.kt`, `GameScreen.kt`): top-down 2D round survival, Wi-Fi co-op.
 - **Blackout Royale** (`br/`, `BrScreen.kt`): top-down battle royale with bots, free-for-all or squads with revives.
   Design and measured numbers: `docs/BLACKOUT_ROYALE.md`.
@@ -28,6 +29,7 @@ A fresh container has JDK 21 only. One-time setup (JDK 17 + Android SDK) is in `
 
     gradle :core:test --console=plain                         # unit tests (~2.5 min, bot matches dominate)
     gradle :core:test --tests 'com.victorious.zombie.br.BrSquad*' --console=plain
+    gradle :core:test --tests 'com.victorious.zombie.fps.*' --console=plain
     gradle :lwjgl3:compileKotlin                              # desktop harness compiles
     export ANDROID_HOME=~/android-sdk && gradle :android:assembleDebug --console=plain
     # APK: android/build/outputs/apk/debug/android-debug.apk
@@ -41,7 +43,8 @@ A fresh container has JDK 21 only. One-time setup (JDK 17 + Android SDK) is in `
 ## Looking at real frames
 Xvfb + software GL works here. Recipes and launchers (`*.kt.txt`, copied in temporarily, deleted before committing) are in
 `tools/dev/`. Use `-Dzombie.touch=1` and a phone-like window (e.g. 1170x540) to see the touch HUD. Captures need alpha forced to 255.
-Touch input itself cannot be exercised on desktop.
+Touch input itself cannot be exercised on desktop. `tools/dev/FpsShot.kt.txt` stages Zombies 3D scenes the same way
+(the screen takes a pre-built `FpsWorld`).
 
 ## Conventions
 - Simulations are headless and testable: `BrWorld`, `World`, `FpsWorld` take inputs and `update(dt)`; screens only render and read input.

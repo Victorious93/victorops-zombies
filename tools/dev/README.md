@@ -65,6 +65,9 @@ Works in this container. Steps:
 
 4. Open the PNGs with the Read tool. Delete the launcher afterwards.
 
+`FpsShot.kt.txt` renders Zombies 3D: copy it to `lwjgl3/src/main/kotlin/com/victorious/zombie/desktop/FpsShot.kt` and run
+`com.victorious.zombie.desktop.FpsShotKt <outdir> <width> <height> [touch]` (add `-Dzombie.touch=1` for the phone HUD).
+
 `ShotLauncherSquads.kt.txt` is a variant with squad scenarios (it stages a revive in progress, the revive prompt, the viewer
 downed, an off-screen downed mate, enemy squads in view, and the result screen). Pass the window size as arguments 2 and 3
 (`1170 540` for a phone-like touch layout; the scenarios marked `touch` set `-Dzombie.touch=1`).
