@@ -1,0 +1,40 @@
+package com.victorious.zombie.br
+
+import kotlin.test.Test
+
+class MapProbe {
+    @Test fun flips() {
+        val hist = HashMap<String, Int>(); var samples = 0; var shown = 0
+        for (seed in 1L..6L) {
+            val w = BrWorld(seed, autoStartS = 0f, botSkill = BotSkill.NORMAL)
+            val prev = HashMap<Int, Pair<Float, Float>>(); val flips = HashMap<Int, Int>(); val branches = HashMap<Int, HashMap<String, Int>>()
+            var tick = 0
+            while (w.phase != Phase.ENDED && tick < 30 * 400) {
+                w.update(1 / 30f); tick++
+                if (w.phase != Phase.LIVE) continue
+                for (f in w.fighters.values) if (f.alive) {
+                    val len = Math.hypot(f.input.dx.toDouble(), f.input.dy.toDouble()).toFloat()
+                    if (len > 0.3f) {
+                        val d = f.input.dx / len to f.input.dy / len; val p = prev[f.id]
+                        if (p != null && d.first * p.first + d.second * p.second < -0.7f) {
+                            flips[f.id] = (flips[f.id] ?: 0) + 1
+                            val b = w.brainDebug(f.id).substringAfter("branch=").substringBefore(' ')
+                            branches.getOrPut(f.id) { HashMap() }.merge(b, 1, Int::plus)
+                        }
+                        prev[f.id] = d
+                    }
+                }
+                if (tick % 30 == 0) {
+                    for (f in w.fighters.values) if ((flips[f.id] ?: 0) >= 12) {
+                        samples++
+                        val top = branches[f.id]!!.maxByOrNull { it.value }!!.key
+                        hist.merge(top, 1, Int::plus)
+                        if (shown++ < 6) println("PROBE seed=$seed t=${w.matchTime.toInt()} ${f.name} flips=${flips[f.id]} branches=${branches[f.id]} ${w.brainDebug(f.id)} hp=${f.hp.toInt()} inZone=${w.inZone(f.x, f.y)} pos=(${f.x.toInt()},${f.y.toInt()})")
+                    }
+                    flips.clear(); branches.clear()
+                }
+            }
+        }
+        println("PROBE oscillation seconds by dominant branch: $hist (total $samples)")
+    }
+}

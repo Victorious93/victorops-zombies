@@ -1,0 +1,38 @@
+package com.victorious.zombie.br
+
+import kotlin.test.Test
+
+class BrProbe {
+    class Result(val seed: Long, val ended: Boolean, val time: Float, val winner: String, val maxKills: Int, val kills: Int, val zoneDeaths: Int, val horde: Int, val firstKillT: Float, val stuck: Int)
+
+    private fun play(seed: Long, skill: BotSkill, dt: Float = 1 / 30f): Result {
+        val w = BrWorld(seed, autoStartS = 0f, botSkill = skill)
+        var firstKill = -1f; var t = 0f; var lastAlive = BrConst.FIELD
+        val lastPos = HashMap<Int, Pair<Float, Float>>(); val still = HashMap<Int, Float>(); var stuckBots = 0
+        while (w.phase != Phase.ENDED && t < 900f) {
+            w.update(dt); t += dt
+            if (w.phase == Phase.LIVE) {
+                if (firstKill < 0 && w.aliveCount() < lastAlive && w.matchTime > 0) firstKill = w.matchTime
+                lastAlive = w.aliveCount()
+                if ((t * 30).toInt() % 90 == 0) for (f in w.fighters.values) if (f.alive) {
+                    val p = lastPos[f.id]; if (p != null && Geo.dist(p.first, p.second, f.x, f.y) < 5f && f.healKind == 0 && (Math.abs(f.input.dx) + Math.abs(f.input.dy)) > 0.3f) still[f.id] = (still[f.id] ?: 0f) + 3f else still[f.id] = 0f
+                    lastPos[f.id] = f.x to f.y
+                    if ((still[f.id] ?: 0f) >= 15f) { stuckBots++; still[f.id] = 0f
+                        if (stuckBots <= 10) println("PROBE STUCK seed=$seed t=${w.matchTime.toInt()} ${f.name} at (${f.x.toInt()},${f.y.toInt()}) hp=${f.hp.toInt()} sh=${f.shield.toInt()} med=${f.medkits} cell=${f.cells} inZone=${w.inZone(f.x, f.y)} reload=${f.reloading} rounds=${f.rounds} ${w.brainDebug(f.id)} input=(${f.input.dx},${f.input.dy}) fire=${f.input.fire} heal=${f.input.heal}") }
+                }
+            }
+        }
+        val fs = w.fighters.values
+        return Result(seed, w.phase == Phase.ENDED, w.matchTime, w.fighters[w.winnerId]?.name ?: "-", fs.maxOf { it.kills }, fs.sumOf { it.kills },
+            fs.count { !it.alive && it.killerId == -1 }, fs.count { !it.alive && it.killerId == -2 }, firstKill, stuckBots)
+    }
+
+    @Test fun balance() {
+        for (skill in BotSkill.values()) {
+            val rs = (1L..16L).map { play(it, skill) }
+            fun avg(f: (Result) -> Float) = rs.map(f).average()
+            println("PROBE $skill: ended=${rs.count { it.ended }}/16 avgTime=${"%.0f".format(avg { it.time })}s min=${rs.minOf { it.time }.toInt()} max=${rs.maxOf { it.time }.toInt()} " +
+                "avgKills=${"%.1f".format(avg { it.kills.toFloat() })} maxKillsAvg=${"%.1f".format(avg { it.maxKills.toFloat() })} zoneDeaths=${"%.1f".format(avg { it.zoneDeaths.toFloat() })} horde=${"%.1f".format(avg { it.horde.toFloat() })} firstKill=${"%.0f".format(avg { it.firstKillT })}s stuckEvents=${rs.sumOf { it.stuck }}")
+        }
+    }
+}

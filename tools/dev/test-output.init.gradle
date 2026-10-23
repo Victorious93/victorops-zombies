@@ -1,0 +1,6 @@
+allprojects {
+    tasks.withType(Test).configureEach {
+        maxHeapSize = '96m'
+        testLogging { showStandardStreams = true; events 'passed','failed'; exceptionFormat = 'short' }
+    }
+}

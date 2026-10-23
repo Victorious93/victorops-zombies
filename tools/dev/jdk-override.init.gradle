@@ -1,0 +1,7 @@
+allprojects {
+    afterEvaluate {
+        if (pluginManager.hasPlugin("org.jetbrains.kotlin.jvm")) {
+            extensions.getByName("kotlin").jvmToolchain(21)
+        }
+    }
+}

@@ -1,0 +1,77 @@
+package com.victorious.zombie.desktop
+
+import com.badlogic.gdx.Game
+import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
+import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration
+import com.badlogic.gdx.graphics.Pixmap
+import com.badlogic.gdx.graphics.PixmapIO
+import com.badlogic.gdx.utils.BufferUtils
+import com.badlogic.gdx.utils.ScreenUtils
+import com.victorious.zombie.BrScreen
+import com.victorious.zombie.CharacterSelectScreen
+import com.victorious.zombie.ModeSelectScreen
+import com.victorious.zombie.Mode
+import com.victorious.zombie.br.BrWorld
+import com.victorious.zombie.br.Phase
+import com.victorious.zombie.logic.Characters
+import com.victorious.zombie.net.HostSession
+
+/** Throwaway: renders Blackout Royale at several points of a match and writes PNGs. Not part of the repo. */
+class ShotGame(private val outDir: String) : Game() {
+    private class Scenario(val name: String, val advance: Int, val autoStart: Float, val menu: Int = -1)
+    private val scenarios = listOf(
+        Scenario("0a_charselect", 0, 0f, menu = 2), Scenario("0b_menu_zombie", 0, 0f, menu = 0), Scenario("0c_menu_royale", 0, 0f, menu = 1), Scenario("1_lobby", 0, 60f), Scenario("2_deploy", 30 * 2, 0f), Scenario("3_early", 30 * 22, 0f),
+        Scenario("4_mid_zone", 30 * 75, 0f), Scenario("5_late", 30 * 150, 0f),
+    )
+    private var idx = -1; private var frames = 0
+
+    override fun create() { next() }
+
+    private fun next() {
+        idx++
+        if (idx >= scenarios.size) { Gdx.app.exit(); return }
+        val sc = scenarios[idx]
+        if (sc.menu >= 0) {
+            frames = 0
+            if (sc.menu == 2) { setScreen(CharacterSelectScreen()); return }
+            val ms = ModeSelectScreen(Characters.SNOOP)
+            if (sc.menu == 1) ModeSelectScreen::class.java.getDeclaredField("royale").apply { isAccessible = true }.setBoolean(ms, true)
+            setScreen(ms); return
+        }
+        val session = HostSession.createRoyale(Characters.SNOOP, autoStartS = sc.autoStart)
+        val w = session.sim as BrWorld
+        repeat(sc.advance) { w.update(1 / 30f); w.fighters[0]?.protectedT = 1e9f }
+        // put the human next to the busiest part of the map so the shot shows something
+        val me = w.fighters.getValue(0)
+        if (w.phase == Phase.LIVE) {
+            val others = w.fighters.values.filter { it.alive && it.bot }
+            val pair = others.flatMap { a -> others.filter { it.id > a.id }.map { b -> a to b } }.minByOrNull { (a, b) -> Math.hypot((a.x - b.x).toDouble(), (a.y - b.y).toDouble()) }
+            if (pair != null) { me.x = (pair.first.x + pair.second.x) / 2 + 160f; me.y = (pair.first.y + pair.second.y) / 2 + 60f }
+        }
+        frames = 0
+        setScreen(BrScreen(Characters.SNOOP, Mode.Host(session)))
+    }
+
+    override fun render() {
+        super.render()
+        frames++
+        if (frames == 12) {
+            val w = Gdx.graphics.backBufferWidth; val h = Gdx.graphics.backBufferHeight
+            val pixels = ScreenUtils.getFrameBufferPixels(0, 0, w, h, true)
+            for (i in 3 until pixels.size step 4) pixels[i] = 0xFF.toByte() // a window ignores framebuffer alpha; make the PNG opaque so it looks like the screen
+            val pm = Pixmap(w, h, Pixmap.Format.RGBA8888)
+            BufferUtils.copy(pixels, 0, pm.pixels, pixels.size)
+            PixmapIO.writePNG(Gdx.files.absolute("$outDir/${scenarios[idx].name}.png"), pm)
+            pm.dispose()
+            println("SHOT wrote ${scenarios[idx].name} ${w}x$h")
+            screen.dispose()
+            next()
+        }
+    }
+}
+
+fun main(args: Array<String>) {
+    val cfg = Lwjgl3ApplicationConfiguration().apply { setTitle("shots"); setWindowedMode(1280, 720); useVsync(false); setForegroundFPS(60) }
+    Lwjgl3Application(ShotGame(args[0]), cfg)
+}

@@ -1,0 +1,7 @@
+allprojects {
+    afterEvaluate {
+        if (path == ':lwjgl3') {
+            tasks.register('printCp') { doLast { println 'CPLINE=' + project.sourceSets.main.runtimeClasspath.asPath } }
+        }
+    }
+}
