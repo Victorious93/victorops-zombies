@@ -39,6 +39,14 @@ var crate_it: Dictionary
 var grenades: Array = []
 var tint := 0.0
 var paused := false
+var power := PowerUps.new()
+var drops: Array = []        ## power-up pickups on the floor
+var god_mode := false        ## screenshots only
+var forge_busy := 0.0
+var groan_t := 6.0
+var round_times := {}        ## round -> seconds (sim report)
+var round_clock := 0.0
+var downs := 0
 const SETTINGS_PATH := "user://settings.cfg"
 const BASE_FOG := Color(0.06, 0.07, 0.09)
 
@@ -136,6 +144,17 @@ func _process(dt: float) -> void:
 	_update_rounds(dt)
 	_update_pickups(dt)
 	_update_grenades(dt)
+	_update_drops(dt)
+	for id in power.update(dt):
+		hud.info("%s wore off" % PowerUps.ALL[id].name); sfx.play("pu_end", -6)
+	player.economy.mult = 2 if power.active("doublepay") else 1
+	round_clock += dt
+	# distant groans from outside the walls
+	groan_t -= dt
+	if groan_t <= 0.0:
+		groan_t = rng.randf_range(7.0, 16.0)
+		var a := rng.randf() * TAU
+		sfx.play_at("groan%d" % (rng.randi() % 3 + 1), player.global_position + Vector3(cos(a), 0.5, sin(a)) * 22.0, -10, rng.randf_range(0.7, 0.85))
 	tint = move_toward(tint, 0.0, dt * 0.35)
 	env.adjustment_saturation = 1.0 - tint * 0.3
 	env.fog_light_color = BASE_FOG.lerp(Color(0.35, 0.03, 0.02), tint) if not Rounds.is_special(round) else Color(0.2, 0.03, 0.02)
@@ -168,6 +187,8 @@ func _update_rounds(dt: float) -> void:
 		intermission -= dt
 		if intermission <= 0.0:
 			round += 1
+			round_clock = 0.0
+			player.economy.on_round_start(); power.on_round_start()
 			to_spawn = Rounds.zombie_count(round)
 			spawn_cd = 1.0
 			if Rounds.is_special(round):
@@ -176,7 +197,7 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d" % round, 3.0)
 			sfx.play("sting", -1)
 			tint = 1.0
-			hud.round_flash()
+			hud.round_flash(); hud.tally_flip(round)
 			if round > 1:
 				player.equipment.on_round_start()
 	elif to_spawn > 0:
@@ -185,12 +206,24 @@ func _update_rounds(dt: float) -> void:
 			spawn_zombie()
 			to_spawn -= 1
 			spawn_cd = Rounds.spawn_interval(round)
-	elif zombies.is_empty():
-		intermission = 8.0
+	elif zombies.size() == 1 and zombies[0].state != Zombie.State.DEAD and not zombies[0].crawler:
+		zombies[0].make_crawler()   ## the last one of the round drags itself along: time to train/rebuy
+	if to_spawn == 0 and zombies.is_empty() and intermission <= 0.0:
+		round_times[round] = round_clock
+		intermission = Rounds.INTERMISSION
 		hud.banner("Round %d survived" % round, 3.0)
 		sfx.play("round_end", -2)
 		tint = 0.6
 		player.health = player.max_health
+
+## Window a stuck zombie should re-enter from: the one nearest the player.
+func respawn_window_for(z: Zombie) -> WindowBarricade:
+	var best: WindowBarricade = z.window; var bd := 1e9
+	for id in facility.active_windows():
+		var w: WindowBarricade = map.windows[id]
+		var d := w.inside_point.distance_to(player.global_position)
+		if d < bd: bd = d; best = w
+	return best
 
 func spawn_zombie(win_id := "") -> Zombie:
 	var ids := facility.active_windows()
@@ -239,6 +272,9 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			_pay(p, r.position + Vector3.UP * 0.3, before)
 			hud.hitmarker(killed, head)
 			sfx.play("hitmarker", -10, 1.25 if head else 1.0)
+			sfx.play_at("thwack", r.position, -6, randf_range(0.9, 1.1))
+			if head: sfx.play("headshot_pop", -4 if killed else -9, randf_range(0.95, 1.08))
+			if killed: sfx.play("kill_confirm", -10)
 			if killed: sfx.play("gore", -8, randf_range(0.9, 1.1))
 			fx.blood_hit(r.position, dir)
 			if w.splash > 0.0: _splash(p, r.position, w, z)
@@ -275,8 +311,8 @@ func _shoot_fuse(p: Player, col: Object) -> void:
 			var up := p.weapon().upgraded_version()
 			if up: p.loadout.replace_current(up); p.apply_reload_perk(); hud.info("Free overcharge: %s" % up.display_name())
 
-func melee(p: Player) -> void:
-	var best: Zombie = null; var bd := Equipment.KNIFE_RANGE_M
+func knife_target(p: Player, reach: float) -> Zombie:
+	var best: Zombie = null; var bd := reach
 	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
 	for z in zombies:
 		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
@@ -284,11 +320,16 @@ func melee(p: Player) -> void:
 		var d := off.length()
 		if d < bd and (d < 0.6 or fwd.dot(off / d) > 0.5):
 			bd = d; best = z
+	return best
+
+func melee(p: Player) -> void:
+	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
+	var best := knife_target(p, Equipment.KNIFE_RANGE_M + 0.4)
 	if best == null: return
 	var before := p.economy.points
 	p.economy.on_hit()
 	var was_alive := best.state != Zombie.State.DEAD
-	best.take_damage(Equipment.KNIFE_DAMAGE, false, p, "body", fwd * 3.0)
+	best.take_damage(Equipment.KNIFE_DAMAGE, false, p, "body", fwd * 3.0, true)
 	_pay(p, best.global_position + Vector3.UP * 1.6, before)
 	hud.hitmarker(was_alive and best.state == Zombie.State.DEAD)
 	sfx.play("knife_hit", -2, randf_range(0.9, 1.1))
@@ -362,12 +403,14 @@ func _tracer(a: Vector3, b: Vector3, w: WeaponDef) -> void:
 	add_child(mi)
 	get_tree().create_timer(0.04).timeout.connect(mi.queue_free)
 
-func on_zombie_killed(z: Zombie, p: Player, headshot: bool) -> void:
+func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> void:
 	zombies.erase(z)
 	kills += 1
+	var pu := power.roll(rng)
+	if pu != "" and z.window and not _outside_map(z): _spawn_drop(pu, z.global_position)
 	if p:
 		var before := p.economy.points
-		p.economy.on_kill(headshot)
+		p.economy.on_kill(headshot, knife)
 		_pay(p, z.global_position + Vector3.UP * 2.0, before)
 		hud.kill_feed(headshot)
 	if rng.randf() < ArmorState.DROP_CHANCE:
@@ -393,7 +436,73 @@ func _update_pickups(dt: float) -> void:
 			hud.info("+%d armor" % ArmorState.PACKS.light.armor); sfx.play("buy", -6)
 			n.queue_free(); pickups.erase(pk)
 
+func _outside_map(z: Zombie) -> bool:
+	return z.state == Zombie.State.RISE or z.state == Zombie.State.TO_WINDOW or z.state == Zombie.State.TEAR
+
+# ---------------------------------------------------------------- power-ups
+func _spawn_drop(id: String, at: Vector3) -> void:
+	var d: Dictionary = PowerUps.ALL[id]
+	var root := Node3D.new(); add_child(root); root.global_position = at + Vector3.UP * 0.9
+	var mi := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.22; tm.outer_radius = 0.32
+	var m := StandardMaterial3D.new(); m.albedo_color = d.color; m.emission_enabled = true; m.emission = d.color
+	m.emission_energy_multiplier = 3.0; mi.mesh = tm; mi.material_override = m; mi.rotation.x = PI / 2; root.add_child(mi)
+	var icon := Label3D.new(); icon.text = PowerUps.ICONS[id]; icon.font_size = 96; icon.pixel_size = 0.004
+	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED; icon.modulate = d.color; icon.outline_size = 18; root.add_child(icon)
+	var gl := OmniLight3D.new(); gl.light_color = d.color; gl.light_energy = 1.5; gl.omni_range = 3.0; root.add_child(gl)
+	drops.append({node = root, id = id, life = PowerUps.PICKUP_LIFE})
+	sfx.play_at("pu_spawn", root.global_position, -2)
+
+func _update_drops(dt: float) -> void:
+	for d in drops.duplicate():
+		d.life -= dt
+		var n: Node3D = d.node
+		n.rotation.y += dt * 2.5
+		n.position.y += sin(Time.get_ticks_msec() * 0.004) * dt * 0.15
+		n.visible = d.life > 6.0 or fmod(d.life, 0.4) > 0.15   # blink before it vanishes
+		if d.life <= 0.0: n.queue_free(); drops.erase(d); continue
+		var off := n.global_position - player.global_position; off.y = 0
+		if off.length() < 1.2 and not player.is_downed:
+			n.queue_free(); drops.erase(d); collect_power(d.id)
+
+func collect_power(id: String) -> void:
+	var d: Dictionary = PowerUps.ALL[id]
+	power.activate(id)
+	hud.banner(d.name, 2.5); hud.info(d.desc)
+	sfx.play("pu_" + id, 2)
+	tint = maxf(tint, 0.3)
+	match id:
+		"restock":
+			for s in player.loadout.slots: s.refill()
+			player.equipment.grenades = Equipment.GRENADE_MAX
+		"blackout":
+			for z in zombies.duplicate():
+				if is_instance_valid(z) and z.state != Zombie.State.DEAD:
+					z.take_damage(z.hp + 1, false, null, "body", Vector3.UP * 3.0)
+			player.economy.earn(PowerUps.BLACKOUT_POINTS)
+			player.add_trauma(0.6); fx.explosion(player.global_position + Vector3.UP * 3.0, 2.0)
+		"handyman":
+			for w in map.windows.values(): w.bar.repair_all(); w.refresh()
+			player.economy.earn(PowerUps.HANDYMAN_POINTS)
+			sfx.play("plank_place")
+
+# ---------------------------------------------------------------- last stand
 func on_player_downed(p: Player) -> void:
+	downs += 1
+	sfx.play("downed", 0)
+	tint = 1.0
+	if p.last_stand.will_revive:
+		hud.banner("DOWN · Lazarus Fizz kicking in", 3.0)
+	else:
+		hud.banner("LAST STAND · bleeding out", 3.0)
+
+func on_player_revived(p: Player) -> void:
+	hud.banner("Back on your feet", 2.0); sfx.play("perk", -4)
+	# clear space so you're not swarmed the instant you rise
+	for z in zombies:
+		if is_instance_valid(z) and z.global_position.distance_to(p.global_position) < 3.0:
+			z.push((z.global_position - p.global_position).normalized() * 12.0)
+
+func on_player_bled_out(p: Player) -> void:
 	over = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	hud.banner("", 0)
@@ -435,7 +544,8 @@ func _deny(msg: String) -> void:
 func repair_window(p: Player, w: WindowBarricade) -> void:
 	var n := w.bar.repair_planks(p.cdef.repair_planks_per_use)
 	if n > 0:
-		p.economy.on_repair(n, p.cdef.repair_points_mult)
+		if p.economy.on_repair(n, p.cdef.repair_points_mult) == 0 and p.economy.repair_earned >= Economy.REPAIR_CAP_PER_ROUND:
+			hud.info("Repair points maxed this round")
 		w.refresh(); sfx.play_at("plank_place", w.center(), -2)
 
 func buy_door(p: Player, id: String) -> void:
@@ -457,7 +567,8 @@ func throw_power(lever: Node3D) -> void:
 func perk_prompt(p: Player, id: String) -> String:
 	var d: Dictionary = Perks.ALL[id]
 	if not facility.power_on: return "%s: power required" % d.name
-	if p.perks.has(id): return ""
+	if p.perks.get(id, false) == true: return ""
+	if id == "lazarus" and int(p.perks.get("_lazarus_buys", 0)) >= Perks.LAZARUS_MAX: return "%s: sold out" % d.name
 	return "%s (%s): %d" % [d.name, d.desc, d.cost]
 
 func buy_perk(p: Player, id: String) -> void:
@@ -469,6 +580,7 @@ func buy_perk(p: Player, id: String) -> void:
 	hud.info("%s active" % Perks.ALL[id].name)
 
 func forge_prompt(p: Player) -> String:
+	if forge_busy > 0.0: return ""
 	if not facility.power_on: return "%s: power required" % OverchargeForge.NAME
 	var c := forge.cost_for(p.weapon())
 	if c < 0: return "%s: weapon maxed" % OverchargeForge.NAME
@@ -476,16 +588,28 @@ func forge_prompt(p: Player) -> String:
 
 func use_forge(p: Player) -> void:
 	if not facility.power_on: _deny("Power required"); return
+	if forge_busy > 0.0: return
+	var slot := p.loadout.current
 	var up := forge.upgrade(p.weapon(), p.economy)
 	if up == null:
 		_deny("Already maxed" if p.weapon().is_maxed() else "Not enough points"); return
-	p.loadout.replace_current(up); p.apply_reload_perk()
-	sfx.play("forge"); hud.info("Upgraded: %s" % up.display_name())
+	# the forge swallows the gun for ~5 s, then hands back the overcharged version
+	forge_busy = OverchargeForge.FORGE_TIME
+	var held: Ammo = p.loadout.slots[slot]
+	held.reload_left = OverchargeForge.FORGE_TIME   # can't fire it while it's in the machine
+	sfx.play("forge"); hud.info("%s working..." % OverchargeForge.NAME)
+	map.forge_working(OverchargeForge.FORGE_TIME)
+	var tw := create_tween(); tw.tween_property(self, "forge_busy", 0.0, OverchargeForge.FORGE_TIME)
+	tw.tween_callback(func():
+		if p.loadout.slots.size() > slot and p.loadout.slots[slot] == held: held.swap(up)
+		else: p.loadout.give(up)
+		p.apply_reload_perk()
+		sfx.play("forge_done", 0); hud.banner(up.display_name(), 2.5))
 
 func crate_prompt(p: Player) -> String:
 	match crate_node.state:
 		CrateNode.State.ROLLING: return ""
-		CrateNode.State.READY: return "Take %s" % Weapons.make(crate_node.result).name
+		CrateNode.State.READY: return "Take %s (%ds)" % [Weapons.make(crate_node.result).name, ceili(crate_node.t)]
 	return "Mystery Crate: %d" % crate.cost
 
 func use_crate(p: Player) -> void:
@@ -501,11 +625,19 @@ func use_crate(p: Player) -> void:
 			hud.info("Got %s!" % w.name); sfx.play("buy", -6)
 
 func wall_prompt(p: Player, id: String) -> String:
-	if p.loadout.has(id) >= 0: return ""
+	var i := p.loadout.has(id)
+	if i >= 0:
+		if p.loadout.slots[i].is_full(): return ""
+		return "%s ammo: %d" % [p.loadout.slots[i].weapon.display_name(), Weapons.ammo_price(id) * (5 if p.loadout.slots[i].weapon.tier > 0 else 1)]
 	return "Buy %s: %d" % [Weapons.make(id).name, Weapons.WALL_PRICES[id]]
 
 func buy_wall(p: Player, id: String) -> void:
-	if p.loadout.has(id) >= 0: return
+	var i := p.loadout.has(id)
+	if i >= 0:
+		var a: Ammo = p.loadout.slots[i]
+		if a.is_full(): return
+		if not p.economy.spend(Weapons.ammo_price(id) * (5 if a.weapon.tier > 0 else 1)): _deny("Not enough points"); return
+		a.refill(); sfx.play("buy", -4); hud.info("Ammo refilled"); return
 	if not p.economy.spend(Weapons.WALL_PRICES[id]): _deny("Not enough points"); return
 	p.loadout.give(Weapons.make(id)); p.apply_reload_perk()
 	sfx.play("buy", -4); hud.info("Bought %s" % Weapons.make(id).name)

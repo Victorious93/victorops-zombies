@@ -3,7 +3,7 @@ extends GutTest
 
 func test_round1_baseline():
 	assert_eq(Rounds.zombie_count(1), 6)
-	assert_eq(Rounds.zombie_health(1), 100)
+	assert_eq(Rounds.zombie_health(1), 150)
 
 func test_count_monotonic_on_normal_rounds():
 	var prev := 0
@@ -16,8 +16,8 @@ func test_count_capped():
 	assert_eq(Rounds.zombie_count(501), 120)
 
 func test_health_curve():
-	assert_eq(Rounds.zombie_health(9), 500)
-	assert_eq(Rounds.zombie_health(10), 550)
+	assert_eq(Rounds.zombie_health(9), 950)
+	assert_eq(Rounds.zombie_health(10), 1045)
 	assert_gt(Rounds.zombie_health(20), Rounds.zombie_health(19))
 
 func test_speed_and_spawn_caps():
@@ -56,7 +56,7 @@ func test_perk_unaffordable():
 	assert_false(owned.has("quickhand")); assert_eq(e.points, 100)
 
 func test_three_original_perks():
-	assert_eq(Perks.ALL.size(), 3)
+	assert_eq(Perks.ALL.size(), 4)
 	assert_eq(Perks.ALL.ironhide.name, "Iron Hide Tonic")
 
 func test_crate_probabilities():
@@ -100,14 +100,14 @@ func test_barricade_multi_repair():
 func test_weapon_tiers():
 	var w := Weapons.make("sidearm")
 	assert_eq(w.display_name(), "Volt Sidearm")
-	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Sidearm Mk.2"); assert_eq(w.damage, 60); assert_false(w.is_maxed())
-	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Sidearm Mk.3"); assert_eq(w.damage, 90); assert_true(w.is_maxed())
+	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Tempest"); assert_eq(w.damage, 160); assert_false(w.is_maxed())
+	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Tempest Mk.III"); assert_eq(w.damage, 240); assert_true(w.is_maxed())
 	assert_same(w.upgraded_version(), w)
 
 func test_upgrade_details():
 	var a := Weapons.at("smg", 0); var b := Weapons.at("smg", 1); var c := Weapons.at("smg", 2)
 	assert_true(a.fire_interval > b.fire_interval and b.fire_interval > c.fire_interval)
-	assert_eq(Weapons.at("scatter", 2).pellets, 9)
+	assert_eq(Weapons.at("scatter", 2).pellets, 10)
 	assert_eq(Weapons.at("cannon", 2).pierce, 3)
 	assert_eq(Weapons.at("rifle", 1).pierce, 0); assert_eq(Weapons.at("rifle", 2).pierce, 1)
 	assert_gt(Weapons.at("nova", 1).splash, Weapons.make("nova").splash)
@@ -168,13 +168,13 @@ func test_ammo_cycle():
 
 func test_ammo_swap_and_manual_reload():
 	var a := Ammo.new(Weapons.make("rifle")); a.fire()
-	a.swap(Weapons.make("nova")); assert_eq(a.rounds, 4); assert_true(a.can_fire())
+	a.swap(Weapons.make("nova")); assert_eq(a.rounds, 6); assert_true(a.can_fire())
 	assert_false(a.reload())
 	a.fire(); assert_true(a.reload()); assert_false(a.can_fire())
 
 func test_quickhand_halves_reload():
 	var a := Ammo.new(Weapons.make("sidearm")); a.reload_mult = 0.5
-	a.fire(); a.reload(); assert_almost_eq(a.reload_left, 0.6, 1e-5)
+	a.fire(); a.reload(); assert_almost_eq(a.reload_left, 0.65, 1e-5)
 
 func test_low_health_trigger():
 	var t := LowHealthTrigger.new()

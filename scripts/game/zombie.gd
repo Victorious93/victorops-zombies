@@ -40,8 +40,10 @@ var eye_light: OmniLight3D
 func setup(p_game, p_window: WindowBarricade, round: int) -> void:
 	game = p_game; window = p_window
 	max_hp = Rounds.zombie_health(round); hp = max_hp
-	speed = Rounds.zombie_speed(round) * randf_range(0.9, 1.15)
-	runner = speed > 1.9
+	# shamblers until round 5, then a growing share of sprinters (Frenzy rounds: everyone runs)
+	var rc := 1.0 if Rounds.is_special(round) else Rounds.runner_chance(round)
+	runner = randf() < rc
+	speed = (Rounds.RUN_SPEED if runner else Rounds.WALK_SPEED) * randf_range(0.9, 1.12)
 	variant = "zombie_b" if randf() < 0.35 else "zombie_a"
 
 func _ready() -> void:
@@ -90,11 +92,21 @@ func _locomotion() -> void:
 	else: _play("Walk", 0.25, clampf(speed / 1.1, 0.7, 1.6))
 
 ## part: "head", "leg" or "body" (from the hit height).
-func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vector3.ZERO) -> void:
+const SWIPE_DAMAGE := 45.0     ## 100 HP player: down on the third hit (2 with chip damage)
+const CRAWLER_DAMAGE := 30.0
+const SWIPE_REACH := 1.7        ## reach-through-the-window range
+var knifed := false
+var stuck_t := 0.0
+var last_pos := Vector3.ZERO
+var swipe_cd := 1.0
+
+func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vector3.ZERO, knife := false) -> void:
 	if state == State.DEAD: return
+	if game and game.power.active("onetouch"): dmg = maxi(dmg, hp)
+	knifed = knife
 	hp -= dmg
 	flash_t = 0.07
-	if part == "leg" and not crawler:
+	if part == "legs" and not crawler:
 		leg_damage += dmg
 		if leg_damage > max_hp * 0.45 and anims.has("Crawl") and hp > 0 and randf() < 0.6:
 			_become_crawler()
@@ -103,8 +115,11 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	elif dmg > max_hp * 0.2 and state == State.CHASE and cur_anim != "Punch" and not crawler:
 		_play("HitReact", 0.05); cur_anim = "HitReact"; attack_anim_t = 0.35
 
+func make_crawler() -> void:
+	if not crawler and state != State.DEAD and anims.has("Crawl"): _become_crawler()
+
 func _become_crawler() -> void:
-	crawler = true; speed *= 0.5
+	crawler = true; runner = false; speed *= 0.5
 	(shape.shape as CapsuleShape3D).height = 0.9; shape.position.y = 0.45
 	if game: game.fx.gibs(global_position + Vector3.UP * 0.4, 3, self)
 
@@ -118,7 +133,7 @@ func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
 		var gore := headshot or dmg >= max_hp * 2 or force.length() > 4.0
 		game.fx.blood_pool(global_position)
 		if gore: game.fx.gibs(global_position + Vector3.UP * (1.5 if headshot else 1.0), 6 if headshot else 9, self, force)
-		game.on_zombie_killed(self, player, headshot)
+		game.on_zombie_killed(self, player, headshot, knifed)
 		if eye_light: eye_light.queue_free()
 
 func push(v: Vector3) -> void:
@@ -153,6 +168,14 @@ func _physics_process(dt: float) -> void:
 				_play("Run" if anims.has("Run") else "Walk", 0.1)
 			else:
 				_play("Punch", 0.2, 0.8)
+				# reach through the gap and swipe anyone standing at the window
+				swipe_cd -= dt
+				var pl = game.player
+				if pl and swipe_cd <= 0.0 and window.bar.planks() < window.bar.max_planks and not pl.is_downed \
+						and _flat_dist(pl.global_position) < SWIPE_REACH + 0.6 and pl.global_position.distance_to(window.inside_point) < SWIPE_REACH:
+					swipe_cd = 1.3
+					pl.take_damage(SWIPE_DAMAGE, global_position)
+					game.sfx.play_at("zombie_attack", window.center(), -2)
 				t -= dt
 				if t <= 0.0:
 					t = randf_range(0.9, 1.4)
@@ -178,7 +201,7 @@ func _physics_process(dt: float) -> void:
 				if attack_cd <= 0.0:
 					attack_cd = 1.0
 					cur_anim = ""; _play("Punch", 0.1, 1.3); attack_anim_t = 0.6
-					pl.take_damage(20.0 if crawler else 30.0, global_position)
+					pl.take_damage(CRAWLER_DAMAGE if crawler else SWIPE_DAMAGE, global_position)
 					game.sfx.play_at("zombie_attack", global_position + Vector3.UP, -2)
 			else:
 				attack_cd = minf(attack_cd, 0.4)
@@ -186,10 +209,27 @@ func _physics_process(dt: float) -> void:
 				if repath <= 0.0:
 					repath = 0.3; agent.target_position = pl.global_position
 				_nav_move(pl.global_position, dt, false)
+				_unstick(dt, pl)
 	groan_cd -= dt
 	if groan_cd <= 0.0:
 		groan_cd = randf_range(4, 10)
 		game.sfx.play_at("groan%d" % (randi() % 3 + 1), global_position + Vector3.UP * 1.5, -4, randf_range(0.85, 1.15) * (0.85 if variant == "zombie_b" else 1.0))
+
+## Re-path when blocked: sidestep to a random point, and if still stuck far away, re-enter from a window.
+func _unstick(dt: float, pl) -> void:
+	if global_position.distance_to(last_pos) > speed * dt * 0.2:
+		stuck_t = maxf(0.0, stuck_t - dt * 2.0)
+	else:
+		stuck_t += dt
+	last_pos = global_position
+	if stuck_t > 1.5 and stuck_t < 1.5 + dt * 1.01:
+		agent.target_position = global_position + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3))
+		repath = 0.8
+	if stuck_t > 7.0 and _flat_dist(pl.global_position) > 10.0:
+		stuck_t = 0.0
+		window = game.respawn_window_for(self)
+		global_position = window.spawn_point
+		state = State.TO_WINDOW; agent.target_position = window.outside_point
 
 func _flat_dist(p: Vector3) -> float:
 	return Vector2(p.x - global_position.x, p.z - global_position.z).length()

@@ -20,6 +20,7 @@ var fuses := {}               # id -> [mesh material, light]
 var dust: Array = []
 var shadow_lights: Array = []
 var forge_rings: Array = []
+var forge_work := 0.0   ## seconds left on the current upgrade animation
 var neon: Array = []          # [material, base energy]
 var _t := 0.0
 
@@ -355,7 +356,7 @@ func _front(root: Node3D) -> Vector3:
 	return root.to_global(Vector3(0, 1.0, -1.0))
 
 func _place_machines() -> void:
-	var perk_spots := {"ironhide": [Vector3(-8.8, 0, -14), -PI / 2, "heart"], "quickhand": [Vector3(24.8, 0, 6), PI / 2, "circle"], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2, "bolt"]}
+	var perk_spots := {"ironhide": [Vector3(-8.8, 0, -14), -PI / 2, "heart"], "quickhand": [Vector3(24.8, 0, 6), PI / 2, "circle"], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2, "bolt"], "lazarus": [Vector3(3.5, 0, 9.1), 0.0, "heart"]}
 	for id in perk_spots:
 		var pd: Dictionary = Perks.ALL[id]
 		var m := _machine(perk_spots[id][0], perk_spots[id][1], pd.color, pd.name, perk_spots[id][2])
@@ -447,12 +448,18 @@ func fuse_lit(id: String) -> void:
 	m.emission = Color(0.4, 1.0, 0.9); m.emission_energy_multiplier = 4.0
 	fuses[id][1].light_energy = 2.0
 
+## 5-second upgrade show: rings spin up, core flares, sparks pour out.
+func forge_working(secs: float) -> void:
+	forge_work = secs
+
 func _process(dt: float) -> void:
 	_t += dt
+	forge_work = maxf(0.0, forge_work - dt)
 	var on: bool = game != null and game.facility.power_on
 	for i in forge_rings.size():
 		var r: Node3D = forge_rings[i]
-		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1)
+		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1) * (1.0 + 7.0 * sin(clampf(forge_work / OverchargeForge.FORGE_TIME, 0, 1) * PI))
+		r.scale = Vector3.ONE * (1.0 + (0.25 * sin(_t * 20.0) if forge_work > 0.0 else 0.0))
 		r.rotation.x += dt * spd; r.rotation.y += dt * spd * 0.7
 	for n in neon:
 		var m: StandardMaterial3D = n[0]

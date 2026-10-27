@@ -13,6 +13,7 @@ func _ready() -> void:
 		args[kv[0]] = kv[1] if kv.size() > 1 else "1"
 	show_menu()
 	if args.has("shots"): _shots(args["shots"])
+	elif args.has("sim"): _sim(int(args["sim"]))
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -130,7 +131,7 @@ func _shots(dir: String) -> void:
 	await _wait(30)
 	game.round = 3
 	var pl := game.player
-	pl.max_health = 1e9; pl.health = 1e9  # screenshot run only: keep the camera alive under slow software rendering
+	game.god_mode = true  # screenshot run only: keep the camera alive under slow software rendering
 	# 02: intake horde through the west window, hip-fire with blood
 	pl.global_position = Vector3(-4, 0.1, 2); pl.yaw = PI / 2 + 0.25; pl.pitch = -0.05
 	for id in ["w_west", "w_west", "w_south", "w_west"]: game.spawn_zombie(id)
@@ -172,4 +173,38 @@ func _shots(dir: String) -> void:
 	game.tint = 1.0; game.hud.round_flash(); game.hud.banner("Round 4", 3.0)
 	await _wait(8)
 	await _snap(dir, "06_explosion_round.png")
+	# 07: power-up drop + active timers on the HUD
+	for z in game.zombies.duplicate(): z.queue_free()
+	game.zombies.clear()
+	pl.global_position = Vector3(-1, 0.1, 4); pl.yaw = PI / 2; pl.pitch = -0.25
+	game._spawn_drop("onetouch", Vector3(-4, 0.4, 4))
+	game.collect_power("doublepay")
+	await _wait(60)
+	await _snap(dir, "07_powerup.png")
+	# 08: crate rolling / Phantom bust
+	pl.global_position = Vector3(12.5, 0.1, 4.5); pl.yaw = -0.9; pl.pitch = 0.08
+	game.crate_node.move_after = true; game.crate_node.start("nova"); game.crate_node.t = 0.05
+	pl.global_position = game.crate_node.global_position + Vector3(0, 0.1, 3.2); pl.yaw = 0.0; pl.pitch = 0.15
+	await _wait(14)
+	await _snap(dir, "08_crate.png")
+	# 09: last stand
+	game.god_mode = false
+	pl.global_position = Vector3(-1, 0.1, 4); pl.yaw = PI / 2; pl.pitch = 0.0
+	pl.health = 1.0; pl.take_damage(50.0)
+	await _wait(6)
+	await _snap(dir, "09_last_stand.png")
 	get_tree().quit()
+
+## Headless playtest: `godot --headless --fixed-fps 60 -- --sim=10` (bot plays rounds 1..N, prints a report).
+func _sim(n: int) -> void:
+	await _wait(5)
+	start_game()
+	await _wait(5)
+	if args.has("simround"):   # clip mode: jump in at a busier round
+		game.round = int(args["simround"]) - 1; game.intermission = 1.0
+		game.player.economy.points = 1500
+	var b := BotDriver.new(); b.game = game; b.max_rounds = n
+	game.add_child(b)
+	if args.has("simquit"):   # movie/clip mode: stop after N seconds of game time
+		await get_tree().create_timer(float(args["simquit"]), true, true).timeout
+		get_tree().quit()
