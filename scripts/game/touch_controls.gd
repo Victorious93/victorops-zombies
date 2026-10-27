@@ -31,8 +31,11 @@ func _layout() -> void:
 		"reload": [Vector2(s.x - 290 * u, s.y - 260 * u), 50 * u, "RLD"],
 		"use": [Vector2(s.x - 150 * u, s.y - 380 * u), 55 * u, "USE"],
 		"swap": [Vector2(s.x - 60 * u, s.y - 330 * u), 45 * u, "SWAP"],
-		"skill": [Vector2(s.x - 290 * u, s.y - 400 * u), 45 * u, "SKILL"],
-		"sprint": [Vector2(250 * u, s.y - 320 * u), 45 * u, "RUN"],
+		"skill": [Vector2(s.x - 300 * u, s.y - 390 * u), 45 * u, "SKILL"],
+		"knife": [Vector2(s.x - 400 * u, s.y - 300 * u), 42 * u, "KNIFE"],
+		"grenade": [Vector2(s.x - 60 * u, s.y - 450 * u), 42 * u, "NADE"],
+		"sprint": [Vector2(330 * u, s.y - 300 * u), 45 * u, "RUN"],
+		"pause": [Vector2(s.x / 2, 40 * u), 28 * u, "II"],
 	}
 	queue_redraw()
 
@@ -57,7 +60,8 @@ func _input(e: InputEvent) -> void:
 				match b:
 					"ads": ads = not ads
 					"sprint": sprint = not sprint
-					"reload", "swap", "skill": _pulses[b] = true
+					"reload", "swap", "skill", "knife", "grenade": _pulses[b] = true
+					"pause": _pulses[b] = true
 				if b == "fire": look_idx = e.index  # fire button also steers aim while held
 			elif e.position.x < size.x * 0.4 and stick_idx == -1:
 				stick_idx = e.index; stick_origin = e.position; stick_pos = e.position

@@ -65,15 +65,15 @@ jobs:
             { echo "VOZ_KEYSTORE_PASSWORD=$P"; echo "VOZ_KEY_ALIAS=ci"; echo "VOZ_KEY_PASSWORD=$P"; } >> "$GITHUB_ENV"
           fi
           echo "VOZ_KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
-      - name: Export debug APK
+      - name: Export release APK (optimized)
         run: |
           set -euo pipefail
           mkdir -p build
-          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$VOZ_KEYSTORE_PATH" GODOT_ANDROID_KEYSTORE_DEBUG_USER="$VOZ_KEY_ALIAS" GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="$VOZ_KEYSTORE_PASSWORD"
-          godot --headless --export-debug Android build/victorops-zombies-debug.apk
-          test -s build/victorops-zombies-debug.apk
+          export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$VOZ_KEYSTORE_PATH" GODOT_ANDROID_KEYSTORE_RELEASE_USER="$VOZ_KEY_ALIAS" GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$VOZ_KEYSTORE_PASSWORD"
+          godot --headless --export-release Android build/victorops-zombies.apk
+          test -s build/victorops-zombies.apk
       - name: Sign v2+v3 and verify
-        run: tools/sign_apk.sh build/victorops-zombies-debug.apk | tee verify.txt
+        run: tools/sign_apk.sh build/victorops-zombies.apk | tee verify.txt
       - name: Check ABIs / SDK
         run: |
           grep -q "native-code: 'arm64-v8a' 'armeabi-v7a'" verify.txt
@@ -82,5 +82,5 @@ jobs:
           grep -q "name='com.victorious.zombie'" verify.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: victorops-zombies-debug-apk
-          path: build/victorops-zombies-debug.apk
+          name: victorops-zombies-apk
+          path: build/victorops-zombies.apk

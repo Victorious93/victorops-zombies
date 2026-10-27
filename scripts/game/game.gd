@@ -5,7 +5,7 @@ extends Node3D
 signal exit_to_menu
 signal restart_requested
 
-var character_id := "snoop"
+var character_id := Characters.DEFAULT
 var force_touch := false
 var map: FacilityMap
 var player: Player
@@ -30,22 +30,39 @@ var current_prompt := ""
 var current_target = null
 var env: Environment
 var auto_rounds := true
+var fx: Fx
+var settings := GameSettings.new()
+var music: AudioStreamPlayer
+var resonance := Resonance.new()
+var crate_mover: CrateMover
+var crate_it: Dictionary
+var grenades: Array = []
+var tint := 0.0
+var paused := false
+const SETTINGS_PATH := "user://settings.cfg"
+const BASE_FOG := Color(0.06, 0.07, 0.09)
 
 func _ready() -> void:
 	rng.randomize()
+	load_settings(settings)
 	sfx = Sfx.new(); add_child(sfx)
+	fx = Fx.new(); fx.game = self; add_child(fx)
 	_build_env()
 	map = FacilityMap.new(); add_child(map); map.build(self)
 	map.bake_navigation_mesh(false)
 	player = Player.new(); player.game = self; player.char_id = character_id
 	player.position = Vector3(0, 0.1, 3); add_child(player)
-	hud = Hud.new(); hud.game = self; add_child(hud)
+	hud = Hud.new(); hud.game = self; hud.process_mode = Node.PROCESS_MODE_ALWAYS; add_child(hud)
+	player.process_mode = Node.PROCESS_MODE_ALWAYS
 	touch = TouchControls.new()
 	touch.visible = force_touch or DisplayServer.is_touchscreen_available() or OS.has_feature("mobile")
 	hud.add_child(touch)
 	player.touch = touch
 	sfx.start_ambient()
+	_start_music()
+	apply_settings()
 	hud.banner("Hold the line", 3.0)
+	crate_mover = CrateMover.new(map.crate_spots, rng)
 	if not touch.visible and not OS.has_feature("headless"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
@@ -61,18 +78,67 @@ func _build_env() -> void:
 	env.fog_light_color = Color(0.06, 0.07, 0.09)
 	env.fog_density = 0.045
 	env.glow_enabled = true
-	env.glow_intensity = 0.6
+	env.glow_intensity = 0.7
+	env.glow_bloom = 0.08
+	env.glow_hdr_threshold = 0.9
+	env.adjustment_enabled = true
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 
-func add_interactable(pos: Vector3, radius: float, prompt: Callable, use: Callable, hold := false) -> void:
-	interactables.append({pos = pos, r = radius, prompt = prompt, use = use, hold = hold})
+static func load_settings(s: GameSettings) -> void:
+	var cf := ConfigFile.new()
+	if cf.load(SETTINGS_PATH) == OK:
+		s.from_dict(cf.get_value("voz", "settings", {}))
+	else:
+		s.set_preset(GameSettings.default_preset(OS.has_feature("mobile")))
+
+static func save_settings(s: GameSettings) -> void:
+	var cf := ConfigFile.new(); cf.set_value("voz", "settings", s.to_dict()); cf.save(SETTINGS_PATH)
+
+func settings_shadows() -> bool: return settings.data().shadows
+
+func apply_settings() -> void:
+	var d := settings.data()
+	get_viewport().scaling_3d_scale = d.scale
+	get_viewport().msaa_3d = Viewport.MSAA_2X if d.msaa >= 2 else Viewport.MSAA_DISABLED
+	env.glow_enabled = d.glow
+	env.fog_enabled = d.fog
+	fx.particle_scale = d.particles
+	if map: map.apply_quality(d)
+	if music: music.volume_db = GameSettings.linear_to_db_safe(settings.music) - 10.0
+	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
+	if player:
+		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
+
+func _start_music() -> void:
+	var s := sfx.stream("music") as AudioStreamWAV
+	if s == null: return
+	s = s.duplicate(); s.loop_mode = AudioStreamWAV.LOOP_FORWARD; s.loop_begin = 0
+	s.loop_end = int(s.get_length() * s.mix_rate)
+	music = AudioStreamPlayer.new(); music.stream = s; add_child(music); music.play()
+
+func toggle_pause() -> void:
+	if over: return
+	paused = not paused
+	hud.show_pause(paused)
+	if not touch.visible:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if paused else Input.MOUSE_MODE_CAPTURED
+	get_tree().paused = paused
+
+func add_interactable(pos: Vector3, radius: float, prompt: Callable, use: Callable, hold := false) -> Dictionary:
+	var it := {pos = pos, r = radius, prompt = prompt, use = use, hold = hold}
+	interactables.append(it)
+	return it
 
 # ---------------------------------------------------------------- loop
 func _process(dt: float) -> void:
-	if over or player == null: return
+	if over or player == null or paused: return
 	_update_prompt()
 	_update_rounds(dt)
 	_update_pickups(dt)
+	_update_grenades(dt)
+	tint = move_toward(tint, 0.0, dt * 0.35)
+	env.adjustment_saturation = 1.0 - tint * 0.3
+	env.fog_light_color = BASE_FOG.lerp(Color(0.35, 0.03, 0.02), tint) if not Rounds.is_special(round) else Color(0.2, 0.03, 0.02)
 
 func _update_prompt() -> void:
 	current_prompt = ""; current_target = null
@@ -106,11 +172,13 @@ func _update_rounds(dt: float) -> void:
 			spawn_cd = 1.0
 			if Rounds.is_special(round):
 				hud.banner("Round %d · FRENZY" % round, 3.5)
-				env.fog_light_color = Color(0.2, 0.03, 0.02)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-				env.fog_light_color = Color(0.06, 0.07, 0.09)
-			sfx.play("round_start", -2)
+			sfx.play("sting", -1)
+			tint = 1.0
+			hud.round_flash()
+			if round > 1:
+				player.equipment.on_round_start()
 	elif to_spawn > 0:
 		spawn_cd -= dt
 		if spawn_cd <= 0.0 and zombies.size() < Rounds.MAX_ALIVE:
@@ -121,6 +189,7 @@ func _update_rounds(dt: float) -> void:
 		intermission = 8.0
 		hud.banner("Round %d survived" % round, 3.0)
 		sfx.play("round_end", -2)
+		tint = 0.6
 		player.health = player.max_health
 
 func spawn_zombie(win_id := "") -> Zombie:
@@ -135,6 +204,17 @@ func spawn_zombie(win_id := "") -> Zombie:
 	return z
 
 # ---------------------------------------------------------------- combat
+func _part_of(z: Zombie, y: float) -> String:
+	var rel := y - z.global_position.y
+	if z.crawler: return "head" if rel > 0.55 else "body"
+	if rel > Zombie.HEAD_Y: return "head"
+	if rel < Zombie.LEG_Y: return "legs"
+	return "body"
+
+func _pay(p: Player, at: Vector3, before: int) -> void:
+	var gain := p.economy.points - before
+	if gain > 0: fx.popup(at, "+%d" % gain)
+
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
 	var exclude: Array[RID] = [p.get_rid()]
@@ -148,23 +228,109 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 		end_point = r.position
 		if r.collider is Zombie:
 			var z: Zombie = r.collider
-			var head: bool = r.position.y - z.global_position.y > Zombie.HEAD_Y
+			var part := _part_of(z, r.position.y)
+			var head := part == "head"
 			var dmg := w.damage * (2 if head else 1)
+			var before := p.economy.points
 			p.economy.on_hit()
 			var was_alive := z.state != Zombie.State.DEAD
-			z.take_damage(dmg, head, p)
-			hud.hitmarker(was_alive and z.state == Zombie.State.DEAD)
-			sfx.play("hitmarker", -10)
-			_impact(r.position, Color(0.5, 0.05, 0.03))
+			z.take_damage(dmg, head, p, part, dir * (4.0 + w.damage * 0.02))
+			var killed := was_alive and z.state == Zombie.State.DEAD
+			_pay(p, r.position + Vector3.UP * 0.3, before)
+			hud.hitmarker(killed, head)
+			sfx.play("hitmarker", -10, 1.25 if head else 1.0)
+			if killed: sfx.play("gore", -8, randf_range(0.9, 1.1))
+			fx.blood_hit(r.position, dir)
 			if w.splash > 0.0: _splash(p, r.position, w, z)
 			if pierce > 0:
 				pierce -= 1; exclude.append(z.get_rid()); from = r.position; continue
 			break
 		else:
-			_impact(r.position, Color(0.7, 0.65, 0.5))
+			var col: Object = r.collider
+			if col and col.has_meta("fuse"):
+				_shoot_fuse(p, col)
+			var n: Vector3 = r.normal
+			fx.bullet_hole(r.position, n)
+			fx.sparks(r.position, n, Color(1.0, 0.8, 0.45), 6, 0.15, 4.0)
 			if w.splash > 0.0: _splash(p, r.position, w, null)
 			break
-	_tracer(p.gun.get_node("Muzzle").global_position if p.gun else origin, end_point, w)
+	var m: Node3D = p.vm.muzzle if p.vm and p.vm.muzzle else null
+	_tracer(m.global_position if m else origin, end_point, w)
+
+func _shoot_fuse(p: Player, col: Object) -> void:
+	var id: String = col.get_meta("fuse")
+	var res := resonance.shoot(id, facility.power_on)
+	if res == "":
+		if not facility.power_on: hud.info("Something hums... it needs power")
+		return
+	map.fuse_lit(id)
+	sfx.play("egg_fuse", -2)
+	hud.info("Resonance fuse %d / %d" % [resonance.found(), Resonance.FUSES.size()])
+	if res == "complete":
+		sfx.play("egg_complete")
+		hud.banner("THE BLACKWATER SIGNAL", 4.0)
+		p.economy.points += Resonance.REWARD_POINTS
+		fx.popup(p.global_position + Vector3.UP * 2.0 - p.global_basis.z * 2.0, "+%d" % Resonance.REWARD_POINTS, Color(0.6, 0.9, 1.0))
+		if not p.weapon().is_maxed():
+			var up := p.weapon().upgraded_version()
+			if up: p.loadout.replace_current(up); p.apply_reload_perk(); hud.info("Free overcharge: %s" % up.display_name())
+
+func melee(p: Player) -> void:
+	var best: Zombie = null; var bd := Equipment.KNIFE_RANGE_M
+	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
+	for z in zombies:
+		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
+		var off: Vector3 = z.global_position - p.global_position; off.y = 0
+		var d := off.length()
+		if d < bd and (d < 0.6 or fwd.dot(off / d) > 0.5):
+			bd = d; best = z
+	if best == null: return
+	var before := p.economy.points
+	p.economy.on_hit()
+	var was_alive := best.state != Zombie.State.DEAD
+	best.take_damage(Equipment.KNIFE_DAMAGE, false, p, "body", fwd * 3.0)
+	_pay(p, best.global_position + Vector3.UP * 1.6, before)
+	hud.hitmarker(was_alive and best.state == Zombie.State.DEAD)
+	sfx.play("knife_hit", -2, randf_range(0.9, 1.1))
+	fx.blood_hit(best.global_position + Vector3.UP * 1.2, fwd)
+	p.add_trauma(0.12)
+
+func throw_grenade(p: Player, from: Vector3, vel: Vector3) -> void:
+	var b := RigidBody3D.new()
+	b.collision_layer = 0; b.collision_mask = 1
+	b.mass = 0.4; b.continuous_cd = true
+	var pm := PhysicsMaterial.new(); pm.bounce = 0.35; pm.friction = 0.8; b.physics_material_override = pm
+	var cs := CollisionShape3D.new(); var sh := SphereShape3D.new(); sh.radius = 0.07; cs.shape = sh; b.add_child(cs)
+	b.add_child(ModelLib.prop("grenade", 0.13, false, false))
+	b.contact_monitor = true; b.max_contacts_reported = 1
+	b.body_entered.connect(func(_n): if b.linear_velocity.length() > 2.0: sfx.play_at("grenade_bounce", b.global_position, -6))
+	add_child(b); b.global_position = from; b.linear_velocity = vel
+	b.angular_velocity = Vector3(randf_range(-8, 8), randf_range(-8, 8), randf_range(-8, 8))
+	grenades.append({body = b, t = Equipment.GRENADE_FUSE, owner = p})
+
+func _update_grenades(dt: float) -> void:
+	for g in grenades.duplicate():
+		g.t -= dt
+		if g.t > 0.0: continue
+		grenades.erase(g)
+		var b: RigidBody3D = g.body
+		var at := b.global_position
+		b.queue_free()
+		explode(g.owner, at, Equipment.GRENADE_RADIUS_M, Equipment.grenade_damage(maxi(round, 1)))
+
+func explode(p: Player, at: Vector3, radius: float, dmg: int) -> void:
+	fx.explosion(at, radius)
+	sfx.play_at("explosion", at, 2)
+	for z in zombies.duplicate():
+		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
+		var d: float = (z.global_position + Vector3.UP * 0.9).distance_to(at)
+		if d > radius: continue
+		var before := p.economy.points
+		var dirv: Vector3 = (z.global_position - at); dirv.y = 0
+		z.take_damage(int(dmg * Equipment.grenade_falloff(d / radius * Equipment.GRENADE_RADIUS_M)), false, p, "legs" if d < radius * 0.5 else "body", dirv.normalized() * 8.0 + Vector3.UP * 4.0)
+		_pay(p, z.global_position + Vector3.UP * 1.8, before)
+	var pd := player.global_position.distance_to(at)
+	player.add_trauma(clampf(1.2 - pd / (radius * 3.0), 0.0, 0.9))
 
 func _splash(p: Player, at: Vector3, w: WeaponDef, skip) -> void:
 	var r := w.splash_m()
@@ -172,7 +338,7 @@ func _splash(p: Player, at: Vector3, w: WeaponDef, skip) -> void:
 		if z == skip or not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
 		if (z.global_position + Vector3.UP).distance_to(at) < r + 0.5:
 			z.take_damage(w.damage / 2, false, p)
-	var fx := _fx_sphere(at, r, Color(0.3, 1.0, 0.8, 0.5)); fx.scale = Vector3.ONE * 0.2
+	var sp := _fx_sphere(at, r, Color(0.3, 1.0, 0.8, 0.5)); sp.scale = Vector3.ONE * 0.2
 
 func _fx_sphere(at: Vector3, radius: float, c: Color) -> MeshInstance3D:
 	var mi := MeshInstance3D.new(); var sm := SphereMesh.new(); sm.radius = radius; sm.height = radius * 2
@@ -199,7 +365,11 @@ func _tracer(a: Vector3, b: Vector3, w: WeaponDef) -> void:
 func on_zombie_killed(z: Zombie, p: Player, headshot: bool) -> void:
 	zombies.erase(z)
 	kills += 1
-	if p: p.economy.on_kill(headshot)
+	if p:
+		var before := p.economy.points
+		p.economy.on_kill(headshot)
+		_pay(p, z.global_position + Vector3.UP * 2.0, before)
+		hud.kill_feed(headshot)
 	if rng.randf() < ArmorState.DROP_CHANCE:
 		_drop_armor(z.global_position)
 
@@ -243,7 +413,7 @@ func use_ability(p: Player) -> void:
 				if off.length() > Characters.BASS_RADIUS_M: continue
 				if z.state == Zombie.State.CHASE and off.length() > 0.01:
 					z.push(off.normalized() * Characters.BASS_KNOCKBACK_M * 6.0)
-				z.take_damage(dmg, false, p)
+				z.take_damage(dmg, false, p, "body", off.normalized() * 6.0)
 			_fx_sphere(p.global_position + Vector3.UP, Characters.BASS_RADIUS_M, Color(0.5, 0.3, 1.0, 0.35))
 			sfx.play("bass_drop")
 			hud.info("%s!" % p.cdef.ability_name)
@@ -256,6 +426,7 @@ func use_ability(p: Player) -> void:
 			sfx.play("plank_place")
 			hud.info("%s: +%d planks" % [p.cdef.ability_name, total])
 	p.ability_cd = p.cdef.ability_cooldown
+	p.add_trauma(0.4)
 
 # ---------------------------------------------------------------- interactions
 func _deny(msg: String) -> void:
@@ -281,6 +452,7 @@ func throw_power(lever: Node3D) -> void:
 	sfx.play("power_on")
 	hud.banner("Power restored", 3.0)
 	env.ambient_light_energy = 0.5
+	player.add_trauma(0.3)
 
 func perk_prompt(p: Player, id: String) -> String:
 	var d: Dictionary = Perks.ALL[id]
@@ -322,6 +494,7 @@ func use_crate(p: Player) -> void:
 			var id := crate.buy(p.economy, rng, p.weapon().id)
 			if id == "": _deny("Not enough points"); return
 			crate_node.start(id); sfx.play_at("crate", crate_node.global_position + Vector3.UP)
+			if crate_mover.on_roll(rng): crate_node.move_after = true
 		CrateNode.State.READY:
 			var w := Weapons.make(crate_node.take())
 			p.loadout.give(w); p.apply_reload_perk()
@@ -342,5 +515,14 @@ func buy_armor(p: Player, pack_id: String) -> void:
 	if not p.armor.buy(pack_id, p.economy): _deny("Not enough points"); return
 	sfx.play("buy", -4); hud.info("%s equipped" % ArmorState.PACKS[pack_id].name)
 
-func restart() -> void: restart_requested.emit()
-func to_menu() -> void: exit_to_menu.emit()
+## Called by the crate once its "overloaded" animation finishes.
+func relocate_crate() -> void:
+	var i := crate_mover.relocate(rng)
+	var spot: Array = map.crate_spots[i]
+	map.move_crate(spot[0], spot[1])
+	crate_it.pos = spot[0] + Vector3(0, 1.0, 0) + Vector3(sin(spot[1]), 0, cos(spot[1])) * 1.0
+	sfx.play_at("crate_move", spot[0] + Vector3.UP, 0)
+	hud.info("The Mystery Crate moved: %s" % spot[2])
+
+func restart() -> void: get_tree().paused = false; restart_requested.emit()
+func to_menu() -> void: get_tree().paused = false; exit_to_menu.emit()

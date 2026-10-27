@@ -10,11 +10,14 @@ var cycle_t := 0.0
 var display: Node3D
 var light: OmniLight3D
 var lid: MeshInstance3D
+var game
+var move_after := false
+var glow_mat: StandardMaterial3D
 
 func build() -> void:
 	var wood := StandardMaterial3D.new(); wood.albedo_color = Color(0.25, 0.16, 0.08); wood.roughness = 0.8
 	var trim := StandardMaterial3D.new(); trim.albedo_color = Color(0.85, 0.65, 0.2); trim.metallic = 0.8
-	var glow := StandardMaterial3D.new(); glow.albedo_color = Color(0.4, 0.9, 1.0)
+	var glow := StandardMaterial3D.new(); glow_mat = glow; glow.albedo_color = Color(0.4, 0.9, 1.0)
 	glow.emission_enabled = true; glow.emission = Color(0.3, 0.8, 1.0); glow.emission_energy_multiplier = 3.0
 	var body := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(1.8, 0.8, 0.8)
 	body.mesh = bm; body.material_override = wood; body.position.y = 0.4; add_child(body)
@@ -37,10 +40,14 @@ func start(final_id: String) -> void:
 
 func _set_display(id: String) -> void:
 	if display: display.queue_free()
-	display = GunModel.build(Weapons.make(id))
-	display.rotation.y = PI / 2
-	display.position = Vector3(0.3, 1.25, 0)
+	var w := Weapons.make(id)
+	display = Node3D.new()
+	var g := ModelLib.gun(Weapons.MODELS.get(id, "pistol"))
+	g.rotation.y = PI / 2; g.scale = Vector3.ONE * 1.5
+	display.add_child(g)
+	display.position = Vector3(0, 1.25, 0)
 	add_child(display)
+	ModelLib.set_shadows(display, false)
 
 func _process(dt: float) -> void:
 	if state == State.IDLE: return
@@ -52,11 +59,29 @@ func _process(dt: float) -> void:
 			cycle_t = 0.12
 		display.position.y = 1.0 + (3.0 - t) * 0.12
 		if t <= 0.0:
+			if move_after:
+				_overload(); return
 			_set_display(result); display.position.y = 1.36
 			state = State.READY; t = 8.0
 	elif state == State.READY:
 		display.rotation.y += dt
 		if t <= 0.0: close()
+
+## The crate refuses this roll (refund) and jumps to a new spot.
+func _overload() -> void:
+	move_after = false
+	state = State.IDLE
+	if display: display.queue_free(); display = null
+	if game:
+		game.player.economy.points += MysteryCrate.COST
+		game.hud.info("The crate overloads! %d refunded" % MysteryCrate.COST)
+		game.sfx.play_at("crate_move", global_position + Vector3.UP, 0)
+	var tw := create_tween()
+	tw.tween_property(self, "position:y", 6.0, 1.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.parallel().tween_property(light, "light_energy", 8.0, 1.0)
+	tw.tween_callback(func():
+		close()
+		if game: game.relocate_crate())
 
 func take() -> String:
 	var r := result; close(); return r

@@ -1,7 +1,7 @@
 # VictorOps Zombies
 
 **Public repo.** Original first-person, round-based zombie survival shooter for Android (and desktop) built with **Godot 4.7.2 (GDScript)**.
-Hold an abandoned facility against endless rounds: board up windows, buy doors, restore power, gamble at the **Mystery Crate**, drink **Iron Hide Tonic**, **Quickhand Draught** or **Fleetfoot Phial**, and upgrade your gun at the **Overcharge Forge**. Play as **Snoop Dogg** (Bass Drop) or **Martha Stewart** (Fortify).
+Hold an abandoned facility against endless rounds: board up windows, buy doors, restore power, gamble at the **Mystery Crate**, drink **Iron Hide Tonic**, **Quickhand Draught** or **Fleetfoot Phial**, and upgrade your gun at the **Overcharge Forge**. Play as **Rook Vance**, a night-shift sound tech (Bass Drop), or **Hollis Marrow**, the facility quartermaster (Fortify). *(v2: these original characters replace the earlier celebrity-named placeholders; abilities unchanged.)*
 
 - `scripts/rules/` – pure game rules (rounds, economy, weapons, crate, perks, forge, armor, barricades), unit-tested
 - `scripts/game/` – 3D game: player controller, zombies (navmesh AI), facility map, HUD, touch controls

@@ -1,16 +1,20 @@
 class_name Characters
-## Playable characters from PR #2 (display names only; drawn as original stylised models).
-## See README: real-person names need permission before any public release.
+## Playable characters. Both are ORIGINAL characters (they replace the earlier real-person
+## placeholders); the Bass Drop and Fortify abilities are unchanged.
 
 const ALL := {
-	"snoop": {"name": "Snoop Dogg", "tagline": "Fast and smooth. Bass Drop knocks the horde back.",
+	"rook": {"name": "Rook Vance", "role": "Night-shift sound tech",
+		"tagline": "Fast and loose. Bass Drop: a sub-bass shockwave that blasts the horde back.",
 		"max_health": 100.0, "speed_mult": 1.12, "fire_interval_mult": 0.85, "start_weapon": "smg",
-		"repair_planks_per_use": 1, "repair_points_mult": 1, "ability": "bass_drop", "ability_name": "Bass Drop", "ability_cooldown": 25.0},
-	"martha": {"name": "Martha Stewart", "tagline": "Tough and tidy. Repairs fast, Fortify rebuilds every window.",
+		"repair_planks_per_use": 1, "repair_points_mult": 1, "ability": "bass_drop", "ability_name": "Bass Drop", "ability_cooldown": 25.0,
+		"color": Color(0.55, 0.35, 1.0)},
+	"hollis": {"name": "Hollis Marrow", "role": "Facility quartermaster",
+		"tagline": "Tough and tidy. Repairs fast; Fortify rebuilds every window at once.",
 		"max_health": 130.0, "speed_mult": 1.0, "fire_interval_mult": 1.0, "start_weapon": "scatter",
-		"repair_planks_per_use": 2, "repair_points_mult": 2, "ability": "fortify", "ability_name": "Fortify", "ability_cooldown": 35.0},
+		"repair_planks_per_use": 2, "repair_points_mult": 2, "ability": "fortify", "ability_name": "Fortify", "ability_cooldown": 35.0,
+		"color": Color(1.0, 0.65, 0.2)},
 }
-const DEFAULT := "snoop"
+const DEFAULT := "rook"
 
 const BASS_RADIUS_M := 4.0      # 240 units / 60
 const BASS_KNOCKBACK_M := 2.33  # 140 units / 60

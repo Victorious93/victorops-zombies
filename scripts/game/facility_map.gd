@@ -1,7 +1,9 @@
 class_name FacilityMap
 extends NavigationRegion3D
-## "Blackwater Research Annex": original map built in code. Intake Hall (start) plus three buyable
-## areas: Generator Wing (power switch), Lab Corridor, Cold Storage. Everything is primitives.
+## "Blackwater Research Annex": original map built in code. Intake Hall (start) plus four buyable
+## areas: Generator Wing (power switch), Lab Corridor (catwalk), Cold Storage (Overcharge Forge) and the
+## open-air Loading Yard (raised dock + island for training loops). PBR surfaces use CC0 ambientCG
+## textures and props are CC0 Quaternius / Kenney models (see ASSETS.md).
 
 const H := 4.0
 const T := 0.4
@@ -13,6 +15,13 @@ var room_lights: Array = []    # white lights enabled by power
 var emergency_lights: Array = []
 var machine_lights: Array = []
 var mats := {}
+var crate_spots: Array = []   # [pos, rot_y, area label]
+var fuses := {}               # id -> [mesh material, light]
+var dust: Array = []
+var shadow_lights: Array = []
+var forge_rings: Array = []
+var neon: Array = []          # [material, base energy]
+var _t := 0.0
 
 func _ready() -> void:
 	var nm := NavigationMesh.new()
@@ -22,15 +31,22 @@ func _ready() -> void:
 	nm.cell_size = 0.25; nm.cell_height = 0.25
 	navigation_mesh = nm
 
-func _noise_tex(freq: float) -> NoiseTexture2D:
-	var n := FastNoiseLite.new(); n.frequency = freq; n.fractal_octaves = 4
-	var tx := NoiseTexture2D.new(); tx.noise = n; tx.width = 256; tx.height = 256; tx.seamless = true
-	return tx
+func _tex(name: String, kind: String) -> Texture2D:
+	return load("res://assets/textures/%s_%s.jpg" % [name, kind])
 
-func _mat(c: Color, tex := true, rough := 0.9, metal := 0.0) -> StandardMaterial3D:
+## PBR material from an ambientCG set (albedo/normal/roughness), triplanar so boxes of any size tile.
+func _pbr(name: String, tint := Color.WHITE, scale := 0.5, metal := 0.0) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_texture = _tex(name, "albedo"); m.albedo_color = tint
+	m.normal_enabled = true; m.normal_texture = _tex(name, "normal"); m.normal_scale = 1.0
+	m.roughness_texture = _tex(name, "rough"); m.roughness = 1.0
+	m.metallic = metal
+	m.uv1_triplanar = true; m.uv1_scale = Vector3.ONE * scale
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	return m
+
+func _mat(c: Color, rough := 0.9, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new(); m.albedo_color = c; m.roughness = rough; m.metallic = metal
-	if tex:
-		m.albedo_texture = _noise_tex(0.02); m.uv1_triplanar = true; m.uv1_scale = Vector3(0.35, 0.35, 0.35)
 	return m
 
 func _emit(c: Color, e := 3.0) -> StandardMaterial3D:
@@ -76,7 +92,7 @@ func wall(a: Vector2, b: Vector2, gaps: Array = []) -> void:
 	for c in cuts:
 		var g: Dictionary = c[2]
 		if g.kind == "window":
-			_wall_piece(a, dir, along_x, c[0], c[1], 0.0, 1.0, wm)
+			_wall_piece(a, dir, along_x, c[0], c[1], 0.0, 1.0, mats.wall_low)
 			_wall_piece(a, dir, along_x, c[0], c[1], 2.3, H, wm)
 			_make_window(a + dir * g.at, along_x, g)
 		elif g.kind == "door":
@@ -144,27 +160,45 @@ func open_door(id: String) -> void:
 func rebake() -> void:
 	bake_navigation_mesh(true)
 
-func light(pos: Vector3, color: Color, energy: float, rng: float, flicker := true) -> OmniLight3D:
-	var l := OmniLight3D.new()
-	if flicker: l.set_script(load("res://scripts/game/flicker_light.gd"))
-	l.light_color = color; l.light_energy = energy; l.omni_range = rng; l.position = pos
-	l.omni_attenuation = 1.2
-	add_child(l)
-	return l
+func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := false, collide := true) -> Node3D:
+	var n := ModelLib.prop(name, size, by_height)
+	n.position = pos; n.rotation.y = rot_y; add_child(n)
+	if collide:
+		var a := _bounds(n)
+		var sb := StaticBody3D.new(); sb.collision_layer = 1; sb.collision_mask = 0
+		var cs := CollisionShape3D.new(); var sh := BoxShape3D.new(); sh.size = a.size; cs.shape = sh
+		cs.position = a.get_center(); sb.add_child(cs); n.add_child(sb)
+	return n
+
+func _bounds(n: Node3D) -> AABB:
+	var acc := AABB(); var first := true
+	for mi in n.find_children("*", "MeshInstance3D", true, false):
+		var xf: Transform3D = n.global_transform.affine_inverse() * (mi as MeshInstance3D).global_transform if n.is_inside_tree() else _rel(n, mi)
+		var b: AABB = xf * (mi as MeshInstance3D).get_aabb()
+		acc = b if first else acc.merge(b); first = false
+	return acc
+
+func _rel(root: Node3D, n: Node3D) -> Transform3D:
+	var xf := Transform3D.IDENTITY; var c: Node = n
+	while c != root and c is Node3D:
+		xf = (c as Node3D).transform * xf; c = c.get_parent()
+	return xf
 
 func build(p_game) -> void:
 	game = p_game
-	mats.wall = _mat(Color(0.42, 0.42, 0.4))
-	mats.floor = _mat(Color(0.26, 0.25, 0.24))
-	mats.ground = _mat(Color(0.12, 0.14, 0.1))
-	mats.trim = _mat(Color(0.1, 0.09, 0.08), false)
-	mats.door = _mat(Color(0.3, 0.32, 0.35), true, 0.6, 0.5)
-	mats.stripe = _mat(Color(0.75, 0.6, 0.1), false)
-	mats.metal = _mat(Color(0.3, 0.31, 0.33), true, 0.5, 0.6)
-	mats.ceiling = _mat(Color(0.2, 0.2, 0.2))
+	mats.wall = _pbr("paintedplaster017", Color(0.78, 0.8, 0.78), 0.35)
+	mats.wall_low = _pbr("concrete034", Color(0.7, 0.7, 0.7), 0.4)
+	mats.floor = _pbr("tiles074", Color(0.75, 0.75, 0.72), 0.45)
+	mats.ground = _pbr("concrete034", Color(0.55, 0.57, 0.55), 0.18)
+	mats.trim = _pbr("metal032", Color(0.35, 0.33, 0.3), 1.0, 0.6)
+	mats.door = _pbr("metalplates006", Color(0.6, 0.62, 0.66), 0.6, 0.7)
+	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
+	mats.metal = _pbr("metal032", Color(0.7, 0.7, 0.72), 0.8, 0.8)
+	mats.plate = _pbr("diamondplate008c", Color(0.75, 0.75, 0.78), 0.6, 0.85)
+	mats.ceiling = _pbr("metalplates006", Color(0.4, 0.4, 0.42), 0.3, 0.5)
 	mats.lamp = _emit(Color(1.0, 0.92, 0.75), 2.0)
-	# ground (outside + floors share one slab so the navmesh is continuous outside)
-	box(Vector3(70, 1, 70), Vector3(8, -0.5, -8), mats.ground)
+	# ground slab covers the building and the yard so the navmesh is continuous outside
+	box(Vector3(90, 1, 76), Vector3(18, -0.5, -8), mats.ground)
 	box(Vector3(36, 0.02, 36), Vector3(8, 0.01, -8), mats.floor, false)
 	box(Vector3(36.4, 0.3, 36.4), Vector3(8, H + 0.15, -8), mats.ceiling, false)
 	# outer walls
@@ -176,60 +210,160 @@ func build(p_game) -> void:
 		{at = 28.0, w = 1.8, kind = "window", id = "w_lab", out = Vector2(0, 1)}])
 	wall(Vector2(-10, -26), Vector2(26, -26), [
 		{at = 28.0, w = 1.8, kind = "window", id = "w_cold", out = Vector2(0, -1)}])
-	wall(Vector2(26, 10), Vector2(26, -26))
+	wall(Vector2(26, 10), Vector2(26, -26), [{at = 10.0, w = 2.6, kind = "door", id = "yard"}])
 	# interior walls with buyable doors
 	wall(Vector2(-10, -10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "north"}])
 	wall(Vector2(10, 10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "east"}])
 	wall(Vector2(10, -10), Vector2(10, -26), [{at = 8.0, w = 2.4, kind = "door", id = "cold"}])
 	wall(Vector2(10, -10), Vector2(26, -10))
-	# props: crates, pipes, desks (obstacles)
-	for p in [Vector3(-7, 0.5, -7), Vector3(-7.6, 0.5, -6), Vector3(6.5, 0.5, 6.5), Vector3(22, 0.5, 6), Vector3(22, 0.5, -22), Vector3(-6, 0.5, -22), Vector3(5, 0.5, -20)]:
-		box(Vector3(1, 1, 1), p, _mat(Color(0.32, 0.26, 0.18)))
-	box(Vector3(3, 0.9, 1.0), Vector3(18, 0.45, -3), mats.metal)  # lab bench
-	box(Vector3(3, 0.9, 1.0), Vector3(18, 0.45, 3.5), mats.metal)
-	box(Vector3(1.2, 2.6, 4), Vector3(24.6, 1.3, -18), _mat(Color(0.75, 0.8, 0.85), true, 0.3, 0.3))  # cold units
-	box(Vector3(4, 2.4, 2), Vector3(0, 1.2, -24.5), mats.metal)  # generator block
-	for x in [-6, 0, 6]:
-		box(Vector3(0.25, 0.25, 36), Vector3(x + 2, H - 0.3, -8), mats.metal, false)  # ceiling pipes
+	_build_yard()
+	_build_catwalk()
+	_build_props()
 	# ceiling lamps: emergency red (power off) + white (power on)
 	for p in [Vector3(0, H - 0.3, 0), Vector3(0, H - 0.3, -18), Vector3(18, H - 0.3, 0), Vector3(18, H - 0.3, -18)]:
 		box(Vector3(1.4, 0.08, 0.4), p + Vector3(0, 0.1, 0), mats.lamp, false)
 		var w := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.9, 0.75), 2.2, 12.0)
-		w.visible = false; room_lights.append(w)
+		w.visible = false; room_lights.append(w); shadow_lights.append(w)
 		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
+		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
 	# moon
-	var moon := DirectionalLight3D.new(); moon.light_color = Color(0.45, 0.55, 0.8); moon.light_energy = 0.25
-	moon.rotation_degrees = Vector3(-50, 30, 0); add_child(moon)
+	var moon := DirectionalLight3D.new(); moon.light_color = Color(0.45, 0.55, 0.8); moon.light_energy = 0.35
+	moon.rotation_degrees = Vector3(-50, 30, 0); moon.shadow_enabled = true; add_child(moon)
+	moon.directional_shadow_max_distance = 40.0
+	shadow_lights.append(moon)
 	_place_machines()
+	_place_fuses()
 
-func _machine(pos: Vector3, rot_y: float, color: Color, title: String) -> Node3D:
+## Dust motes hanging in the light (the mobile renderer has no volumetric fog).
+func _dust(at: Vector3, extents: Vector3) -> void:
+	var p := CPUParticles3D.new(); p.amount = 40; p.lifetime = 8.0; p.preprocess = 8.0
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX; p.emission_box_extents = extents
+	p.gravity = Vector3(0, -0.01, 0); p.initial_velocity_min = 0.02; p.initial_velocity_max = 0.08
+	p.direction = Vector3(1, 0.2, 0); p.spread = 180
+	var q := QuadMesh.new(); q.size = Vector2(0.025, 0.025); p.mesh = q
+	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(1, 0.95, 0.85, 0.25); q.material = m
+	p.position = at; add_child(p); dust.append(p)
+
+func _build_yard() -> void:
+	# Loading Yard: x 26..46, z -16..10, open-air with a chain-link perimeter and two windows on x=46
+	wall(Vector2(46, 10), Vector2(46, -16), [
+		{at = 6.0, w = 1.8, kind = "window", id = "w_yard_s", out = Vector2(1, 0)},
+		{at = 18.0, w = 1.8, kind = "window", id = "w_yard_n", out = Vector2(1, 0)}])
+	for seg in [[Vector2(26, 10), Vector2(46, 10)], [Vector2(26, -16), Vector2(46, -16)]]:
+		var a: Vector2 = seg[0]; var b: Vector2 = seg[1]
+		box(Vector3(b.x - a.x, H, T), Vector3((a.x + b.x) / 2, H / 2, a.y), mats.wall_low)
+	# raised loading dock with two ramps (verticality)
+	box(Vector3(10, 1.4, 5), Vector3(36, 0.7, -13.5), mats.wall_low)
+	box(Vector3(10.2, 0.06, 5.2), Vector3(36, 1.43, -13.5), mats.plate, false)
+	for x in [29.0, 43.0]:
+		var r := box(Vector3(4, 0.3, 3.2), Vector3(x, 0.62, -12.0), mats.plate)
+		r.rotation.z = (1.0 if x < 36 else -1.0) * atan2(1.4, 4.0)
+	box(Vector3(10, 0.12, 0.12), Vector3(36, 2.4, -11.0), mats.stripe)  # guard rail
+	# dock lights
+	for x in [32.0, 40.0]:
+		var l := light(Vector3(x, 3.6, -12), Color(1.0, 0.75, 0.45), 2.0, 12.0)
+		shadow_lights.append(l)
+	_dust(Vector3(36, 2, -6), Vector3(9, 1.5, 9))
+	# central island for kiting
+	prop("police_car", 4.6, Vector3(36, 0, -1), 0.4)
+	prop("barrel", 0.95, Vector3(33.2, 0, 1.4), 0.0, true)
+	prop("barrel_explosive", 0.95, Vector3(38.9, 0, -3.2), 0.0, true)
+	prop("debris", 1.6, Vector3(41, 0, 5), 1.0, false, false)
+	prop("fence", 3.0, Vector3(30, 0, 8.6), 0.0, false, false)
+	label("LOADING YARD", Vector3(36, 3.2, -11.0), 0.0, 64, Color(1.0, 0.75, 0.3))
+	var sl := light(Vector3(36, 3.5, 3), Color(0.5, 0.6, 0.9), 1.4, 14.0, false)
+	shadow_lights.append(sl)
+
+func _build_catwalk() -> void:
+	# Lab catwalk at 1.8 m along the north wall of the lab with a ramp down to the east.
+	box(Vector3(8, 0.15, 2.2), Vector3(16, 1.8, -8.5), mats.plate)
+	for x in [12.5, 19.5]:
+		box(Vector3(0.12, 1.8, 0.12), Vector3(x, 0.9, -7.5), mats.metal)
+	box(Vector3(8, 0.08, 0.08), Vector3(16, 2.85, -7.42), mats.stripe, false)
+	var ramp := box(Vector3(4.4, 0.15, 2.2), Vector3(22, 0.9, -8.5), mats.plate)
+	ramp.rotation.z = -atan2(1.8, 4.2)
+
+func _build_props() -> void:
+	prop("crate", 1.0, Vector3(-7, 0, -7), 0.3)
+	prop("crate", 0.9, Vector3(-7.8, 0, -5.8), -0.2)
+	prop("crate", 1.0, Vector3(6.5, 0, 6.5), 0.1)
+	prop("desk", 1.8, Vector3(18, 0, -3), 0.0)
+	prop("computer", 0.6, Vector3(18, 0.82, -3), PI, false, false)
+	prop("desk", 1.8, Vector3(18, 0, 3.5), PI)
+	prop("papers", 0.5, Vector3(17.4, 0.82, 3.5), 0.4, false, false)
+	prop("shelf", 2.0, Vector3(24.8, 0, -18), PI / 2, true)
+	prop("shelf", 2.0, Vector3(24.8, 0, -21), PI / 2, true)
+	prop("gas_tank", 1.6, Vector3(-6, 0, -22), 0.0, true)
+	prop("barrel", 0.95, Vector3(5, 0, -20), 0.0, true)
+	prop("barrel", 0.95, Vector3(5.8, 0, -20.6), 0.0, true)
+	prop("pipes_panel", 2.6, Vector3(-9.6, 0, -16), PI / 2, true, false)
+	prop("bricks", 1.0, Vector3(-3, 0, 7.5), 0.6, false, false)
+	prop("debris", 1.2, Vector3(4, 0, -4), 0.0, false, false)
+	prop("signs", 1.2, Vector3(9.6, 1.6, 3), -PI / 2, false, false)
+	box(Vector3(4, 2.4, 2), Vector3(0, 1.2, -24.5), mats.metal)  # generator block
+	for x in [-6, 0, 6]:
+		box(Vector3(0.25, 0.25, 36), Vector3(x + 2, H - 0.3, -8), mats.metal, false)  # ceiling pipes
+
+func light(pos: Vector3, color: Color, energy: float, rng: float, flicker := true) -> OmniLight3D:
+	var l := OmniLight3D.new()
+	if flicker: l.set_script(load("res://scripts/game/flicker_light.gd"))
+	l.light_color = color; l.light_energy = energy; l.omni_range = rng; l.position = pos
+	l.omni_attenuation = 1.2
+	add_child(l)
+	return l
+
+func apply_quality(d: Dictionary) -> void:
+	for l in shadow_lights:
+		if is_instance_valid(l): l.shadow_enabled = d.shadows
+	for p in dust:
+		p.emitting = d.dust; p.visible = d.dust
+	for z in get_tree().get_nodes_in_group("voz_zombie"):
+		ModelLib.set_shadows(z.model, d.shadows)
+
+# ---------------------------------------------------------------- machines
+## Neon perk machine: cabinet + glowing tube outline + emblem + sign.
+func _machine(pos: Vector3, rot_y: float, color: Color, title: String, emblem := "circle") -> Node3D:
 	var root := Node3D.new(); root.position = pos; root.rotation.y = rot_y; add_child(root)
-	box(Vector3(1.2, 2.2, 0.8), Vector3(0, 1.1, 0), _mat(color.darkened(0.6), true, 0.4, 0.4), true, 1, root)
+	box(Vector3(1.2, 2.2, 0.8), Vector3(0, 1.1, 0), _pbr("metalplates006", color.darkened(0.45), 0.9, 0.6), true, 1, root)
 	var panel := box(Vector3(0.9, 0.9, 0.05), Vector3(0, 1.45, -0.42), _emit(color, 0.3), false, 1, root)
-	var l := Label3D.new(); l.text = title; l.font_size = 36; l.pixel_size = 0.004; l.outline_size = 8
-	l.shaded = false; l.position = Vector3(0, 2.35, -0.42); l.rotation.y = PI; l.modulate = color.lightened(0.3)
+	var tube := _emit(color.lightened(0.2), 0.4)
+	for e in [[Vector3(1.26, 0.05, 0.05), Vector3(0, 2.22, -0.42)], [Vector3(1.26, 0.05, 0.05), Vector3(0, 0.02, -0.42)],
+			[Vector3(0.05, 2.2, 0.05), Vector3(0.62, 1.1, -0.42)], [Vector3(0.05, 2.2, 0.05), Vector3(-0.62, 1.1, -0.42)]]:
+		box(e[0], e[1], tube, false, 1, root)
+	var em := MeshInstance3D.new(); em.material_override = tube
+	match emblem:
+		"heart":
+			var sm := SphereMesh.new(); sm.radius = 0.16; sm.height = 0.32; em.mesh = sm; em.scale = Vector3(1, 1, 0.3)
+		"bolt":
+			var pm := PrismMesh.new(); pm.size = Vector3(0.3, 0.42, 0.05); em.mesh = pm; em.rotation.z = 0.4
+		_:
+			var tm := TorusMesh.new(); tm.inner_radius = 0.12; tm.outer_radius = 0.17; em.mesh = tm; em.rotation.x = PI / 2
+	em.position = Vector3(0, 1.5, -0.47); root.add_child(em)
+	var l := Label3D.new(); l.text = title.to_upper(); l.font_size = 40; l.pixel_size = 0.004; l.outline_size = 10
+	l.shaded = false; l.position = Vector3(0, 2.45, -0.42); l.rotation.y = PI; l.modulate = color.lightened(0.45)
+	l.outline_modulate = color.darkened(0.3)
 	root.add_child(l)
 	var ml := OmniLight3D.new(); ml.light_color = color; ml.light_energy = 0.0; ml.omni_range = 4.0
 	ml.position = Vector3(0, 1.5, -1.0); root.add_child(ml)
-	machine_lights.append([ml, panel])
+	machine_lights.append([ml, panel.material_override if panel is MeshInstance3D else panel.get_child(1).material_override])
+	neon.append([tube, 0.4, color])
 	return root
 
 func _front(root: Node3D) -> Vector3:
 	return root.to_global(Vector3(0, 1.0, -1.0))
 
 func _place_machines() -> void:
-	# Iron Hide Tonic (Generator Wing), Quickhand Draught (Lab), Fleetfoot Phial (Intake)
-	var perk_spots := {"ironhide": [Vector3(-8.8, 0, -14), -PI / 2], "quickhand": [Vector3(24.8, 0, 6), PI / 2], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2]}
+	var perk_spots := {"ironhide": [Vector3(-8.8, 0, -14), -PI / 2, "heart"], "quickhand": [Vector3(24.8, 0, 6), PI / 2, "circle"], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2, "bolt"]}
 	for id in perk_spots:
 		var pd: Dictionary = Perks.ALL[id]
-		var m := _machine(perk_spots[id][0], perk_spots[id][1], pd.color, pd.name)
+		var m := _machine(perk_spots[id][0], perk_spots[id][1], pd.color, pd.name, perk_spots[id][2])
 		var pid: String = id
 		game.add_interactable(_front(m), 2.2,
 			func(pl): return game.perk_prompt(pl, pid),
 			func(pl): game.buy_perk(pl, pid))
-	# Overcharge Forge in Cold Storage
-	var f := _machine(Vector3(18, 0, -24.8), PI, Color(0.7, 0.3, 1.0), OverchargeForge.NAME)
-	game.add_interactable(_front(f), 2.4, func(pl): return game.forge_prompt(pl), func(pl): game.use_forge(pl))
+	_build_forge(Vector3(18, 0, -24.4))
 	# Power switch in Generator Wing
 	var sw := Node3D.new(); sw.position = Vector3(3, 0, -24.3); add_child(sw)
 	box(Vector3(0.8, 1.2, 0.3), Vector3(0, 1.4, 0), mats.metal, true, 1, sw)
@@ -239,12 +373,22 @@ func _place_machines() -> void:
 	game.add_interactable(Vector3(3, 1.0, -23.3), 2.2,
 		func(pl): return "" if game.facility.power_on else "Throw the power switch",
 		func(pl): game.throw_power(lever))
-	# Mystery Crate in the Lab Corridor
-	var crate := CrateNode.new(); crate.position = Vector3(18, 0, -8.6); add_child(crate); crate.build()
+	# Mystery Crate: starts in the Lab, relocates between these spots
+	crate_spots = [
+		[Vector3(16, 0, 6.6), PI, "Lab Corridor"],
+		[Vector3(36, 0, 8.4), PI, "Loading Yard"],
+		[Vector3(-6, 0, -24.6), 0.0, "Generator Wing"],
+		[Vector3(20, 0, -13.6), 0.0, "Cold Storage"],
+		[Vector3(-6, 0, 8.6), PI, "Intake Hall"],
+	]
+	var crate := CrateNode.new(); crate.game = game; add_child(crate); crate.build()
 	game.crate_node = crate
-	label("MYSTERY CRATE", Vector3(18, 2.4, -9.5), 0.0, 44, Color(0.5, 0.9, 1.0))
-	game.add_interactable(Vector3(18, 1.0, -7.6), 2.2, func(pl): return game.crate_prompt(pl), func(pl): game.use_crate(pl))
-	# Wall-buys (chalk outline + label on the wall)
+	var marker := label("MYSTERY CRATE", Vector3(0, 2.3, 0), 0.0, 44, Color(0.5, 0.9, 1.0))
+	marker.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	remove_child(marker); crate.add_child(marker)
+	game.crate_it = game.add_interactable(Vector3.ZERO, 2.2, func(pl): return game.crate_prompt(pl), func(pl): game.use_crate(pl))
+	move_crate(crate_spots[0][0], crate_spots[0][1])
+	# Wall-buys
 	_wall_buy("smg", Vector3(-9.75, 1.6, -3), PI / 2)
 	_wall_buy("rifle", Vector3(-9.75, 1.6, -20), PI / 2)
 	_wall_buy("scatter", Vector3(14, 1.6, 9.75), PI)
@@ -253,11 +397,77 @@ func _place_machines() -> void:
 	_armor_rack("medium", Vector3(25.6, 0, -4), -PI / 2)
 	_armor_rack("heavy", Vector3(14, 0, -25.6), 0.0)
 
+func move_crate(pos: Vector3, rot_y: float) -> void:
+	var c: CrateNode = game.crate_node
+	c.position = pos; c.rotation.y = rot_y
+	if game.crate_it: game.crate_it.pos = pos + Vector3(sin(rot_y), 0, cos(rot_y)) * 1.0 + Vector3.UP
+
+## Overcharge Forge: anvil block, three counter-rotating rings, sparks, hum.
+func _build_forge(pos: Vector3) -> void:
+	var c := Color(0.7, 0.3, 1.0)
+	var root := _machine(pos, PI, c, OverchargeForge.NAME, "circle")
+	var core := MeshInstance3D.new(); var sm := SphereMesh.new(); sm.radius = 0.22; sm.height = 0.44; core.mesh = sm
+	core.material_override = _emit(Color(0.85, 0.5, 1.0), 2.5); core.position = Vector3(0, 2.9, 0); root.add_child(core)
+	for i in 3:
+		var r := MeshInstance3D.new(); var tm := TorusMesh.new()
+		tm.inner_radius = 0.42 + i * 0.13; tm.outer_radius = 0.46 + i * 0.13; tm.rings = 24; tm.ring_segments = 6
+		r.mesh = tm; r.material_override = _emit(c.lightened(0.2 * i), 1.6); r.position = core.position
+		root.add_child(r); forge_rings.append(r)
+	var sp := CPUParticles3D.new(); sp.amount = 24; sp.lifetime = 0.8; sp.position = core.position
+	sp.direction = Vector3.UP; sp.spread = 70; sp.initial_velocity_min = 1.0; sp.initial_velocity_max = 2.5
+	sp.gravity = Vector3(0, -4, 0); sp.scale_amount_min = 0.5
+	var q := QuadMesh.new(); q.size = Vector2(0.04, 0.04); var qm := StandardMaterial3D.new()
+	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; qm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	qm.albedo_color = Color(0.9, 0.7, 1.0); q.material = qm; sp.mesh = q
+	root.add_child(sp); dust.append(sp)
+	var hum := AudioStreamPlayer3D.new(); hum.stream = load("res://audio/forge_hum.wav"); hum.unit_size = 3.0
+	hum.max_distance = 18.0; hum.volume_db = -6; hum.position = Vector3(0, 1.5, 0); hum.autoplay = true
+	root.add_child(hum)
+	hum.finished.connect(hum.play)
+	game.add_interactable(_front(root), 2.4, func(pl): return game.forge_prompt(pl), func(pl): game.use_forge(pl))
+
+# ---------------------------------------------------------------- easter egg
+func _place_fuses() -> void:
+	var spots := {"catwalk": Vector3(16, 3.2, -9.7), "yard": Vector3(45.7, 3.5, 9.7), "cold": Vector3(25.7, 3.4, -25.7)}
+	for id in spots:
+		var sb := StaticBody3D.new(); sb.collision_layer = 1; sb.collision_mask = 0; sb.set_meta("fuse", id)
+		var cs := CollisionShape3D.new(); var sh := BoxShape3D.new(); sh.size = Vector3(0.3, 0.4, 0.3); cs.shape = sh; sb.add_child(cs)
+		var mi := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 0.07; cm.bottom_radius = 0.07; cm.height = 0.34
+		mi.mesh = cm; var m := _emit(Color(0.25, 0.6, 0.9), 0.35); mi.material_override = m; sb.add_child(mi)
+		var cap := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(0.18, 0.06, 0.18); cap.mesh = bm
+		cap.material_override = mats.metal; cap.position.y = 0.2; sb.add_child(cap)
+		sb.position = spots[id]; add_child(sb)
+		var l := OmniLight3D.new(); l.light_color = Color(0.3, 0.7, 1.0); l.light_energy = 0.25; l.omni_range = 1.6
+		sb.add_child(l)
+		fuses[id] = [m, l]
+
+func fuse_lit(id: String) -> void:
+	if not fuses.has(id): return
+	var m: StandardMaterial3D = fuses[id][0]
+	m.emission = Color(0.4, 1.0, 0.9); m.emission_energy_multiplier = 4.0
+	fuses[id][1].light_energy = 2.0
+
+func _process(dt: float) -> void:
+	_t += dt
+	var on: bool = game != null and game.facility.power_on
+	for i in forge_rings.size():
+		var r: Node3D = forge_rings[i]
+		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1)
+		r.rotation.x += dt * spd; r.rotation.y += dt * spd * 0.7
+	for n in neon:
+		var m: StandardMaterial3D = n[0]
+		var base: float = 3.2 if on else 0.4
+		m.emission_energy_multiplier = base * (0.92 + 0.08 * sin(_t * 9.0 + n[1] * 10.0)) * (0.2 if not on and fmod(_t * 1.7 + n[1], 3.0) < 0.1 else 1.0)
+
 func _wall_buy(id: String, pos: Vector3, rot_y: float) -> void:
 	var w := Weapons.make(id)
-	var g := GunModel.build(w)
-	g.position = pos; g.rotation.y = rot_y + PI / 2; g.scale = Vector3.ONE * 1.4
+	var g := ModelLib.gun(Weapons.MODELS.get(id, "pistol"))
+	g.position = pos; g.rotation.y = rot_y + PI / 2; g.scale = Vector3.ONE * 1.6
 	add_child(g)
+	# chalk outline behind the gun
+	var fwd0 := Vector3(sin(rot_y), 0, cos(rot_y))
+	var ch := box(Vector3(1.4, 0.55, 0.02) if absf(fwd0.z) > 0.5 else Vector3(0.02, 0.55, 1.4), pos - fwd0 * 0.02, _emit(Color(0.85, 0.85, 0.8), 0.15), false)
+	ch.transparency = 0.6
 	var fwd := Vector3(sin(rot_y), 0, cos(rot_y))
 	label("%s\n%d" % [w.name, Weapons.WALL_PRICES[id]], pos + Vector3(0, 0.55, 0) + fwd * 0.05, rot_y, 36, Color(0.95, 0.95, 0.9))
 	game.add_interactable(pos + fwd * 1.0 - Vector3(0, 0.6, 0), 2.0,
@@ -266,7 +476,7 @@ func _wall_buy(id: String, pos: Vector3, rot_y: float) -> void:
 func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
 	var p: Dictionary = ArmorState.PACKS[pack_id]
 	var root := Node3D.new(); root.position = pos; root.rotation.y = rot_y; add_child(root)
-	box(Vector3(1.0, 1.6, 0.3), Vector3(0, 0.8, 0), mats.metal, true, 1, root)
+	box(Vector3(1.0, 1.6, 0.3), Vector3(0, 0.8, 0), mats.plate, true, 1, root)
 	box(Vector3(0.6, 0.7, 0.15), Vector3(0, 1.1, 0.2), _emit(Color(0.2, 0.9, 0.4), 0.8), false, 1, root)
 	var l := Label3D.new(); l.text = "%s\n+%d armor  %d" % [p.name, p.armor, p.cost]; l.font_size = 30; l.pixel_size = 0.004
 	l.outline_size = 8; l.shaded = false; l.position = Vector3(0, 1.85, 0.2); root.add_child(l)
@@ -280,4 +490,4 @@ func set_power(on: bool) -> void:
 	for l in emergency_lights: l.base = 0.3 if on else 1.2
 	for pair in machine_lights:
 		pair[0].light_energy = 1.5 if on else 0.0
-		pair[1].material_override.emission_energy_multiplier = 3.0 if on else 0.3
+		pair[1].emission_energy_multiplier = 3.0 if on else 0.3

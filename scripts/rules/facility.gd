@@ -7,9 +7,10 @@ const DOORS := {
 	"north": {"cost": 750, "opens": "generator", "label": "Generator Wing"},
 	"east": {"cost": 1000, "opens": "lab", "label": "Lab Corridor"},
 	"cold": {"cost": 1250, "opens": "cold", "label": "Cold Storage"},
+	"yard": {"cost": 1500, "opens": "yard", "label": "Loading Yard"},
 }
 ## Window id -> area it belongs to (only opened areas spawn zombies).
-const WINDOWS := {"w_west": "intake", "w_south": "intake", "w_gen": "generator", "w_lab": "lab", "w_cold": "cold"}
+const WINDOWS := {"w_west": "intake", "w_south": "intake", "w_gen": "generator", "w_lab": "lab", "w_cold": "cold", "w_yard_n": "yard", "w_yard_s": "yard"}
 
 var open_areas := {"intake": true}
 var open_doors := {}
