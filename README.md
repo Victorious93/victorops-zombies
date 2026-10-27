@@ -1,6 +1,6 @@
 # VictorOps Zombies
 
-Original first-person, round-based zombie survival shooter for Android (and desktop) built with **Godot 4.7.2 (GDScript)**.
+**Public repo.** Original first-person, round-based zombie survival shooter for Android (and desktop) built with **Godot 4.7.2 (GDScript)**.
 Hold an abandoned facility against endless rounds: board up windows, buy doors, restore power, gamble at the **Mystery Crate**, drink **Iron Hide Tonic**, **Quickhand Draught** or **Fleetfoot Phial**, and upgrade your gun at the **Overcharge Forge**. Play as **Snoop Dogg** (Bass Drop) or **Martha Stewart** (Fortify).
 
 - `scripts/rules/` – pure game rules (rounds, economy, weapons, crate, perks, forge, armor, barricades), unit-tested
@@ -24,4 +24,6 @@ tools/sign_apk.sh build/victorops-zombies-debug.apk         # v2+v3 sign + verif
 Package `com.victorious.zombie`, minSdk 24, targetSdk 35, arm64-v8a + armeabi-v7a. Signing keys are never committed; CI uses the `VOZ_*` secrets.
 
 ## Roadmap
-Co-op (ENet LAN, revive), more maps, special enemy types, release build. Assets & licenses: see `ASSETS.md`.
+- **Legacy scaffold (v0, `legacy/libgdx/`)** already had Wi-Fi/LAN co-op (host-authoritative) + Bluetooth via VictorLink64 `NetLink` (not device-tested), hardened TCP networking and the Fortify cooldown fix (#4). Co-op *was* built there — just not yet in the Godot version.
+- **Next (Godot):** port co-op (ENet LAN, host-authoritative, revive) and the VictorLink64 hook-up (see `docs/VICTORLINK64.md`).
+- **Later:** more maps, special enemy types, high scores, settings, controller support, release build. Assets & licenses: see `ASSETS.md`.
