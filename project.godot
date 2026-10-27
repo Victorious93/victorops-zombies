@@ -1,0 +1,43 @@
+; Engine configuration file.
+config_version=5
+
+[application]
+
+config/name="VictorOps Zombies"
+config/description="Original round-based first-person zombie survival."
+config/version="1.0.0"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+config/icon="res://icons/icon_192.png"
+boot_splash/bg_color=Color(0, 0, 0, 1)
+boot_splash/show_image=false
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation=4
+
+[input_devices]
+
+pointing/emulate_touch_from_mouse=false
+pointing/emulate_mouse_from_touch=true
+
+[layer_names]
+
+3d_physics/layer_1="world"
+3d_physics/layer_2="zombies"
+3d_physics/layer_3="player"
+3d_physics/layer_4="player_blockers"
+
+[physics]
+
+common/physics_ticks_per_second=60
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true
+anti_aliasing/quality/msaa_3d=0

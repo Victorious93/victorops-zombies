@@ -1,0 +1,86 @@
+name: Godot CI
+on:
+  push:
+  pull_request:
+env:
+  GODOT_VERSION: 4.7.2
+  GODOT_RELEASE: stable
+jobs:
+  test-and-export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: Install Godot + export templates
+        run: |
+          set -euo pipefail
+          V="${GODOT_VERSION}-${GODOT_RELEASE}"
+          base="https://github.com/godotengine/godot/releases/download/${V}"
+          mkdir -p "$HOME/godot" && cd "$HOME/godot"
+          curl -fsSL -o godot.zip "$base/Godot_v${V}_linux.x86_64.zip"
+          unzip -q godot.zip && mv Godot_v${V}_linux.x86_64 godot && chmod +x godot
+          curl -fsSL -o tpz.tpz "$base/Godot_v${V}_export_templates.tpz"
+          T="$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}"
+          mkdir -p "$T" && unzip -q tpz.tpz && mv templates/* "$T/"
+          echo "$HOME/godot" >> "$GITHUB_PATH"
+      - name: Import project
+        run: godot --headless --import
+      - name: Unit tests (GUT)
+        run: godot --headless -s addons/gut/gut_cmdln.gd -gexit 2>&1 | tee gut.txt; grep -q "All tests passed" gut.txt
+      - name: Configure Android export
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.config/godot
+          cat > ~/.config/godot/editor_settings-4.7.tres <<EOT
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOT
+          mkdir -p android/build
+          unzip -q "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}/android_source.zip" -d android/build
+          printf '%s' "${GODOT_VERSION}.${GODOT_RELEASE}" > android/.build_version
+          touch android/build/.gdignore
+      - name: Keystore
+        env:
+          VOZ_KEYSTORE_B64: ${{ secrets.VOZ_KEYSTORE_B64 }}
+          VOZ_KEYSTORE_PASSWORD: ${{ secrets.VOZ_KEYSTORE_PASSWORD }}
+          VOZ_KEY_ALIAS: ${{ secrets.VOZ_KEY_ALIAS }}
+          VOZ_KEY_PASSWORD: ${{ secrets.VOZ_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KS="$RUNNER_TEMP/voz.jks"
+          if [ -n "${VOZ_KEYSTORE_B64}" ]; then
+            echo "$VOZ_KEYSTORE_B64" | base64 -d > "$KS"
+            { echo "VOZ_KEYSTORE_PASSWORD=$VOZ_KEYSTORE_PASSWORD"; echo "VOZ_KEY_ALIAS=$VOZ_KEY_ALIAS"; echo "VOZ_KEY_PASSWORD=$VOZ_KEY_PASSWORD"; } >> "$GITHUB_ENV"
+          else
+            echo "::warning::No keystore secret; signing with a throwaway key (not installable over existing builds)"
+            P="ci-$(openssl rand -hex 8)"; echo "::add-mask::$P"
+            keytool -genkeypair -keystore "$KS" -alias ci -keyalg RSA -keysize 2048 -validity 30 -storepass "$P" -keypass "$P" -dname "CN=CI"
+            { echo "VOZ_KEYSTORE_PASSWORD=$P"; echo "VOZ_KEY_ALIAS=ci"; echo "VOZ_KEY_PASSWORD=$P"; } >> "$GITHUB_ENV"
+          fi
+          echo "VOZ_KEYSTORE_PATH=$KS" >> "$GITHUB_ENV"
+      - name: Export debug APK
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          export GODOT_ANDROID_KEYSTORE_DEBUG_PATH="$VOZ_KEYSTORE_PATH" GODOT_ANDROID_KEYSTORE_DEBUG_USER="$VOZ_KEY_ALIAS" GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD="$VOZ_KEYSTORE_PASSWORD"
+          godot --headless --export-debug Android build/victorops-zombies-debug.apk
+          test -s build/victorops-zombies-debug.apk
+      - name: Sign v2+v3 and verify
+        run: tools/sign_apk.sh build/victorops-zombies-debug.apk | tee verify.txt
+      - name: Check ABIs / SDK
+        run: |
+          grep -q "native-code: 'arm64-v8a' 'armeabi-v7a'" verify.txt
+          grep -q "targetSdkVersion:'35'" verify.txt
+          grep -q "minSdkVersion:'24'" verify.txt
+          grep -q "name='com.victorious.zombie'" verify.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: victorops-zombies-debug-apk
+          path: build/victorops-zombies-debug.apk

@@ -14,3 +14,9 @@ keystore.properties
 signing.properties
 android/libs/
 *.keystore
+# Godot
+.godot/
+android/
+*.idsig
+*.apk
+*.aab
