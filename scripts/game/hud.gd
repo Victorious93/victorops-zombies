@@ -120,11 +120,21 @@ func _draw_center() -> void:
 		var s := 1.0 + (0.4 if hit_kill else 0.0) + hit_t
 		for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 			hit.draw_line(c + d * 7 * s, c + d * 16 * s, col, 3.0 if not hit_kill else 4.0)
-	if dmg_t > 0.0 and not is_nan(dmg_angle):
-		var dir := Vector2(sin(dmg_angle), -cos(dmg_angle))
+	# damage direction arcs: one per recent attacker, tracked in world space so they turn with you
+	for ind in dmg_marks:
+		var off: Vector3 = p.to_local(ind.from); off.y = 0
+		if off.length() < 0.01: continue
+		var ang := atan2(off.x, -off.z)
+		var dir := Vector2(sin(ang), -cos(ang))
 		var r := minf(hit.size.x, hit.size.y) * 0.28
-		var tip := c + dir * (r + 26); var side := dir.orthogonal() * 22
-		hit.draw_colored_polygon(PackedVector2Array([tip, c + dir * r + side, c + dir * r - side]), Color(1, 0.1, 0.05, dmg_t * 1.4))
+		var a: float = clampf(ind.t / 0.9, 0, 1)
+		var pts := PackedVector2Array()
+		for i in 13:
+			var aa := ang - 0.32 + 0.64 * i / 12.0
+			pts.append(c + Vector2(sin(aa), -cos(aa)) * r)
+		hit.draw_polyline(pts, Color(1, 0.08, 0.04, a), 9.0)
+		var tip := c + dir * (r + 24); var side := dir.orthogonal() * 16
+		hit.draw_colored_polygon(PackedVector2Array([tip, c + dir * (r + 6) + side, c + dir * (r + 6) - side]), Color(1, 0.1, 0.05, a))
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
 
@@ -174,8 +184,14 @@ func bark(text: String) -> void:
 func info(text: String) -> void:
 	info_lbl.text = text; info_lbl.modulate.a = 1.0
 
-func damage_flash(angle := NAN) -> void:
+var dmg_marks: Array = []  ## [{from: Vector3, t: float}]
+var desat := 0.0
+
+func damage_flash(angle := NAN, from := Vector3.INF) -> void:
 	dmg_t = 0.5; dmg_angle = angle
+	if from != Vector3.INF:
+		dmg_marks.append({from = from, t = 1.2})
+		if dmg_marks.size() > 4: dmg_marks.pop_front()
 
 func _process(dt: float) -> void:
 	var p = game.player
@@ -217,7 +233,14 @@ func _process(dt: float) -> void:
 	bark_t -= dt; bark_lbl.visible = bark_t > 0
 	info_lbl.modulate.a = maxf(0.0, info_lbl.modulate.a - dt * 0.5)
 	dmg_t = maxf(0.0, dmg_t - dt)
+	for m in dmg_marks: m.t -= dt
+	dmg_marks = dmg_marks.filter(func(m): return m.t > 0.0)
 	var low: float = 1.0 - p.health / p.max_health
+	# low health: drain colour and pulse the vignette with the heartbeat
+	var crit := clampf((p.health / p.max_health - 0.45) / -0.35, 0.0, 1.0) if not p.is_downed else 1.0
+	desat = lerpf(desat, crit, clampf(dt * 3.0, 0, 1))
+	if game.env: game.env.adjustment_saturation = lerpf(1.0, 0.2, desat)
+	low += desat * 0.25 * absf(sin(Time.get_ticks_msec() / 1000.0 * PI * 1.3))
 	vignette.color.a = clampf(dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
 	hit.queue_redraw()
 

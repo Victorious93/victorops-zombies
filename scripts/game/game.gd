@@ -80,14 +80,14 @@ func _ready() -> void:
 func _build_env() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.02, 0.025, 0.035)
+	env.background_color = Color(0.01, 0.012, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.3, 0.33, 0.42)
-	env.ambient_light_energy = 0.35
+	env.ambient_light_color = Color(0.26, 0.3, 0.42)
+	env.ambient_light_energy = 0.2
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.06, 0.07, 0.09)
-	env.fog_density = 0.045
+	env.fog_density = 0.055
 	env.glow_enabled = true
 	env.glow_intensity = 0.7
 	env.glow_bloom = 0.08
@@ -119,6 +119,10 @@ func apply_settings() -> void:
 	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
 	if player:
 		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
+		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
+		if player.flashlight: player.flashlight.shadow_enabled = d.shadows
+	if touch:
+		touch.floating = settings.joystick != "fixed"; touch.fire_scale = settings.fire_size; touch._layout()
 
 func _start_music() -> void:
 	var s := sfx.stream("music") as AudioStreamWAV
@@ -270,7 +274,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			var before := p.economy.points
 			p.economy.on_hit()
 			var was_alive := z.state != Zombie.State.DEAD
-			z.take_damage(dmg, head, p, part, dir * (4.0 + w.damage * 0.02))
+			z.take_damage(dmg, head, p, part, dir * (3.0 + w.damage * 0.02) * w.kick_mult())
 			var killed := was_alive and z.state == Zombie.State.DEAD
 			_pay(p, r.position + Vector3.UP * 0.3, before)
 			hud.hitmarker(killed, head)
@@ -289,8 +293,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			if col and col.has_meta("fuse"):
 				_shoot_fuse(p, col)
 			var n: Vector3 = r.normal
-			fx.bullet_hole(r.position, n)
-			fx.sparks(r.position, n, Color(1.0, 0.8, 0.45), 6, 0.15, 4.0)
+			fx.bullet_hole(r.position, n, w.weight >= 1.2)
 			if w.splash > 0.0: _splash(p, r.position, w, null)
 			break
 	var m: Node3D = p.vm.muzzle if p.vm and p.vm.muzzle else null

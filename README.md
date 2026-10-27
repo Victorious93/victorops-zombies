@@ -37,3 +37,11 @@ Package `com.victorious.zombie`, minSdk 24, targetSdk 35, arm64-v8a + armeabi-v7
 - **Legacy scaffold (v0, `legacy/libgdx/`)** already had Wi-Fi/LAN co-op (host-authoritative) + Bluetooth via VictorLink64 `NetLink` (not device-tested), hardened TCP networking and the Fortify cooldown fix (#4). Co-op *was* built there — just not yet in the Godot version.
 - **Next (Godot):** port co-op (ENet LAN, host-authoritative, revive) and the VictorLink64 hook-up (see `docs/VICTORLINK64.md`).
 - **Later:** more maps, special enemy types, high scores, settings, controller support, release build. Assets & licenses: see `ASSETS.md`.
+
+## Single-player feel (v4)
+- Zombies: wind-up swings, lunges, stagger/knockback, head and leg pops with blood, fling-and-topple deaths (animated, not physics ragdoll), varied groans, rise-from-ground and drop-over-wall spawns; a progress watchdog unsticks blocked zombies.
+- Guns: weight per weapon (move speed, kick, impact force), first-shot punch, muzzle light, heavy impacts with sparks and dust, layered reload.
+- Camera: sprint FOV kick, landing bob, damage direction arcs, heartbeat + desaturation at low HP.
+- Mobile: auto-fire, aim slowdown + magnetism, gyro (off/ADS/always), look curve, fixed/floating stick, fire-button size (Settings).
+- Performance/lighting: Medium preset at 0.75 render scale, prop visibility ranges (LOD), darker scene with rim light, gun flashlight, red alarm beacons from round 6.
+- `-- --clip=DIR` runs a scripted 30 s trailer route (use with `--fixed-fps 30 --write-movie out.avi`) and saves 6 stills.

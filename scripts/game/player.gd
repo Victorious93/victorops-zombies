@@ -66,6 +66,16 @@ var last_stand := LastStand.new()
 var stand_loadout: Loadout = null
 var saved_loadout: Loadout = null
 var crouch_key_prev := false
+## v4 feel
+var auto_fire := false
+var gyro_mode := "off"
+var look_curve := 1.3
+var since_shot := 9.0
+var fov_kick := 0.0
+var land_bob := 0.0
+var fall_speed := 0.0
+var heartbeat_t := 0.0
+var flashlight: SpotLight3D
 ## Bot/sim driver: when set, {mv: Vector2, fire, ads, use, sprint: bool} replaces device input.
 var bot_input = null
 
@@ -84,9 +94,12 @@ func _ready() -> void:
 	head = Node3D.new(); head.position.y = 1.62; add_child(head)
 	cam = Camera3D.new(); cam.fov = 75; cam.near = 0.03; cam.far = 140; head.add_child(cam)
 	cam.current = true
-	var torch := SpotLight3D.new(); torch.light_energy = 1.6; torch.spot_range = 22; torch.spot_angle = 28
-	torch.light_color = Color(1.0, 0.95, 0.85); torch.position = Vector3(0.15, -0.1, 0); cam.add_child(torch)
 	vm = Viewmodel.new(); vm.setup(cdef.get("color", Color(0.4, 0.4, 0.45))); cam.add_child(vm)
+	# gun-mounted flashlight: rides the viewmodel so the beam sways, kicks and dips on reload
+	flashlight = SpotLight3D.new(); flashlight.light_energy = 2.4; flashlight.spot_range = 24; flashlight.spot_angle = 24
+	flashlight.spot_attenuation = 0.8; flashlight.light_color = Color(1.0, 0.93, 0.8)
+	flashlight.position = Vector3(0.0, 0.02, -0.25); vm.add_child(flashlight)
+	flashlight.shadow_enabled = game != null and game.settings_shadows()
 	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand)
 	vm.set_weapon(weapon())
 
@@ -130,6 +143,7 @@ func reload() -> void:
 
 func _start_reload_sfx() -> void:
 	reload_beats = {out = false, ins = false, bolt = false}
+	game.sfx.play("mag_release", -8)
 	game.sfx.play("mag_out", -6)
 	reload_beats.out = true
 
@@ -164,8 +178,16 @@ func _physics_process(dt: float) -> void:
 		mv = bot_input.mv; fire = bot_input.fire; want_ads = bot_input.ads; use = bot_input.use; sprint_key = bot_input.sprint
 	elif on_touch:
 		mv += touch.move
-		_look(touch.consume_look(), TOUCH_SENS)
+		var targets := _assist_targets()
+		var fwd := -cam.global_basis.z
+		var slow := AimAssist.slowdown(cam.global_position, fwd, targets) if aim_assist else 1.0
+		_look(AimAssist.look_curve(touch.consume_look(), look_curve) * slow, TOUCH_SENS)
+		if gyro_mode == "always" or (gyro_mode == "ads" and ads):
+			var g := Input.get_gyroscope()  # rad/s, device axes (landscape)
+			yaw += g.y * dt * sens * 0.9; pitch = clampf(pitch + g.x * dt * sens * 0.9, -1.45, 1.45)
 		fire = fire or touch.fire
+		if auto_fire and not fire and AimAssist.on_target(cam.global_position, fwd, targets):
+			fire = true
 		want_ads = want_ads or touch.ads
 		use = use or touch.use
 		sprint_key = sprint_key or touch.sprint
@@ -195,6 +217,7 @@ func _physics_process(dt: float) -> void:
 	var spd: float = WALK * cdef.speed_mult * (1.15 if perks.has("fleetfoot") else 1.0)
 	if is_downed: spd *= 0.25
 	if sprinting: spd *= 1.7 if perks.has("fleetfoot") else 1.5
+	spd *= weapon().move_mult()
 	spd *= lerpf(1.0, 0.6, ads01)
 	var dir := (transform.basis * Vector3(mv.x, 0, mv.y)) * spd
 	if slide_t > 0.0:
@@ -203,8 +226,16 @@ func _physics_process(dt: float) -> void:
 	if lunge_t > 0.0:
 		lunge_t -= dt; dir = lunge_vel
 	velocity.x = dir.x; velocity.z = dir.z
+	var was_air := not is_on_floor()
 	velocity.y = -0.5 if is_on_floor() else velocity.y - GRAVITY * dt
+	if was_air: fall_speed = maxf(fall_speed, -velocity.y)
 	move_and_slide()
+	if was_air and is_on_floor():
+		# landing: camera dips and springs back, harder the further you fell
+		if fall_speed > 2.0:
+			land_bob = clampf(fall_speed * 0.025, 0.04, 0.22); add_trauma(clampf(fall_speed * 0.02, 0.0, 0.25))
+			game.sfx.play("step1", -8, 0.7)
+		fall_speed = 0.0
 	# footsteps
 	if is_on_floor() and mv.length() > 0.2:
 		step_t -= dt * spd / WALK
@@ -212,15 +243,13 @@ func _physics_process(dt: float) -> void:
 			step_t = 0.42
 			game.sfx.play("step%d" % (randi() % 3 + 1), -16 if not sprinting else -12, randf_range(1.1, 1.3))
 	# aim assist (touch, or when enabled): slow pull toward the nearest zombie in a small cone
-	if aim_assist and on_touch and (ads or fire):
-		var targets: Array = []
-		for z in game.zombies:
-			if is_instance_valid(z) and z.state != Zombie.State.DEAD:
-				targets.append(z.global_position + Vector3.UP * (0.5 if z.crawler else 1.25))
+	# magnetism: full pull while aiming/firing, a gentle one while just looking around
+	if aim_assist and on_touch:
+		var targets := _assist_targets()
 		var fwd := -cam.global_basis.z
 		var i := AimAssist.pick(cam.global_position, fwd, targets)
 		if i >= 0:
-			var n := AimAssist.nudge(cam.global_position, fwd, targets[i], dt)
+			var n := AimAssist.nudge(cam.global_position, fwd, targets[i], dt) * (1.0 if (ads or fire) else 0.4)
 			yaw += n.x; pitch = clampf(pitch + n.y, -1.45, 1.45)
 	# look + recoil recovery + shake
 	recoil = lerpf(recoil, 0.0, clampf(dt * 8.0, 0, 1))
@@ -230,10 +259,14 @@ func _physics_process(dt: float) -> void:
 	rotation.y = yaw
 	head.rotation.x = clampf(pitch + recoil, -1.5, 1.5) + sin(shake_t * 1.3) * sh * 0.05
 	head.rotation.z = sin(shake_t * 0.9 + 1.7) * sh * 0.06
-	var base_fov := 82.0 if sprinting or slide_t > 0.0 else 75.0
-	cam.fov = lerpf(base_fov, 55.0, ads01)
+	var base_fov := 86.0 if sprinting or slide_t > 0.0 else 75.0
+	fov_kick = move_toward(fov_kick, 0.0, dt * 30.0)
+	cam.fov = lerpf(cam.fov, lerpf(base_fov, 55.0, ads01) + fov_kick * lerpf(1.0, 0.3, ads01), clampf(dt * 12.0, 0, 1))
 	var head_y := 0.55 if is_downed else (1.0 if slide_t > 0.0 else 1.62)
-	head.position.y = lerpf(head.position.y, head_y, clampf(dt * 10.0, 0, 1))
+	land_bob = move_toward(land_bob, 0.0, dt * 0.9)
+	head.position.y = lerpf(head.position.y, head_y - land_bob, clampf(dt * 10.0, 0, 1))
+	since_shot += dt
+	_heartbeat(dt)
 	pattern_reset -= dt
 	if pattern_reset <= 0.0: pattern_i = 0
 	# weapon
@@ -245,8 +278,11 @@ func _physics_process(dt: float) -> void:
 	var r01 := reload01()
 	if r01 >= 0.0:
 		if not reload_beats.get("out", false): _start_reload_sfx()
-		if r01 > 0.55 and not reload_beats.ins: reload_beats.ins = true; game.sfx.play("mag_in", -5)
-		if r01 > 0.85 and not reload_beats.bolt: reload_beats.bolt = true; game.sfx.play("bolt", -6)
+		# layered reload: release click -> mag out -> handling -> mag seat -> rack
+		if r01 > 0.08 and not reload_beats.get("cloth", false): reload_beats.cloth = true; game.sfx.play("reload_cloth", -12, randf_range(0.9, 1.1))
+		if r01 > 0.55 and not reload_beats.ins: reload_beats.ins = true; game.sfx.play("mag_in", -4); vm.kick += 0.25
+		if r01 > 0.85 and not reload_beats.bolt:
+			reload_beats.bolt = true; game.sfx.play("rack", -4, 1.15 - weapon().weight * 0.15); vm.kick += 0.35; add_trauma(0.04)
 	else:
 		reload_beats = {}
 	if fire and not sprinting and vm.knife_t <= 0.0 and vm.throw_t <= 0.0:
@@ -287,11 +323,16 @@ func try_fire(moving: bool) -> void:
 	# learnable per-gun recoil pattern (resets after a short pause in fire), plus a little noise
 	var kick: Vector2 = w.recoil_pattern[pattern_i % w.recoil_pattern.size()]
 	pattern_i += 1; pattern_reset = w.fire_interval * 2.5 + 0.15
-	var k := lerpf(1.0, 0.6, ads01)
-	recoil += deg_to_rad(w.recoil * kick.x) * k
+	# weight + first-shot punch: the first round after a pause hits harder; heavy guns shove more
+	var first := w.first_shot_mult(since_shot)
+	since_shot = 0.0
+	var k := lerpf(1.0, 0.6, ads01) * w.kick_mult()
+	recoil += deg_to_rad(w.recoil * kick.x) * k * first
 	yaw -= deg_to_rad(w.recoil * kick.y * 0.35 + randf_range(-0.05, 0.05) * w.recoil) * k
-	vm.fire(0.5 + w.recoil * 0.15)
-	add_trauma(0.06 + w.recoil * 0.025 * (0.5 if ads else 1.0))
+	vm.fire((0.5 + w.recoil * 0.15) * w.kick_mult() * first)
+	add_trauma((0.06 + w.recoil * 0.025 * (0.5 if ads else 1.0)) * w.kick_mult() * first)
+	fov_kick = minf(fov_kick + (0.8 + w.weight * 1.2) * first, 5.0)
+	if first > 1.2 or w.weight >= 1.2: game.sfx.play("shot_punch", -8.0 + w.weight * 3.0, randf_range(0.9, 1.05) / sqrt(w.weight))
 	var model: String = vm.model_name
 	game.sfx.play(SHOT_SOUND.get(model, "shot_pistol"), -7.0 if w.automatic else -4.0, randf_range(0.95, 1.05) * (0.88 if w.tier > 0 else 1.0))
 	if w.tier > 0: game.sfx.play("shot_energy", -16, 1.6)
@@ -326,13 +367,29 @@ func use_ability() -> void:
 	if ability_cd > 0.0 or game.over: return
 	game.use_ability(self)
 
+func _assist_targets() -> Array:
+	var targets: Array = []
+	for z in game.zombies:
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD:
+			targets.append(z.global_position + Vector3.UP * (0.5 if z.crawler else 1.25))
+	return targets
+
+## Low health: heartbeat speeds up as health drops (HUD drains colour in step).
+func _heartbeat(dt: float) -> void:
+	var frac := health / maxf(max_health, 1.0)
+	if is_downed or frac > 0.45: heartbeat_t = 0.0; return
+	heartbeat_t -= dt
+	if heartbeat_t <= 0.0:
+		heartbeat_t = lerpf(0.55, 1.1, frac / 0.45)
+		game.sfx.play("heartbeat", lerpf(-2.0, -12.0, frac / 0.45))
+
 func take_damage(d: float, from := Vector3.INF) -> void:
 	if is_downed or game.over: return
 	if game.god_mode: d = 0.0
 	health -= armor.absorb(d)
 	since_hit = 0.0
 	add_trauma(0.35)
-	game.hud.damage_flash(_dir_angle(from))
+	game.hud.damage_flash(_dir_angle(from), from)
 	game.sfx.play("hurt", -3)
 	if low_trigger.check(health, max_health): game.bark(Barks.DANGER)
 	if health <= 0.0:

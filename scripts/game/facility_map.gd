@@ -23,6 +23,9 @@ var forge_rings: Array = []
 var forge_work := 0.0   ## seconds left on the current upgrade animation
 var neon: Array = []          # [material, base energy]
 var _t := 0.0
+var alarm_lights: Array = []   ## pulsing red alarms that kick in after round 5
+var alarm_mats: Array = []
+const ALARM_ROUND := 6
 
 func _ready() -> void:
 	var nm := NavigationMesh.new()
@@ -164,12 +167,20 @@ func rebake() -> void:
 func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := false, collide := true) -> Node3D:
 	var n := ModelLib.prop(name, size, by_height)
 	n.position = pos; n.rotation.y = rot_y; add_child(n)
+	_lod(n, 38.0 if size > 1.5 else 24.0)
 	if collide:
 		var a := _bounds(n)
 		var sb := StaticBody3D.new(); sb.collision_layer = 1; sb.collision_mask = 0
 		var cs := CollisionShape3D.new(); var sh := BoxShape3D.new(); sh.size = a.size; cs.shape = sh
 		cs.position = a.get_center(); sb.add_child(cs); n.add_child(sb)
 	return n
+
+## Distance culling ("LOD") for props: small clutter disappears past a few rooms, with a fade margin.
+func _lod(n: Node, dist: float) -> void:
+	if n is GeometryInstance3D:
+		n.visibility_range_end = dist; n.visibility_range_end_margin = 2.0
+		n.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_DISABLED
+	for c in n.get_children(): _lod(c, dist)
 
 func _bounds(n: Node3D) -> AABB:
 	var acc := AABB(); var first := true
@@ -227,8 +238,14 @@ func build(p_game) -> void:
 		w.visible = false; room_lights.append(w); shadow_lights.append(w)
 		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
-	# moon
-	var moon := DirectionalLight3D.new(); moon.light_color = Color(0.45, 0.55, 0.8); moon.light_energy = 0.35
+	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
+	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
+		var am := _emit(Color(1.0, 0.1, 0.05), 0.2); alarm_mats.append(am)
+		box(Vector3(0.3, 0.3, 0.3), p, am, false)
+		var al := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.08, 0.04), 0.0, 10.0, false)
+		al.visible = false; alarm_lights.append(al)
+	# moon (dimmer: the scene is lit mostly by the gun flashlight, lamps and neon)
+	var moon := DirectionalLight3D.new(); moon.light_color = Color(0.4, 0.5, 0.85); moon.light_energy = 0.22
 	moon.rotation_degrees = Vector3(-50, 30, 0); moon.shadow_enabled = true; add_child(moon)
 	moon.directional_shadow_max_distance = 40.0
 	shadow_lights.append(moon)
@@ -461,6 +478,14 @@ func _process(dt: float) -> void:
 		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1) * (1.0 + 7.0 * sin(clampf(forge_work / OverchargeForge.FORGE_TIME, 0, 1) * PI))
 		r.scale = Vector3.ONE * (1.0 + (0.25 * sin(_t * 20.0) if forge_work > 0.0 else 0.0))
 		r.rotation.x += dt * spd; r.rotation.y += dt * spd * 0.7
+	var alarm: bool = game != null and game.round >= ALARM_ROUND and not game.over
+	var pulse := 0.5 + 0.5 * sin(_t * 5.0)
+	for i in alarm_lights.size():
+		var al: OmniLight3D = alarm_lights[i]
+		al.visible = alarm
+		if alarm:
+			var k := pow(0.5 + 0.5 * sin(_t * 5.0 + i * 1.3), 3.0)
+			al.light_energy = 2.6 * k; alarm_mats[i].emission_energy_multiplier = 0.5 + 5.0 * k
 	for n in neon:
 		var m: StandardMaterial3D = n[0]
 		var base: float = 3.2 if on else 0.4

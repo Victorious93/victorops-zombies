@@ -65,9 +65,23 @@ func surface_quad(at: Vector3, normal: Vector3, size: float, mat: Material, life
 	else: _add_decal(mi)
 	return mi
 
-func bullet_hole(at: Vector3, normal: Vector3) -> void:
-	surface_quad(at, normal, randf_range(0.07, 0.11), _quad_mat("hole", _hole_tex))
-	sparks(at, normal, Color(1.0, 0.8, 0.45), 5)
+func bullet_hole(at: Vector3, normal: Vector3, heavy := false) -> void:
+	surface_quad(at, normal, randf_range(0.07, 0.11) * (1.6 if heavy else 1.0), _quad_mat("hole", _hole_tex))
+	# hot spark streaks + a chunky dust/debris puff
+	sparks(at, normal, Color(1.0, 0.8, 0.45), 9 if heavy else 6, 0.22, 6.0)
+	sparks(at, normal, Color(0.42, 0.4, 0.37), 10 if heavy else 6, 0.55, 2.2, 0.06)
+	if heavy: sparks(at, normal, Color(0.25, 0.23, 0.2), 6, 0.8, 3.0, 0.035)
+
+## Big arterial burst for head/limb pops.
+func blood_burst(at: Vector3, dir: Vector3, big := true) -> void:
+	sparks(at, (dir + Vector3.UP * 0.6).normalized(), Color(0.6, 0.0, 0.0), 26 if big else 14, 0.55, 5.0, 0.05)
+	sparks(at, Vector3.UP, Color(0.35, 0.0, 0.01), 12, 0.9, 2.0, 0.09)
+	blood_hit(at, dir)
+
+## Dirt spray when a zombie claws out of the ground.
+func dirt_burst(at: Vector3) -> void:
+	sparks(at + Vector3.UP * 0.1, Vector3.UP, Color(0.22, 0.17, 0.11), 18, 0.9, 3.5, 0.07)
+	sparks(at + Vector3.UP * 0.1, Vector3.UP, Color(0.3, 0.26, 0.2), 10, 1.4, 1.2, 0.14)
 
 func blood_hit(at: Vector3, dir: Vector3) -> void:
 	sparks(at, -dir, Color(0.55, 0.0, 0.0), 8, 0.25, 2.5)
@@ -81,12 +95,13 @@ func blood_pool(at: Vector3) -> void:
 	var m := surface_quad(at + Vector3.UP * 0.01, Vector3.UP, 0.2, _quad_mat("blood", _blood_tex))
 	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(6.0, 9.0), 1.8).set_ease(Tween.EASE_OUT)
 
-func sparks(at: Vector3, normal: Vector3, color: Color, amount: int, life := 0.18, spd := 4.0) -> void:
+func sparks(at: Vector3, normal: Vector3, color: Color, amount: int, life := 0.18, spd := 4.0, size := 0.03) -> void:
 	var p := CPUParticles3D.new()
 	p.one_shot = true; p.emitting = false; p.amount = maxi(1, int(amount * particle_scale)); p.lifetime = life
 	p.explosiveness = 1.0; p.direction = normal; p.spread = 50.0
 	p.initial_velocity_min = spd * 0.5; p.initial_velocity_max = spd; p.gravity = Vector3(0, -9, 0)
-	var q := QuadMesh.new(); q.size = Vector2(0.03, 0.03); p.mesh = q
+	var q := QuadMesh.new(); q.size = Vector2(size, size); p.mesh = q
+	p.scale_amount_min = 0.6; p.scale_amount_max = 1.4
 	var m := _quad_mat("spark_%s" % color.to_html(), _soft_tex, color, true, color.r > 0.8)
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	p.material_override = m

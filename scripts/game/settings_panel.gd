@@ -18,12 +18,24 @@ static func _slider(h: HBoxContainer, lo: float, hi: float, v: float, step: floa
 	s.value_changed.connect(func(x): val.text = "%.2f" % x; cb.call(x))
 	h.add_child(s); h.add_child(val)
 
+static func _choice(h: HBoxContainer, opts: Array, cur: String, cb: Callable) -> void:
+	var grp := ButtonGroup.new()
+	for o in opts:
+		var b := Button.new(); b.toggle_mode = true; b.button_group = grp; b.text = String(o).capitalize()
+		b.custom_minimum_size = Vector2(120, 48); b.add_theme_font_size_override("font_size", 22)
+		b.button_pressed = cur == o
+		b.pressed.connect(func(): cb.call(o))
+		h.add_child(b)
+
 static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> Control:
 	var root := PanelContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var sb := StyleBoxFlat.new(); sb.bg_color = Color(0.02, 0.02, 0.03, 0.82); root.add_theme_stylebox_override("panel", sb)
+	var scroll := ScrollContainer.new(); scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	root.add_child(scroll)
 	var box := VBoxContainer.new(); box.alignment = BoxContainer.ALIGNMENT_CENTER
-	box.add_theme_constant_override("separation", 14); root.add_child(box)
+	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL; box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	box.add_theme_constant_override("separation", 10); scroll.add_child(box)
 	var t := Label.new(); t.text = "SETTINGS"; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	t.add_theme_font_size_override("font_size", 44); t.add_theme_color_override("font_color", Color(0.85, 0.1, 0.06)); box.add_child(t)
 	_slider(_row(box, "Look sensitivity"), 0.2, 3.0, st.sensitivity, 0.05, func(x): st.set_sensitivity(x); on_change.call())
@@ -39,6 +51,13 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	var ah := _row(box, "Aim assist (touch)")
 	var cb := CheckButton.new(); cb.button_pressed = st.aim_assist; cb.custom_minimum_size = Vector2(80, 48)
 	cb.toggled.connect(func(on): st.aim_assist = on; on_change.call()); ah.add_child(cb)
+	var afh := _row(box, "Auto-fire on target")
+	var af := CheckButton.new(); af.button_pressed = st.auto_fire; af.custom_minimum_size = Vector2(80, 48)
+	af.toggled.connect(func(on): st.auto_fire = on; on_change.call()); afh.add_child(af)
+	_choice(_row(box, "Gyro aim"), GameSettings.GYRO_MODES, st.gyro, func(v): st.gyro = v; on_change.call())
+	_choice(_row(box, "Joystick"), ["floating", "fixed"], st.joystick, func(v): st.joystick = v; on_change.call())
+	_slider(_row(box, "Look curve"), 1.0, 1.8, st.look_curve, 0.05, func(x): st.look_curve = x; on_change.call())
+	_slider(_row(box, "Fire button size"), 1.0, 1.8, st.fire_size, 0.05, func(x): st.fire_size = x; on_change.call())
 	_slider(_row(box, "Music"), 0.0, 1.0, st.music, 0.05, func(x): st.music = x; on_change.call())
 	_slider(_row(box, "Effects"), 0.0, 1.0, st.sfx, 0.05, func(x): st.sfx = x; on_change.call())
 	for pair in buttons:

@@ -36,6 +36,21 @@ var knock := Vector3.ZERO
 var flash_t := 0.0
 var meshes: Array = []
 var eye_light: OmniLight3D
+var voice := 1           ## which groan this zombie uses (each has its own voice)
+var voice_pitch := 1.0
+var stagger_t := 0.0
+var lunge_cd := 1.5
+var lunge_t := 0.0
+var windup_t := -1.0     ## >0: an attack is winding up and lands when it reaches 0
+var drop_in := false     ## spawned on top of the perimeter wall and drops down
+var drop_v := 0.0
+var skel: Skeleton3D
+var head_popped := false
+var death_fling := Vector3.ZERO
+var death_tilt := Vector3.ZERO
+const LUNGE_RANGE := 2.9
+const LUNGE_SPEED := 5.5
+const WINDUP := 0.22
 
 func setup(p_game, p_window: WindowBarricade, round: int) -> void:
 	game = p_game; window = p_window
@@ -45,6 +60,9 @@ func setup(p_game, p_window: WindowBarricade, round: int) -> void:
 	runner = randf() < rc
 	speed = (Rounds.RUN_SPEED if runner else Rounds.WALK_SPEED) * randf_range(0.9, 1.12)
 	variant = "zombie_b" if randf() < 0.35 else "zombie_a"
+	voice = randi() % 5 + 1
+	voice_pitch = randf_range(0.78, 1.22) * (0.88 if variant == "zombie_b" else 1.0)
+	drop_in = randf() < 0.35
 
 func _ready() -> void:
 	add_to_group("voz_zombie")
@@ -67,14 +85,37 @@ func _ready() -> void:
 	if anims.has("HitRecieve") and not anims.has("HitReact"): anims.HitReact = anims.HitRecieve
 	if anims.has("Attack") and not anims.has("Punch"): anims.Punch = anims.Attack
 	_collect_meshes(model)
+	for mi in meshes:
+		(mi as GeometryInstance3D).visibility_range_end = 48.0
+		for si in (mi as MeshInstance3D).mesh.get_surface_count():
+			var m := (mi as MeshInstance3D).mesh.surface_get_material(si)
+			if m is StandardMaterial3D: (mi as MeshInstance3D).set_surface_override_material(si, _rim_mat(m))
 	ModelLib.set_shadows(model, game == null or game.settings_shadows())
 	if ap:
 		for k in ["Walk", "Run", "Crawl", "Idle"]:
 			if anims.has(k): ap.get_animation(anims[k]).loop_mode = Animation.LOOP_LINEAR
 		ap.speed_scale = randf_range(0.9, 1.1)
+	var sks := model.find_children("*", "Skeleton3D", true, false)
+	if not sks.is_empty(): skel = sks[0]
 	t = 0.9; groan_cd = randf_range(1, 6)
-	model.position.y = -1.8
-	_play("Idle")
+	if drop_in:
+		# climbs over the yard wall: appears on top, drops down with a thud
+		model.position.y = 2.6; t = 0.9
+		if anims.has("Run"): _play("Run", 0.1, 0.5)
+	else:
+		model.position.y = -1.8
+		_play("Idle")
+		if game and game.fx: game.fx.dirt_burst(global_position)
+		if game and game.sfx: game.sfx.play_at("dirt_rise", global_position, -6, randf_range(0.85, 1.1))
+
+## Cold blue-green rim so zombies read as silhouettes in the dark. Shared per source material (batches).
+static var _rim_cache := {}
+static func _rim_mat(src: StandardMaterial3D) -> StandardMaterial3D:
+	if not _rim_cache.has(src):
+		var m := src.duplicate() as StandardMaterial3D
+		m.rim_enabled = true; m.rim = 0.7; m.rim_tint = 0.15
+		_rim_cache[src] = m
+	return _rim_cache[src]
 
 func _collect_meshes(n: Node) -> void:
 	if n is MeshInstance3D: meshes.append(n)
@@ -112,8 +153,17 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 			_become_crawler()
 	if hp <= 0:
 		die(player, headshot, force, dmg)
-	elif dmg > max_hp * 0.2 and state == State.CHASE and cur_anim != "Punch" and not crawler:
-		_play("HitReact", 0.05); cur_anim = "HitReact"; attack_anim_t = 0.35
+		return
+	# stagger: knocked back, slowed, interrupts a wind-up on big hits
+	var heavy := float(dmg) / max_hp
+	if state == State.CHASE and not crawler:
+		var f := force; f.y = 0
+		knock += f.limit_length(6.0) * clampf(heavy * 2.5, 0.15, 1.0)
+		stagger_t = maxf(stagger_t, clampf(0.12 + heavy * 0.8, 0.12, 0.6))
+		if heavy > 0.2: windup_t = -1.0; lunge_t = 0.0
+		if heavy > 0.12 or headshot:
+			cur_anim = ""; _play("HitReact", 0.04, 1.4); attack_anim_t = stagger_t
+	model.rotation.x = clampf(-heavy * 0.9, -0.35, 0.0)  # flinch, recovers in _physics_process
 
 func make_crawler() -> void:
 	if not crawler and state != State.DEAD and anims.has("Crawl"): _become_crawler()
@@ -121,17 +171,36 @@ func make_crawler() -> void:
 func _become_crawler() -> void:
 	crawler = true; runner = false; speed *= 0.5
 	(shape.shape as CapsuleShape3D).height = 0.9; shape.position.y = 0.45
-	if game: game.fx.gibs(global_position + Vector3.UP * 0.4, 3, self)
+	_pop_bone("LowerLeg.L" if randf() < 0.5 else "LowerLeg.R")
+	if game:
+		game.fx.gibs(global_position + Vector3.UP * 0.4, 4, self)
+		game.fx.blood_burst(global_position + Vector3.UP * 0.4, Vector3.UP, false)
+		game.sfx.play_at("gore", global_position, -6, randf_range(0.9, 1.1))
+
+## Limb/head pop: collapse the bone (and its children) to nothing so the mesh tears off there.
+func _pop_bone(bone: String) -> void:
+	if skel == null: return
+	var i := skel.find_bone(bone)
+	if i < 0: return
+	skel.set_bone_pose_scale(i, Vector3.ONE * 0.001)
+	set_meta("popped_" + bone, i)
 
 func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
 	state = State.DEAD; t = 4.0
 	collision_layer = 0
 	velocity = Vector3.ZERO
 	if anims.has("Death"):
-		cur_anim = ""; _play("Death", 0.08)
+		cur_anim = ""; _play("Death", 0.05, randf_range(1.1, 1.5))
+	# fake ragdoll: the body is flung along the hit and topples that way while the death anim plays
+	var f := force; f.y = 0
+	death_fling = f.limit_length(7.0) * 0.55 + f.normalized() * 0.6
+	death_tilt = Vector3(clampf(f.length() * 0.12, 0.15, 0.9), 0, randf_range(-0.35, 0.35))
 	if game:
 		var gore := headshot or dmg >= max_hp * 2 or force.length() > 4.0
 		game.fx.blood_pool(global_position)
+		if headshot and (dmg >= max_hp * 0.5 or randf() < 0.6):
+			head_popped = true; _pop_bone("Head")
+			game.fx.blood_burst(global_position + Vector3.UP * HEAD_Y, force.normalized())
 		if gore: game.fx.gibs(global_position + Vector3.UP * (1.5 if headshot else 1.0), 6 if headshot else 9, self, force)
 		game.on_zombie_killed(self, player, headshot, knifed)
 		if eye_light: eye_light.queue_free()
@@ -148,13 +217,29 @@ func _physics_process(dt: float) -> void:
 	match state:
 		State.DEAD:
 			t -= dt
+			if death_fling.length() > 0.05:
+				global_position += death_fling * dt
+				death_fling = death_fling.move_toward(Vector3.ZERO, dt * 9.0)
+			# topple in the direction of the fling (relative to our own facing)
+			model.rotation.x = lerpf(model.rotation.x, -death_tilt.x * 0.6, dt * 6)
+			model.rotation.z = lerpf(model.rotation.z, death_tilt.z, dt * 6)
 			if t < 1.2: model.position.y -= dt * 0.5
 			if t <= 0.0: queue_free()
 			return
 		State.RISE:
 			t -= dt
-			model.position.y = lerpf(model.position.y, 0.0, dt * 4)
+			if drop_in:
+				drop_v -= 18.0 * dt
+				model.position.y = maxf(0.0, model.position.y + drop_v * dt)
+				if model.position.y <= 0.0 and drop_v < -1.0:
+					drop_v = 0.0; game.fx.dirt_burst(global_position)
+					game.sfx.play_at("land_thud", global_position, -6, randf_range(0.8, 1.0))
+					_play("Idle", 0.1)
+			else:
+				model.position.y = lerpf(model.position.y, 0.0, dt * 4)
+				model.rotation.x = sin(t * 9.0) * 0.12 * t  # claws and lurches up out of the dirt
 			if t <= 0.0:
+				model.rotation.x = 0
 				model.position.y = 0; state = State.TO_WINDOW; agent.target_position = window.outside_point
 		State.TO_WINDOW:
 			if _flat_dist(window.outside_point) < 0.7:
@@ -196,14 +281,34 @@ func _physics_process(dt: float) -> void:
 			if pl == null: return
 			var d := _flat_dist(pl.global_position)
 			var dy: float = absf(pl.global_position.y - global_position.y)
-			if d < (1.0 if crawler else 1.35) and dy < 1.6 and not pl.is_downed:
+			lunge_cd -= dt
+			if windup_t > 0.0:
+				# committed swing: keep facing, land it if still in reach
+				windup_t -= dt; _face(pl.global_position); velocity = Vector3.ZERO
+				if windup_t <= 0.0:
+					windup_t = -1.0
+					if d < (1.25 if crawler else 1.75) and dy < 1.6 and not pl.is_downed:
+						pl.take_damage(CRAWLER_DAMAGE if crawler else SWIPE_DAMAGE, global_position)
+						game.sfx.play_at("zombie_attack", global_position + Vector3.UP, -2, voice_pitch)
+					else:
+						game.sfx.play_at("swipe_miss", global_position + Vector3.UP, -8, randf_range(0.9, 1.1))
+			elif lunge_t > 0.0:
+				# lunge: a short burst straight at the player, ending in a swing
+				lunge_t -= dt
+				var dir: Vector3 = pl.global_position - global_position; dir.y = 0; dir = dir.normalized()
+				velocity.x = dir.x * LUNGE_SPEED; velocity.z = dir.z * LUNGE_SPEED; velocity.y = -0.5
+				move_and_slide(); _face(pl.global_position)
+				if lunge_t <= 0.0 or d < 1.2: lunge_t = 0.0; _start_swing()
+			elif d < (1.0 if crawler else 1.35) and dy < 1.6 and not pl.is_downed:
 				velocity = Vector3.ZERO; _face(pl.global_position)
 				attack_cd -= dt
-				if attack_cd <= 0.0:
-					attack_cd = 1.0
-					cur_anim = ""; _play("Punch", 0.1, 1.3); attack_anim_t = 0.6
-					pl.take_damage(CRAWLER_DAMAGE if crawler else SWIPE_DAMAGE, global_position)
-					game.sfx.play_at("zombie_attack", global_position + Vector3.UP, -2)
+				if attack_cd <= 0.0 and stagger_t <= 0.0:
+					attack_cd = 0.95
+					_start_swing()
+			elif not crawler and stagger_t <= 0.0 and lunge_cd <= 0.0 and d < LUNGE_RANGE and d > 1.5 and dy < 1.0 and not pl.is_downed:
+				lunge_cd = randf_range(2.2, 3.5); lunge_t = 0.28
+				cur_anim = ""; _play("Run_Attack" if anims.has("Run_Attack") else "Run", 0.05, 1.6)
+				game.sfx.play_at("screech", global_position + Vector3.UP * 1.5, -5, voice_pitch * randf_range(0.95, 1.05))
 			else:
 				attack_cd = minf(attack_cd, 0.4)
 				repath -= dt
@@ -211,10 +316,16 @@ func _physics_process(dt: float) -> void:
 					repath = 0.3; agent.target_position = pl.global_position
 				_nav_move(pl.global_position, dt, false)
 				_unstick(dt, pl.global_position)
+	stagger_t -= dt
+	model.rotation.x = lerpf(model.rotation.x, 0.0, dt * 8.0) if state != State.RISE else model.rotation.x
 	groan_cd -= dt
 	if groan_cd <= 0.0:
-		groan_cd = randf_range(4, 10)
-		game.sfx.play_at("groan%d" % (randi() % 3 + 1), global_position + Vector3.UP * 1.5, -4, randf_range(0.85, 1.15) * (0.85 if variant == "zombie_b" else 1.0))
+		groan_cd = randf_range(3.5, 9) if not runner else randf_range(2.5, 6)
+		game.sfx.play_at("groan%d" % voice, global_position + Vector3.UP * 1.5, -4, voice_pitch * randf_range(0.96, 1.04))
+
+func _start_swing() -> void:
+	windup_t = WINDUP
+	cur_anim = ""; _play("Punch", 0.06, 1.7); attack_anim_t = 0.5
 
 ## Re-path when blocked: no progress toward the goal -> sidestep, then re-enter from the window nearest
 ## the closest player (out of sight if possible). Runs in TO_WINDOW and CHASE.
@@ -261,7 +372,7 @@ func _nav_move(target: Vector3, dt: float, set_target := true) -> void:
 		var off: Vector3 = global_position - z.global_position; off.y = 0
 		var l := off.length()
 		if l < 0.7 and l > 0.001: sep += off / l * (0.7 - l)
-	var slow := 0.35 if attack_anim_t > 0.0 else 1.0
+	var slow := 0.15 if stagger_t > 0.0 else (0.35 if attack_anim_t > 0.0 else 1.0)
 	var v := (dir + sep * 1.5).normalized() * speed * slow + knock
 	knock = knock.move_toward(Vector3.ZERO, dt * 12)
 	velocity.x = v.x; velocity.z = v.z
