@@ -22,6 +22,8 @@ var reserve_mags: int = 8
 var ads_time := 0.2
 var recoil_pattern: Array = [Vector2(1, 0)]
 var upgrade_name := ""
+## Handling mass: 0.6 = light pistol/SMG, 1.6 = LMG/rail. Drives kick, camera punch, move speed and ADS feel.
+var weight := 1.0
 ## 3D feel (not part of the ported rules)
 var automatic := false
 var spread_deg := 0.6
@@ -36,6 +38,12 @@ func setup(opts: Dictionary) -> WeaponDef:
 		set(k, opts[k])
 	return self
 
+func move_mult() -> float: return clampf(1.08 - 0.1 * weight, 0.85, 1.05)
+func kick_mult() -> float: return 0.55 + 0.65 * weight
+## Extra punch on the first shot after a pause (seconds since last shot) - makes single taps feel heavy.
+func first_shot_mult(since_last: float) -> float:
+	return 1.0 + 0.8 * clampf((since_last - fire_interval * 1.5) / 0.35, 0.0, 1.0)
+
 func is_upgraded() -> bool: return tier > 0
 func is_maxed() -> bool: return tier >= MAX_TIER
 func splash_m() -> float: return splash / SPLASH_UNITS_PER_METRE
@@ -47,7 +55,7 @@ func display_name() -> String:
 
 func duplicate_def() -> WeaponDef:
 	var w := WeaponDef.new(id, name, damage, fire_interval)
-	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name"]:
+	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight"]:
 		w.set(k, get(k))
 	return w
 

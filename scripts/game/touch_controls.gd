@@ -16,6 +16,12 @@ var look_idx := -1
 var held := {}  # touch index -> button name
 var buttons := {}  # name -> [center, radius, label]
 
+var floating := true     ## floating stick appears under the thumb; fixed stays at home
+var fire_scale := 1.3
+
+func stick_home() -> Vector2:
+	return Vector2(180 * size.y / 720.0, size.y - 160 * size.y / 720.0)
+
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -26,7 +32,7 @@ func _layout() -> void:
 	var s := size
 	var u := s.y / 720.0
 	buttons = {
-		"fire": [Vector2(s.x - 150 * u, s.y - 200 * u), 85 * u, "FIRE"],
+		"fire": [Vector2(s.x - 160 * u, s.y - 190 * u), 85 * u * fire_scale, "FIRE"],
 		"ads": [Vector2(s.x - 300 * u, s.y - 110 * u), 55 * u, "AIM"],
 		"reload": [Vector2(s.x - 290 * u, s.y - 260 * u), 50 * u, "RLD"],
 		"use": [Vector2(s.x - 150 * u, s.y - 380 * u), 55 * u, "USE"],
@@ -64,7 +70,8 @@ func _input(e: InputEvent) -> void:
 					"pause": _pulses[b] = true
 				if b == "fire": look_idx = e.index  # fire button also steers aim while held
 			elif e.position.x < size.x * 0.4 and stick_idx == -1:
-				stick_idx = e.index; stick_origin = e.position; stick_pos = e.position
+				stick_idx = e.index; stick_origin = e.position if floating else stick_home(); stick_pos = e.position
+				if not floating: _set_move()
 			elif look_idx == -1:
 				look_idx = e.index
 		else:
@@ -77,12 +84,14 @@ func _input(e: InputEvent) -> void:
 	elif e is InputEventScreenDrag:
 		if e.index == stick_idx:
 			stick_pos = e.position
-			var r := 90.0 * size.y / 720.0
-			move = ((stick_pos - stick_origin) / r).limit_length(1.0)
-			if move.y < -0.9 and not sprint: pass
+			_set_move()
 			queue_redraw()
 		elif e.index == look_idx:
 			_look += e.relative
+
+func _set_move() -> void:
+	var r := 90.0 * size.y / 720.0
+	move = AimAssist.stick(((stick_pos - stick_origin) / r).limit_length(1.0))
 
 func _update_held() -> void:
 	fire = held.values().has("fire")
@@ -104,6 +113,6 @@ func _draw() -> void:
 		draw_circle(stick_origin, r, Color(1, 1, 1, 0.1))
 		draw_circle(stick_origin + move * r, r * 0.4, Color(1, 1, 1, 0.35))
 	else:
-		var home := Vector2(180, size.y - 160) * Vector2(size.y / 720.0, 1.0)
-		home = Vector2(180 * size.y / 720.0, size.y - 160 * size.y / 720.0)
-		draw_arc(home, r, 0, TAU, 40, Color(1, 1, 1, 0.25), 2.0)
+		var home := stick_home()
+		draw_arc(home, r, 0, TAU, 40, Color(1, 1, 1, 0.25 if floating else 0.4), 2.0)
+		if not floating: draw_circle(home, r * 0.4, Color(1, 1, 1, 0.2))

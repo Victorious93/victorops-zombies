@@ -28,6 +28,10 @@ func _physics_process(dt: float) -> void:
 	if game.over or game.round > max_rounds or t > 60.0 * 40:
 		_finish(); return
 	var bi: Dictionary = p.bot_input
+	if OS.has_environment("VOZ_SIM_DEBUG") and Engine.get_physics_frames() % 300 == 0 and game.to_spawn == 0:
+		var zs := []
+		for z in game.zombies: zs.append("%s@%s hp%d" % [Zombie.State.keys()[z.state], str(z.global_position.snapped(Vector3.ONE * 0.1)), z.hp])
+		print("[dbg] r%d t%.0f hp%.0f downed=%s player@%s zombies=%s" % [game.round, t, p.health, p.is_downed, str(p.global_position.snapped(Vector3.ONE * 0.1)), zs])
 	bi.fire = false; bi.mv = Vector2.ZERO; bi.ads = false; bi.sprint = false
 	var target: Zombie = null; var bd := 1e9
 	for z in game.zombies:
@@ -56,7 +60,7 @@ func _physics_process(dt: float) -> void:
 	var crowd := 0
 	for z in game.zombies:
 		if is_instance_valid(z) and z.state == Zombie.State.CHASE and z.global_position.distance_to(p.global_position) < 3.0: crowd += 1
-	if crowd >= 2 or (bd < 1.6 and p.knife_cd > 0.0) or (tearing and bd < 3.0):
+	if crowd >= 2 or (bd < 3.2 and not tearing and p.health < 70.0) or (bd < 1.6 and p.knife_cd > 0.0) or (tearing and bd < 3.0):
 		var away := (p.global_position - target.global_position); away.y = 0
 		var home := (Vector3(0, 0, 3) - p.global_position); home.y = 0
 		var go := (away.normalized() + home.normalized() * 0.6).normalized()
@@ -74,7 +78,7 @@ func _shop() -> void:
 		game.throw_power(Node3D.new()); print("[sim] r%d power on" % game.round)
 	for id in ["rifle"]:
 		var i := p.loadout.has(id)
-		if i < 0 and p.economy.points >= Weapons.WALL_PRICES[id] + 200 and (game.round >= 3):
+		if i < 0 and p.economy.points >= Weapons.WALL_PRICES[id] + 200 and (game.round >= 2):
 			game.buy_wall(p, id); print("[sim] r%d bought %s" % [game.round, id]); return
 		if i >= 0 and p.loadout.slots[i].reserve < p.loadout.slots[i].max_reserve() / 3 and p.economy.points >= Weapons.ammo_price(id):
 			game.buy_wall(p, id)
@@ -93,8 +97,8 @@ func _finish() -> void:
 	for r in game.round_times:
 		total += game.round_times[r]
 		lines.append("%5d | %7.1f | %7d | %d" % [r, game.round_times[r], Rounds.zombie_count(r), Rounds.zombie_health(r)])
-	lines.append("reached round %d · kills %d · downs %d · hits taken %d · game over %s · points %d · sim time %.0f s (+%d s breaks) · wall clock %.1f s" % [
-		game.round, game.kills, game.downs, hits_taken, str(game.over), game.player.economy.points, total, int(Rounds.INTERMISSION) * game.round_times.size(), (Time.get_ticks_msec() - started_ms) / 1000.0])
+	lines.append("reached round %d · kills %d · downs %d · stuck respawns %d · hits taken %d · game over %s · points %d · sim time %.0f s (+%d s breaks) · wall clock %.1f s" % [
+		game.round, game.kills, game.downs, game.stuck_respawns, hits_taken, str(game.over), game.player.economy.points, total, int(Rounds.INTERMISSION) * game.round_times.size(), (Time.get_ticks_msec() - started_ms) / 1000.0])
 	for l in lines: print(l)
 	var f := FileAccess.open("user://sim_report.txt", FileAccess.WRITE)
 	if f: f.store_string("\n".join(lines))

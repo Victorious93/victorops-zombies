@@ -122,9 +122,10 @@ func _tint_upgraded(n: Node, c: Color) -> void:
 	for ch in n.get_children(): _tint_upgraded(ch, c)
 
 func fire(strength: float) -> void:
-	kick = minf(kick + strength, 1.6)
-	flash.visible = true; flash.rotation.z = randf() * TAU; flash.scale = Vector3.ONE * randf_range(0.8, 1.3)
-	flash_light.light_energy = 3.0; flash_t = 0.045
+	kick = minf(kick + strength, 2.2)
+	flash.visible = true; flash.rotation.z = randf() * TAU
+	flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * clampf(0.8 + strength * 0.35, 0.9, 1.8)
+	flash_light.light_energy = clampf(2.5 + strength * 2.0, 3.0, 7.0); flash_t = 0.05
 
 func add_sway(look_delta: Vector2) -> void:
 	sway += look_delta * 0.6
@@ -141,9 +142,10 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	var bob_amt := lerpf(1.0, 0.2, ads_k) * move01
 	var off := Vector3(sin(bob) * 0.012, -absf(cos(bob)) * 0.012, 0) * bob_amt
 	off += Vector3(-sway.x * 0.25, sway.y * 0.25, 0) * lerpf(1.0, 0.3, ads_k)
-	off.z += kick * 0.045
+	off.z += kick * 0.06
+	off.y += kick * 0.012
 	if sprint: off += Vector3(-0.06, -0.06, 0.04)
-	var rot := Vector3(kick * 0.12 + (-0.45 if sprint else 0.0), sway.x * 0.5, sin(bob * 0.5) * 0.03 * bob_amt)
+	var rot := Vector3(kick * 0.2 + (-0.45 if sprint else 0.0), sway.x * 0.5, sin(bob * 0.5) * 0.03 * bob_amt)
 	if sprint: rot.y += 0.6; rot.z += 0.25
 	# reload: tilt + dip, magazine pull/insert beats
 	if reload01 >= 0.0:

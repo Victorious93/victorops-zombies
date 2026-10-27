@@ -14,6 +14,7 @@ func _ready() -> void:
 	show_menu()
 	if args.has("shots"): _shots(args["shots"])
 	elif args.has("sim"): _sim(int(args["sim"]))
+	elif args.has("clip"): _clip(args["clip"])
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -208,3 +209,96 @@ func _sim(n: int) -> void:
 	if args.has("simquit"):   # movie/clip mode: stop after N seconds of game time
 		await get_tree().create_timer(float(args["simquit"]), true, true).timeout
 		get_tree().quit()
+
+# ------------------------------------------------------------------ scripted 30 s trailer route
+## --clip=<dir>: a directed camera route through the action (run with --fixed-fps 30 --write-movie).
+## Horde at the west window (round 6 alarms) -> Mystery Crate -> Overcharge Forge -> power-up.
+## Also saves six stills into <dir>. God mode keeps the camera alive; everything else is live gameplay.
+var _clip_pl: Player
+
+func _aim_at(p: Vector3, k: float) -> void:
+	var v := p - _clip_pl.cam.global_position
+	var ty := atan2(-v.x, -v.z); var tp := atan2(v.y, Vector2(v.x, v.z).length())
+	_clip_pl.yaw = lerp_angle(_clip_pl.yaw, ty, k); _clip_pl.pitch = lerpf(_clip_pl.pitch, tp, k)
+
+func _nearest_zombie() -> Zombie:
+	var best: Zombie = null; var bd := 1e9
+	for z in game.zombies:
+		if not is_instance_valid(z) or z.state == Zombie.State.DEAD or z.state == Zombie.State.RISE: continue
+		var d: float = z.global_position.distance_to(_clip_pl.global_position)
+		if d < bd: bd = d; best = z
+	return best
+
+## Move the player along a straight line over n frames while looking at [look] (or fighting).
+func _glide(to: Vector3, look: Vector3, n: int, fight := false) -> void:
+	var from := _clip_pl.global_position
+	for i in n:
+		var t := smoothstep(0.0, 1.0, float(i + 1) / n)
+		_clip_pl.global_position = from.lerp(to, t)
+		var z := _nearest_zombie() if fight else null
+		if z:
+			_aim_at(z.global_position + Vector3.UP * (Zombie.HEAD_Y - 0.05 if not z.crawler else 0.35), 0.16)
+			_clip_pl.bot_input.fire = _clip_pl.ammo().rounds > 0 and Engine.get_process_frames() % 2 == 0
+			if _clip_pl.ammo().rounds == 0 and not _clip_pl.ammo().reloading(): _clip_pl.reload()
+		else:
+			_aim_at(look, 0.08)
+			_clip_pl.bot_input.fire = false
+		await get_tree().process_frame
+
+func _clip(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	args["touch"] = "1"
+	start_game()
+	game.auto_rounds = false
+	game.god_mode = true
+	await _wait(5)
+	var pl := game.player; _clip_pl = pl
+	pl.bot_input = {mv = Vector2.ZERO, fire = false, ads = false, use = false, sprint = false}
+	pl.economy.points = 12000
+	pl.loadout.give(Weapons.make("rifle")); pl.apply_reload_perk()
+	game.round = 6   # alarm beacons + runners
+	game.throw_power(Node3D.new())
+	game.map.open_door("east"); game.map.open_door("cold")
+	# A: window horde (0-11 s) - zombies rise outside, tear the planks, lunge through
+	pl.global_position = Vector3(-3.0, 0.1, 3.2); pl.yaw = PI / 2 + 0.2; pl.pitch = -0.05
+	pl.health = 40.0   # low-health heartbeat + colour drain for the opening
+	for id in ["w_west", "w_west", "w_west", "w_south", "w_west", "w_south", "w_west"]: game.spawn_zombie(id)
+	await _glide(Vector3(-3.0, 0.1, 3.2), Vector3(-10, 1.2, 2), 60)
+	for z in game.zombies: z.window.bar.damage(999); z.window.refresh()
+	await _glide(Vector3(-4.0, 0.1, 2.4), Vector3(-10, 1.2, 2), 90, true)
+	await _snap(dir, "01_window_horde.png")
+	pl.take_damage(5.0, Vector3(-8, 1, 6))
+	await _glide(Vector3(-2.5, 0.1, 4.0), Vector3(-10, 1.2, 2), 90, true)
+	await _snap(dir, "02_headshots_low_hp.png")
+	await _glide(Vector3(-1.5, 0.1, 4.5), Vector3(-10, 1.2, 2), 90, true)
+	pl.health = pl.max_health
+	for z in game.zombies.duplicate():
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(z.hp + 1, true, pl, "head", Vector3(-6, 0, 0))
+	# B: Mystery Crate (11-16 s)
+	var cp: Vector3 = game.crate_node.global_position
+	var front: Vector3 = cp + game.crate_node.global_basis.z * 2.4; front.y = 0.1
+	await _glide(front, cp + Vector3.UP * 0.8, 50)
+	game.use_crate(pl)
+	await _glide(front + (cp - front).normalized() * 0.4, cp + Vector3.UP * 1.0, 60)
+	await _snap(dir, "03_mystery_crate.png")
+	await _glide(front, cp + Vector3.UP * 1.0, 40)
+	game.use_crate(pl)   # take the weapon
+	# C: Overcharge Forge (16-22 s)
+	pl.global_position = Vector3(18, 0.1, -16.5); pl.yaw = 0.0
+	await _glide(Vector3(18, 0.1, -19.3), Vector3(18, 1.2, -23), 50)
+	game.use_forge(pl)
+	await _glide(Vector3(18, 0.1, -19.6), Vector3(18, 1.3, -23), 70)
+	await _snap(dir, "04_overcharge_forge.png")
+	await _glide(Vector3(18, 0.1, -19.4), Vector3(18, 1.2, -23), 70)
+	# D: power-up + runners (22-30 s)
+	pl.global_position = Vector3(-1, 0.1, 5); pl.yaw = PI / 2
+	game._spawn_drop("onetouch", Vector3(-4.5, 0.4, 4.5))
+	for id in ["w_west", "w_south", "w_west"]: game.spawn_zombie(id)
+	await _glide(Vector3(-1.5, 0.1, 4.8), Vector3(-4.5, 0.5, 4.5), 50)
+	await _snap(dir, "05_powerup_alarm.png")
+	await _glide(Vector3(-4.5, 0.1, 4.5), Vector3(-9, 1.0, 4.5), 50)
+	for z in game.zombies: if is_instance_valid(z) and z.window: z.window.bar.damage(999); z.window.refresh()
+	await _glide(Vector3(-3.0, 0.1, 4.0), Vector3(-9, 1.0, 3), 110, true)
+	await _snap(dir, "06_onetouch_kills.png")
+	await _wait(30)
+	get_tree().quit()

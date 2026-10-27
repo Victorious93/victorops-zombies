@@ -53,6 +53,7 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | Map layout, gun arms/sleeves, sights, machines, Forge, decals, particles, gibs | Built in GDScript from Godot primitives (`scripts/game/*.gd`) | Original, same license as repo |
 | All sound effects, 3D groans/footsteps, music loop, round sting (`audio/*.wav`) | Synthesized by `tools/gen_audio.py` (Python + numpy DSP, no samples) | Original, same license as repo |
 | Feel-pass sounds: hit thwack, headshot pop, kill confirm, slide, crate tink/ready, Phantom laugh, power-up stings, downed, forge done | Synthesized by `tools/gen_audio_feel.py` (numpy formant/tone synthesis, no samples, no voice recordings) | Original, same license as repo |
+| v4 polish sounds: groan4/groan5, lunge screech, swipe miss, dirt rise, land thud, heartbeat, mag release, reload cloth, rack, shot punch | Synthesized by `tools/gen_audio_v4.py` (numpy noise/formant synthesis, no samples, no voice recordings) | Original, same license as repo |
 | Logo / launcher icon (`assets/victorops-zombies-logo.jpg`, `icons/*`) | Project's own logo | Project-owned |
 | UI font | Godot default font | Engine MIT / font OFL |
 | GUT 9.7.1 (`addons/gut/`, tests only, excluded from APK) | https://github.com/bitwes/Gut | MIT (fonts SIL OFL 1.1) |
