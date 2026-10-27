@@ -3,6 +3,7 @@ extends RefCounted
 ## Weapon upgrade machine. Tier price: cost * (tier + 1). Needs power.
 
 const NAME := "Overcharge Forge"
+const FORGE_TIME := 5.0  ## seconds the gun spends inside the machine
 var cost := 5000
 
 ## Price of the next upgrade, or -1 if maxed.

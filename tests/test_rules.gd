@@ -3,7 +3,7 @@ extends GutTest
 
 func test_round1_baseline():
 	assert_eq(Rounds.zombie_count(1), 6)
-	assert_eq(Rounds.zombie_health(1), 100)
+	assert_eq(Rounds.zombie_health(1), 150)
 
 func test_count_monotonic_on_normal_rounds():
 	var prev := 0
@@ -16,8 +16,8 @@ func test_count_capped():
 	assert_eq(Rounds.zombie_count(501), 120)
 
 func test_health_curve():
-	assert_eq(Rounds.zombie_health(9), 500)
-	assert_eq(Rounds.zombie_health(10), 550)
+	assert_eq(Rounds.zombie_health(9), 950)
+	assert_eq(Rounds.zombie_health(10), 1045)
 	assert_gt(Rounds.zombie_health(20), Rounds.zombie_health(19))
 
 func test_speed_and_spawn_caps():
@@ -56,7 +56,7 @@ func test_perk_unaffordable():
 	assert_false(owned.has("quickhand")); assert_eq(e.points, 100)
 
 func test_three_original_perks():
-	assert_eq(Perks.ALL.size(), 3)
+	assert_eq(Perks.ALL.size(), 4)
 	assert_eq(Perks.ALL.ironhide.name, "Iron Hide Tonic")
 
 func test_crate_probabilities():
@@ -100,14 +100,14 @@ func test_barricade_multi_repair():
 func test_weapon_tiers():
 	var w := Weapons.make("sidearm")
 	assert_eq(w.display_name(), "Volt Sidearm")
-	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Sidearm Mk.2"); assert_eq(w.damage, 60); assert_false(w.is_maxed())
-	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Sidearm Mk.3"); assert_eq(w.damage, 90); assert_true(w.is_maxed())
+	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Tempest"); assert_eq(w.damage, 160); assert_false(w.is_maxed())
+	w = w.upgraded_version(); assert_eq(w.display_name(), "Volt Tempest Mk.III"); assert_eq(w.damage, 240); assert_true(w.is_maxed())
 	assert_same(w.upgraded_version(), w)
 
 func test_upgrade_details():
 	var a := Weapons.at("smg", 0); var b := Weapons.at("smg", 1); var c := Weapons.at("smg", 2)
 	assert_true(a.fire_interval > b.fire_interval and b.fire_interval > c.fire_interval)
-	assert_eq(Weapons.at("scatter", 2).pellets, 9)
+	assert_eq(Weapons.at("scatter", 2).pellets, 10)
 	assert_eq(Weapons.at("cannon", 2).pierce, 3)
 	assert_eq(Weapons.at("rifle", 1).pierce, 0); assert_eq(Weapons.at("rifle", 2).pierce, 1)
 	assert_gt(Weapons.at("nova", 1).splash, Weapons.make("nova").splash)
@@ -149,9 +149,11 @@ func test_armor_tiers_ordered():
 
 func test_characters():
 	assert_eq(Characters.ALL.size(), 2)
-	assert_eq(Characters.by_id("martha").name, "Martha Stewart")
+	assert_eq(Characters.by_id("hollis").name, "Hollis Marrow")
+	assert_eq(Characters.by_id("rook").ability_name, "Bass Drop")
+	assert_eq(Characters.by_id("hollis").ability_name, "Fortify")
 	assert_eq(Characters.by_id("nope").name, Characters.by_id(Characters.DEFAULT).name)
-	var m := Characters.by_id("martha"); var s := Characters.by_id("snoop")
+	var m := Characters.by_id("hollis"); var s := Characters.by_id("rook")
 	assert_gt(m.repair_planks_per_use, s.repair_planks_per_use)
 	var e := Economy.new(0); e.on_repair(2, m.repair_points_mult); assert_eq(e.points, 40)
 	assert_true(s.fire_interval_mult < 1.0 and s.speed_mult > 1.0)
@@ -166,13 +168,13 @@ func test_ammo_cycle():
 
 func test_ammo_swap_and_manual_reload():
 	var a := Ammo.new(Weapons.make("rifle")); a.fire()
-	a.swap(Weapons.make("nova")); assert_eq(a.rounds, 4); assert_true(a.can_fire())
+	a.swap(Weapons.make("nova")); assert_eq(a.rounds, 6); assert_true(a.can_fire())
 	assert_false(a.reload())
 	a.fire(); assert_true(a.reload()); assert_false(a.can_fire())
 
 func test_quickhand_halves_reload():
 	var a := Ammo.new(Weapons.make("sidearm")); a.reload_mult = 0.5
-	a.fire(); a.reload(); assert_almost_eq(a.reload_left, 0.6, 1e-5)
+	a.fire(); a.reload(); assert_almost_eq(a.reload_left, 0.65, 1e-5)
 
 func test_low_health_trigger():
 	var t := LowHealthTrigger.new()
@@ -202,3 +204,85 @@ func test_loadout_two_slots():
 	assert_eq(l.has("smg"), -1); assert_eq(l.has("sidearm"), 0)
 	l.cycle(); assert_eq(l.weapon().id, "sidearm")
 	l.give(Weapons.make("sidearm")); assert_eq(l.slots.size(), 2)
+
+func test_characters_are_original():
+	for id in Characters.ALL:
+		var n: String = Characters.ALL[id].name
+		for banned in ["Snoop", "Martha", "Stewart", "Dogg"]:
+			assert_false(n.contains(banned), "%s should be an original name" % n)
+
+func test_full_gun_roster():
+	for id in ["sidearm", "smg", "scatter", "rifle", "lmg", "nova"]:
+		assert_not_null(Weapons.make(id), id)
+		assert_true(Weapons.MODELS.has(id), "model for " + id)
+	assert_true(Weapons.make("lmg").mag_size > Weapons.make("rifle").mag_size)
+	assert_eq(Weapons.WONDER, "nova")
+	assert_false(Weapons.WALL_PRICES.has(Weapons.WONDER), "wonder weapon is crate-only")
+	assert_gt(MysteryCrate.new().probability_of("lmg"), 0.0)
+
+func test_grenades():
+	var e := Equipment.new()
+	assert_eq(e.grenades, Equipment.GRENADE_START)
+	assert_true(e.throw_one()); assert_true(e.throw_one()); assert_false(e.throw_one())
+	e.on_round_start(); e.on_round_start(); e.on_round_start()
+	assert_eq(e.grenades, Equipment.GRENADE_MAX)
+	assert_eq(Equipment.grenade_falloff(0.0), 1.0)
+	assert_almost_eq(Equipment.grenade_falloff(Equipment.GRENADE_RADIUS_M), 0.25, 1e-5)
+	assert_eq(Equipment.grenade_falloff(Equipment.GRENADE_RADIUS_M + 0.1), 0.0)
+	assert_gt(Equipment.grenade_damage(10), Equipment.grenade_damage(1))
+
+func test_crate_moves_to_a_different_spot():
+	var rng := RandomNumberGenerator.new(); rng.seed = 7
+	var m := CrateMover.new(["lab", "yard", "gen", "intake"], rng)
+	assert_between(m.uses_left, CrateMover.MIN_USES, CrateMover.MAX_USES)
+	for trial in 200:
+		var rolls := 0
+		while not m.on_roll(rng): rolls += 1
+		assert_between(rolls + 1, CrateMover.MIN_USES, CrateMover.MAX_USES)
+		var before := m.current
+		assert_ne(m.relocate(rng), before)
+	var single := CrateMover.new(["lab"], rng)
+	for i in 20: assert_false(single.on_roll(rng))
+
+func test_resonance_easter_egg():
+	var r := Resonance.new()
+	assert_eq(r.shoot("yard", false), "", "needs power")
+	assert_eq(r.shoot("yard", true), "progress")
+	assert_eq(r.shoot("yard", true), "", "no double count")
+	assert_eq(r.shoot("bogus", true), "")
+	assert_eq(r.shoot("cold", true), "progress")
+	assert_eq(r.shoot("catwalk", true), "complete")
+	assert_true(r.done); assert_eq(r.shoot("cold", true), "")
+
+func test_settings_and_presets():
+	var s := GameSettings.new()
+	s.set_sensitivity(10.0); assert_eq(s.sensitivity, 3.0)
+	s.set_preset("ultra"); assert_eq(s.preset, "medium")
+	assert_eq(GameSettings.default_preset(true), "low")
+	assert_lt(GameSettings.PRESETS.low.scale, GameSettings.PRESETS.high.scale)
+	assert_false(GameSettings.PRESETS.low.shadows)
+	var t := GameSettings.new(); s.set_preset("high"); s.aim_assist = false
+	t.from_dict(s.to_dict())
+	assert_eq(t.preset, "high"); assert_false(t.aim_assist); assert_eq(t.sensitivity, 3.0)
+
+func test_aim_assist():
+	var o := Vector3.ZERO; var f := Vector3(0, 0, -1)
+	var targets := [Vector3(5, 0, -10), Vector3(0.3, 0, -10), Vector3(0, 0, 10)]
+	assert_eq(AimAssist.pick(o, f, targets), 1)
+	assert_eq(AimAssist.pick(o, f, [Vector3(5, 0, -10)]), -1, "outside cone")
+	assert_eq(AimAssist.pick(o, f, [Vector3(0, 0, -50)], 30.0), -1, "out of range")
+	var n := AimAssist.nudge(o, f, Vector3(0.3, 0, -10), 0.016)
+	assert_lt(n.x, 0.0, "turns right (negative yaw) toward a target on +x")
+
+func test_yard_area():
+	var f := Facility.new(); var e := Economy.new(5000)
+	assert_eq(f.buy_door("yard", e), ""); assert_true(f.open_areas.yard)
+	assert_true(f.active_windows().has("w_yard_n"))
+
+func test_original_characters_keep_abilities():
+	assert_eq(Characters.DEFAULT, "rook")
+	assert_eq(Characters.ALL.rook.ability, "bass_drop")
+	assert_eq(Characters.ALL.hollis.ability, "fortify")
+	for id in Characters.ALL:
+		var n: String = Characters.ALL[id].name.to_lower()
+		assert_false(n.contains("snoop") or n.contains("martha"), "no celebrity names")

@@ -1,7 +1,7 @@
 # VictorOps Zombies
 
 **Public repo.** Original first-person, round-based zombie survival shooter for Android (and desktop) built with **Godot 4.7.2 (GDScript)**.
-Hold an abandoned facility against endless rounds: board up windows, buy doors, restore power, gamble at the **Mystery Crate**, drink **Iron Hide Tonic**, **Quickhand Draught** or **Fleetfoot Phial**, and upgrade your gun at the **Overcharge Forge**. Play as **Snoop Dogg** (Bass Drop) or **Martha Stewart** (Fortify).
+Hold an abandoned facility against endless rounds: board up windows, buy doors, restore power, gamble at the **Mystery Crate**, drink **Iron Hide Tonic**, **Quickhand Draught**, **Fleetfoot Phial** or **Lazarus Fizz** (solo self-revive, max 3), and upgrade your gun at the **Overcharge Forge**. Play as **Rook Vance**, a night-shift sound tech (Bass Drop), or **Hollis Marrow**, the facility quartermaster (Fortify). *(v2: these original characters replace the earlier celebrity-named placeholders; abilities unchanged.)*
 
 - `scripts/rules/` – pure game rules (rounds, economy, weapons, crate, perks, forge, armor, barricades), unit-tested
 - `scripts/game/` – 3D game: player controller, zombies (navmesh AI), facility map, HUD, touch controls
@@ -9,8 +9,18 @@ Hold an abandoned facility against endless rounds: board up windows, buy doors, 
 - `legacy/libgdx/` – previous Kotlin/libGDX version (kept for VictorLink64, see `docs/VICTORLINK64.md`)
 
 ## Controls
-Desktop: WASD move, mouse look, LMB fire, RMB aim, R reload, E use (hold to repair), 1/2 or wheel swap, Shift sprint, Q ability.
+Desktop: WASD move, mouse look, LMB fire, RMB aim, R reload, E use (hold to repair), 1/2 or wheel swap, Shift sprint (stamina), C/Ctrl slide while sprinting, V knife (lunge), Q ability.
 Touch: left floating stick, swipe right side to look, FIRE/AIM/RLD/USE/SWAP/SKILL/RUN buttons.
+
+## How it plays (feel pass, v3)
+- Round 1: 6 slow shamblers at 150 HP (2 sidearm body shots or 1 knife). +100 HP per round to round 9, then ×1.1 per round. Runners from round 5, max 24 alive, 10 s break with sting + tally marks. The last zombie of a round crawls.
+- Points: +10 hit, +60 kill, +100 headshot kill, +130 knife kill, plank repairs (capped 500/round). Doors 750–1250, wall guns 1000–1400 (ammo half price), crate 950, perks 2000–2500, Forge 5000 (~5 s, renamed gun, ×2 damage/mag).
+- Zombies come through windows: rip planks, reach in and swipe (2–3 hits downs you). Health regenerates after ~4 s. Downed = last stand with the sidearm and a 10 s bleed-out; solo game over unless you hold Lazarus Fizz.
+- Power-ups (30 s, max 4/round): RESTOCK (ammo), ONE TOUCH (insta-kill), DOUBLE PAY, BLACKOUT (kill all), HANDYMAN (rebuild windows).
+- Mystery Crate: slowing roll, 9 s take timer, and sometimes **The Phantom** takes the crate (refund) and it moves.
+
+## Bot playtest
+`godot --headless --fixed-fps 60 -- --sim=10` – a bot plays rounds 1–10 in the start room (aims, fires, knifes, backs off, rebuys ammo, opens the lab + power at round 4, buys Lazarus/Iron Hide) and prints time per round, kills and downs.
 
 ## Build
 ```bash

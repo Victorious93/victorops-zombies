@@ -24,6 +24,19 @@ var bark_t := 0.0
 var dmg_t := 0.0
 var over_panel: Control
 var fps_lbl: Label
+var hit_head := false
+var dmg_angle := NAN
+var feed_lbl: Label
+var feed_t := 0.0
+var streak := 0
+var round_t := 0.0
+var pause_panel: Control
+var touch_layout := false
+var grenade_lbl: Label
+var pu_lbl: Label
+var stand_lbl: Label
+var stamina_bar: ProgressBar
+var shown_round := 0
 
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
@@ -61,6 +74,28 @@ func _ready() -> void:
 	armor_bar.max_value = 200
 	hit = Control.new(); hit.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); hit.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hit.draw.connect(_draw_center); add_child(hit)
+	feed_lbl = _lbl(26, Color(1, 0.3, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(feed_lbl, Control.PRESET_CENTER, Vector2(0, 60), Vector2(600, 40))
+	grenade_lbl = _lbl(22, Color(0.85, 0.85, 0.85), HORIZONTAL_ALIGNMENT_RIGHT); _place(grenade_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-430, -140))
+	pu_lbl = _lbl(26, Color(1, 0.9, 0.4), HORIZONTAL_ALIGNMENT_CENTER); _place(pu_lbl, Control.PRESET_CENTER_BOTTOM, Vector2(0, -60), Vector2(700, 40))
+	stand_lbl = _lbl(40, Color(1, 0.25, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(stand_lbl, Control.PRESET_CENTER, Vector2(0, 220), Vector2(900, 60))
+	stamina_bar = _bar(Color(0.9, 0.85, 0.5)); _place(stamina_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -50), Vector2(160, 6))
+
+## Touch screens: move bars/ammo away from the stick and button clusters.
+func set_touch_layout(on: bool) -> void:
+	if on == touch_layout: return
+	touch_layout = on
+	var vp := get_viewport().get_visible_rect().size
+	var u := vp.y / 720.0
+	if on:
+		for pair in [[ability_lbl, Vector2(28, 118)], [health_bar, Vector2(28, 150)], [armor_bar, Vector2(28, 172)]]:
+			var c: Control = pair[0]; c.set_anchors_preset(Control.PRESET_TOP_LEFT); c.position = pair[1]
+		for pair in [[ammo_lbl, -70.0], [weapon_lbl, -110.0], [grenade_lbl, -140.0]]:
+			var c: Control = pair[0]; c.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+			c.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			c.position = Vector2(vp.x / 2 - c.size.x / 2 + 40 * u, vp.y + pair[1])
+		fps_lbl.position.y = 186
+		perks_lbl.set_anchors_preset(Control.PRESET_TOP_LEFT); perks_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+		perks_lbl.position = Vector2(28, 196)
 
 func _bar(c: Color) -> ProgressBar:
 	var b := ProgressBar.new(); b.show_percentage = false
@@ -81,12 +116,54 @@ func _draw_center() -> void:
 	else:
 		hit.draw_circle(c, 2.0, Color(1, 0.3, 0.2))
 	if hit_t > 0.0:
-		var col := Color(1, 0.15, 0.1, hit_t / 0.25) if hit_kill else Color(1, 1, 1, hit_t / 0.25)
+		var col := Color(1, 0.15, 0.1, hit_t / 0.25) if hit_kill else (Color(1, 0.85, 0.2, hit_t / 0.25) if hit_head else Color(1, 1, 1, hit_t / 0.25))
+		var s := 1.0 + (0.4 if hit_kill else 0.0) + hit_t
 		for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
-			hit.draw_line(c + d * 7, c + d * 16, col, 3.0)
+			hit.draw_line(c + d * 7 * s, c + d * 16 * s, col, 3.0 if not hit_kill else 4.0)
+	if dmg_t > 0.0 and not is_nan(dmg_angle):
+		var dir := Vector2(sin(dmg_angle), -cos(dmg_angle))
+		var r := minf(hit.size.x, hit.size.y) * 0.28
+		var tip := c + dir * (r + 26); var side := dir.orthogonal() * 22
+		hit.draw_colored_polygon(PackedVector2Array([tip, c + dir * r + side, c + dir * r - side]), Color(1, 0.1, 0.05, dmg_t * 1.4))
+	if round_t > 0.0:
+		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
 
-func hitmarker(kill: bool) -> void:
-	hit_t = 0.25; hit_kill = kill
+func hitmarker(kill: bool, head := false) -> void:
+	hit_t = 0.25; hit_kill = kill; hit_head = head
+
+func kill_feed(head: bool) -> void:
+	streak = streak + 1 if feed_t > 0.0 else 1
+	feed_t = 1.6
+	var t := "HEADSHOT" if head else "KILL"
+	if streak >= 3: t += "  x%d" % streak
+	feed_lbl.text = t
+	feed_lbl.add_theme_color_override("font_color", Color(1, 0.8, 0.2) if head else Color(1, 0.3, 0.2))
+	feed_lbl.scale = Vector2.ONE * 1.3; feed_lbl.pivot_offset = feed_lbl.size / 2
+
+## Round counter flips over (squash to a line, swap the number, spring back) with tally marks up to 5.
+func tally_flip(r: int) -> void:
+	var tw := create_tween()
+	round_lbl.pivot_offset = Vector2(0, round_lbl.size.y / 2)
+	tw.tween_property(round_lbl, "scale:y", 0.0, 0.25)
+	tw.tween_callback(func(): shown_round = r)
+	tw.tween_property(round_lbl, "scale", Vector2(1.6, 1.6), 0.2).set_trans(Tween.TRANS_BACK)
+	tw.tween_property(round_lbl, "scale", Vector2.ONE, 0.6)
+
+static func tally(r: int) -> String:
+	if r <= 0: return ""
+	if r <= 5: return "卌" if r == 5 else "|".repeat(r)
+	return str(r)
+
+func round_flash() -> void:
+	round_t = 1.0
+	round_lbl.scale = Vector2.ONE * 1.6
+
+func show_pause(on: bool) -> void:
+	if pause_panel: pause_panel.queue_free(); pause_panel = null
+	if not on: return
+	pause_panel = SettingsPanel.make(game.settings, func(): game.apply_settings(); Game.save_settings(game.settings),
+		[["Resume", game.toggle_pause], ["Main menu", game.to_menu]])
+	add_child(pause_panel)
 
 func banner(text: String, dur := 3.0) -> void:
 	banner_lbl.text = text; banner_t = dur
@@ -97,19 +174,29 @@ func bark(text: String) -> void:
 func info(text: String) -> void:
 	info_lbl.text = text; info_lbl.modulate.a = 1.0
 
-func damage_flash() -> void:
-	dmg_t = 0.5
+func damage_flash(angle := NAN) -> void:
+	dmg_t = 0.5; dmg_angle = angle
 
 func _process(dt: float) -> void:
 	var p = game.player
 	if p == null: return
-	round_lbl.text = str(game.round) if game.round > 0 else ""
+	if shown_round == 0 and game.round > 0 and round_lbl.scale.y > 0.5: shown_round = game.round
+	round_lbl.text = tally(shown_round)
 	points_lbl.text = str(p.economy.points)
 	var a: Ammo = p.ammo()
-	ammo_lbl.text = "RELOADING" if a.reloading() else "%d / ∞" % a.rounds
+	ammo_lbl.text = "RELOADING" if a.reloading() else "%d / %d" % [a.rounds, a.reserve]
+	ammo_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.25) if a.rounds == 0 and a.reserve == 0 else (Color(1, 0.85, 0.3) if a.reserve < a.weapon.mag_size else Color.WHITE))
+	var pus: Array = []
+	for id in game.power.timers: pus.append("%s %s %ds" % [PowerUps.ICONS[id], PowerUps.ALL[id].name, ceili(game.power.timers[id])])
+	pu_lbl.text = "    ".join(pus)
+	stand_lbl.visible = p.is_downed
+	if p.is_downed:
+		stand_lbl.text = ("GETTING UP  %.1f" if p.last_stand.will_revive else "BLEEDING OUT  %.1f") % maxf(p.last_stand.left, 0.0)
+	stamina_bar.max_value = p.STAMINA_MAX * (1.6 if p.perks.get("fleetfoot", false) else 1.0); stamina_bar.value = p.stamina
+	stamina_bar.visible = stamina_bar.value < stamina_bar.max_value - 0.01
 	weapon_lbl.text = p.weapon().display_name()
 	var pk: Array = []
-	for id in p.perks: pk.append(Perks.ALL[id].name)
+	for id in Perks.held(p.perks): pk.append(Perks.ALL[id].name)
 	perks_lbl.text = "\n".join(pk)
 	fps_lbl.text = "%d fps" % Engine.get_frames_per_second()
 	health_bar.max_value = p.max_health; health_bar.value = p.health
@@ -120,12 +207,18 @@ func _process(dt: float) -> void:
 	var touch_on: bool = game.touch != null and game.touch.visible
 	prompt_lbl.text = "" if pr == "" else ("%s %s" % ["[USE]" if touch_on else "[E]", pr])
 	hit_t = maxf(0.0, hit_t - dt)
+	set_touch_layout(game.touch != null and game.touch.visible)
+	feed_t -= dt; feed_lbl.visible = feed_t > 0.0
+	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
+	round_t = maxf(0.0, round_t - dt * 0.8)
+	round_lbl.scale = round_lbl.scale.lerp(Vector2.ONE, clampf(dt * 3, 0, 1))
+	grenade_lbl.text = "Grenades %d  ·  Knife [V]" % p.equipment.grenades if not touch_layout else "Grenades %d" % p.equipment.grenades
 	banner_t -= dt; banner_lbl.visible = banner_t > 0
 	bark_t -= dt; bark_lbl.visible = bark_t > 0
 	info_lbl.modulate.a = maxf(0.0, info_lbl.modulate.a - dt * 0.5)
 	dmg_t = maxf(0.0, dmg_t - dt)
 	var low: float = 1.0 - p.health / p.max_health
-	vignette.color.a = clampf(dmg_t * 0.6 + low * 0.35, 0, 0.7)
+	vignette.color.a = clampf(dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
 	hit.queue_redraw()
 
 func show_game_over(round: int, kills: int) -> void:

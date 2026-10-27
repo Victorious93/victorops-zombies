@@ -14,15 +14,25 @@ static func zombie_count(round: int) -> int:
 		n = int(n * 0.75)
 	return n
 
-## Hit points of each zombie: linear to round 9, then +10% per round.
+const INTERMISSION := 10.0
+
+## Hit points of each zombie: 150 on round 1, +100 per round to round 9, then x1.1 per round.
 static func zombie_health(round: int) -> int:
 	assert(round >= 1)
 	if round <= 9:
-		return 100 + (round - 1) * 50
-	var hp := 500.0
+		return 150 + (round - 1) * 100
+	var hp := 950.0
 	for i in range(round - 9):
 		hp *= 1.1
 	return int(hp)
+
+## Share of a round's zombies that run: everyone shambles until round 4, then runners phase in.
+static func runner_chance(round: int) -> float:
+	if round < 5: return 0.0
+	return clampf(0.35 + (round - 5) * 0.25, 0.0, 1.0)
+
+const WALK_SPEED := 1.05   ## m/s shamble
+const RUN_SPEED := 3.6     ## m/s sprint (player walks 4.2, sprints 6.3)
 
 ## Speed in the original 2D units/s, capped.
 static func zombie_speed_units(round: int) -> float:

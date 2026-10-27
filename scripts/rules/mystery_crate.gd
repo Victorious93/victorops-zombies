@@ -3,7 +3,7 @@ extends RefCounted
 ## Mystery Crate: weighted random weapon for a point cost (same table as the libGDX MysteryBox).
 
 const COST := 950
-const DEFAULT_TABLE := [["scatter", 30], ["smg", 30], ["rifle", 25], ["cannon", 10], ["nova", 5]]
+const DEFAULT_TABLE := [["scatter", 25], ["smg", 25], ["rifle", 22], ["lmg", 13], ["cannon", 10], ["nova", 5]]
 
 var cost: int = COST
 var table: Array = DEFAULT_TABLE
