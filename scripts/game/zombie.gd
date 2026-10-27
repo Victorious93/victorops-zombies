@@ -158,9 +158,10 @@ func _physics_process(dt: float) -> void:
 				model.position.y = 0; state = State.TO_WINDOW; agent.target_position = window.outside_point
 		State.TO_WINDOW:
 			if _flat_dist(window.outside_point) < 0.7:
-				state = State.TEAR; t = 1.0
+				state = State.TEAR; t = 1.0; watch.reset()
 			else:
 				_nav_move(window.outside_point, dt)
+				_unstick(dt, window.outside_point)
 		State.TEAR:
 			_face(window.center()); velocity = Vector3.ZERO
 			if window.bar.is_broken():
@@ -189,7 +190,7 @@ func _physics_process(dt: float) -> void:
 			p.y += sin(clampf(t, 0, 1) * PI) * 1.1
 			global_position = p
 			if t >= 1.0:
-				state = State.CHASE; repath = 0.0
+				state = State.CHASE; repath = 0.0; watch.reset()
 		State.CHASE:
 			var pl = game.player
 			if pl == null: return
@@ -209,27 +210,33 @@ func _physics_process(dt: float) -> void:
 				if repath <= 0.0:
 					repath = 0.3; agent.target_position = pl.global_position
 				_nav_move(pl.global_position, dt, false)
-				_unstick(dt, pl)
+				_unstick(dt, pl.global_position)
 	groan_cd -= dt
 	if groan_cd <= 0.0:
 		groan_cd = randf_range(4, 10)
 		game.sfx.play_at("groan%d" % (randi() % 3 + 1), global_position + Vector3.UP * 1.5, -4, randf_range(0.85, 1.15) * (0.85 if variant == "zombie_b" else 1.0))
 
-## Re-path when blocked: sidestep to a random point, and if still stuck far away, re-enter from a window.
-func _unstick(dt: float, pl) -> void:
-	if global_position.distance_to(last_pos) > speed * dt * 0.2:
-		stuck_t = maxf(0.0, stuck_t - dt * 2.0)
-	else:
-		stuck_t += dt
+## Re-path when blocked: no progress toward the goal -> sidestep, then re-enter from the window nearest
+## the closest player (out of sight if possible). Runs in TO_WINDOW and CHASE.
+var watch := ProgressWatch.new()
+func _unstick(dt: float, goal: Vector3) -> void:
+	# chasing a player who is moving around isn't "stuck" just because distance doesn't shrink:
+	# measure progress toward the goal, but count actual movement as progress too.
+	var moved := global_position.distance_to(last_pos)
 	last_pos = global_position
-	if stuck_t > 1.5 and stuck_t < 1.5 + dt * 1.01:
-		agent.target_position = global_position + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3))
-		repath = 0.8
-	if stuck_t > 7.0 and _flat_dist(pl.global_position) > 10.0:
-		stuck_t = 0.0
-		window = game.respawn_window_for(self)
-		global_position = window.spawn_point
-		state = State.TO_WINDOW; agent.target_position = window.outside_point
+	var d := _flat_dist(goal)
+	if state == State.CHASE and moved > speed * dt * 0.6 and watch.since < ProgressWatch.SIDESTEP: watch.since = maxf(0.0, watch.since - dt)
+	match watch.update(d, dt):
+		"sidestep":
+			agent.target_position = global_position + Vector3(randf_range(-3, 3), 0, randf_range(-3, 3))
+			repath = 1.0
+		"respawn":
+			if game.has_method("on_zombie_stuck"): game.on_zombie_stuck(self)
+			window = game.respawn_window_for(self)
+			global_position = window.spawn_point + Vector3(randf_range(-1, 1), 0, randf_range(-1, 1))
+			velocity = Vector3.ZERO; knock = Vector3.ZERO
+			state = State.TO_WINDOW; agent.target_position = window.outside_point
+			watch.reset()
 
 func _flat_dist(p: Vector3) -> float:
 	return Vector2(p.x - global_position.x, p.z - global_position.z).length()
