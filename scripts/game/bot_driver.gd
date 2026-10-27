@@ -93,8 +93,8 @@ func _finish() -> void:
 	for r in game.round_times:
 		total += game.round_times[r]
 		lines.append("%5d | %7.1f | %7d | %d" % [r, game.round_times[r], Rounds.zombie_count(r), Rounds.zombie_health(r)])
-	lines.append("reached round %d · kills %d · downs %d · hits taken %d · game over %s · points %d · sim time %.0f s (+%d s breaks) · wall clock %.1f s" % [
-		game.round, game.kills, game.downs, hits_taken, str(game.over), game.player.economy.points, total, int(Rounds.INTERMISSION) * game.round_times.size(), (Time.get_ticks_msec() - started_ms) / 1000.0])
+	lines.append("reached round %d · kills %d · downs %d · stuck respawns %d · hits taken %d · game over %s · points %d · sim time %.0f s (+%d s breaks) · wall clock %.1f s" % [
+		game.round, game.kills, game.downs, game.stuck_respawns, hits_taken, str(game.over), game.player.economy.points, total, int(Rounds.INTERMISSION) * game.round_times.size(), (Time.get_ticks_msec() - started_ms) / 1000.0])
 	for l in lines: print(l)
 	var f := FileAccess.open("user://sim_report.txt", FileAccess.WRITE)
 	if f: f.store_string("\n".join(lines))

@@ -47,6 +47,9 @@ var groan_t := 6.0
 var round_times := {}        ## round -> seconds (sim report)
 var round_clock := 0.0
 var downs := 0
+var stuck_respawns := 0
+
+func on_zombie_stuck(_z) -> void: stuck_respawns += 1
 const SETTINGS_PATH := "user://settings.cfg"
 const BASE_FOG := Color(0.06, 0.07, 0.09)
 
