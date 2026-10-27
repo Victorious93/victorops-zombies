@@ -2,7 +2,7 @@
 
 ![VictorOps Zombies logo](assets/victorops-zombies-logo.jpg)
 
-An **original** top-down, round-based wave-survival zombie shooter for Android.
+**Public repo.** An **original** top-down, round-based wave-survival zombie shooter for Android.
 Hold the line across ever-harder rounds, board up the windows, spend your points
 at the Mystery Crate, the Iron Hide Tonic perk machine and the Overcharge Forge.
 
@@ -56,8 +56,9 @@ CI (`.github/workflows/android.yml`) runs tests, builds the debug APK, verifies 
 and both ABIs with `apksigner`, and uploads the APK as an artifact.
 
 ## Roadmap
-- **v1 – single-player**: real art & audio, multiple maps/rooms with buyable doors, more perks, specials, save high scores, settings, controller support.
-- **Later milestone – co-op multiplayer (scoped, not built)**: local split/shared-screen co-op, then online co-op (host-authoritative netcode, lobby, revive mechanic).
+- **Done in scaffold (v0):** playable solo slice, characters, tiered gun upgrades, armor packs, ammo/reload, callouts, Wi-Fi/LAN co-op (host-authoritative) + Bluetooth via VictorLink64 `NetLink` (not device-tested). TCP networking hardened; Fortify cooldown fixed (#4).
+- **v1 – single-player polish**: real art & audio, multiple maps/rooms with buyable doors, more perks, specials, save high scores, settings, controller support.
+- **Later:** local split/shared-screen co-op polish; broader online lobby. Wi-Fi/LAN co-op already exists in code (see Concept above) — do not re-read older notes that said co-op was unbuilt.
 
 ## Originality / IP statement
 VictorOps Zombies is an original work. Code, rules, weapon names and (placeholder) graphics are
