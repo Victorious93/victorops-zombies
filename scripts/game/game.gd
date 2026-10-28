@@ -128,11 +128,16 @@ static func save_settings(s: GameSettings) -> void:
 	var cf := ConfigFile.new(); cf.set_value("voz", "settings", s.to_dict()); cf.save(SETTINGS_PATH)
 
 func settings_shadows() -> bool: return settings.data().shadows
-## The gun flashlight only casts shadows once the room lights are on. Before power it would be the
-## sole shadowed light, and in the GL Compatibility renderer a lone shadowed spot samples an unset
-## shadow atlas and floods surfaces with inf/NaN (the blown-out white/black pre-power world).
-func flashlight_shadows() -> bool: return flashlight_casts_shadows(settings_shadows(), facility != null and facility.power_on)
-static func flashlight_casts_shadows(shadows_setting: bool, power_on: bool) -> bool: return shadows_setting and power_on
+## The gun flashlight casts shadows only once the room lights are on, and never in GL Compatibility.
+## Root cause of the v7 blown-out white/black frames: the viewmodel overlay is a second SubViewport that
+## shares the world; in GL Compatibility a *shadowed spot light* seen by two viewports gets its shadow
+## data re-rendered for the overlay camera, so the main view samples a mismatched/unset shadow map and
+## floods surfaces with inf/NaN (glow then spreads it to white). Omni/directional shadows are unaffected.
+## Compatibility is also the fallback on phones without Vulkan, so the guard protects those too.
+func flashlight_shadows() -> bool:
+	return flashlight_casts_shadows(settings_shadows(), facility != null and facility.power_on,
+		RenderingServer.get_current_rendering_method() == "gl_compatibility")
+static func flashlight_casts_shadows(shadows_setting: bool, power_on: bool, compat := false) -> bool: return shadows_setting and power_on and not compat
 
 func apply_settings() -> void:
 	var d := settings.data()

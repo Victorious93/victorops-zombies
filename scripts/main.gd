@@ -389,9 +389,12 @@ func _views(dir: String) -> void:
 	var pl := game.player
 	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
 	await _wait(60)
+	_debug_toggles(OS.get_environment("VOZ_DBG"))
 	var only := OS.get_environment("VOZ_VIEWS")   # optional: "scenery", "zombies", "viewmodel" (comma list)
 	var want := func(ph: String) -> bool: return only == "" or ph in only
+	var vonly := OS.get_environment("VOZ_VIEW_ONLY")
 	for v in (VIEWS if want.call("scenery") else []):
+		if vonly != "" and not v[0].begins_with(vonly): continue
 		pl.global_position = v[1]; pl.yaw = v[2]; pl.pitch = v[3]; pl.velocity = Vector3.ZERO
 		await _wait(45)
 		await _snap(sd, v[0] + ".png")
@@ -456,3 +459,37 @@ func _probe(dir: String) -> void:
 			print("PB ", id, " tl ", cam.to_local(fa.target_l.global_position), " tr ", cam.to_local(fa.target_r.global_position))
 		if offs.is_empty(): await _snap(dir, id + "_hip.png")
 	get_tree().quit()
+
+## Render bisect switches for capture debugging (VOZ_DBG="noshadow,noglow,nofog,noflash,nobounce,nodust").
+func _debug_toggles(t: String) -> void:
+	if t == "": return
+	var env: Environment = game.env
+	if "noglow" in t: env.glow_enabled = false
+	if "nofog" in t: env.fog_enabled = false
+	if "noshadow" in t:
+		for l in game.map.shadow_lights: if is_instance_valid(l): l.shadow_enabled = false
+	if "noflash" in t and game.player.flashlight: game.player.flashlight.visible = false
+	if "nobounce" in t:
+		for l in game.map.bounce_lights: l.visible = false
+	if "nodust" in t:
+		for d in game.map.dust: d.visible = false
+	if "bakedyn" in t:
+		for l in game.map.bounce_lights: l.light_bake_mode = Light3D.BAKE_DYNAMIC
+	if "att1" in t:
+		for l in game.map.bounce_lights: l.omni_attenuation = 1.0
+	if "spec" in t:
+		for l in game.map.bounce_lights: l.light_specular = 0.5
+	if "nofsh" in t: game.player.flashlight.shadow_enabled = false
+	if "noomsh" in t:
+		for l in game.map.shadow_lights: if l is OmniLight3D: l.shadow_enabled = false
+	if "ovl0" in t: game.player.vm_overlay.vp.positional_shadow_atlas_size = 0
+	if "ovl4" in t: game.player.vm_overlay.vp.positional_shadow_atlas_size = 4096
+	if "ovloff" in t: game.player.vm_overlay.vp.render_target_update_mode = SubViewport.UPDATE_DISABLED
+	if "fbias" in t: game.player.flashlight.shadow_bias = 0.1; game.player.flashlight.shadow_normal_bias = 1.0
+	if "nomoon" in t: game.map.moon_light.visible = false
+	if "count" in t:
+		var c := Vector3(-6, 1.5, -12.5); var n := 0
+		for l in get_tree().root.find_children("*", "Light3D", true, false):
+			if l is OmniLight3D and l.is_visible_in_tree() and l.global_position.distance_to(c) < l.omni_range + 4: n += 1; print("LIGHT ", l.get_path(), " ", l.global_position, " r=", l.omni_range, " sh=", l.shadow_enabled)
+		print("LIGHTCOUNT ", n)
+	print("VOZ_DBG ", t)
