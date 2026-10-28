@@ -106,7 +106,7 @@ func _ready() -> void:
 	flashlight.spot_attenuation = 1.9; flashlight.light_specular = 0.25  # softer, wider pool: no blown-out disk on walls
 	flashlight.light_color = Color(1.0, 0.93, 0.8)
 	flashlight.position = Vector3(0.0, 0.02, -0.25); vm.add_child(flashlight)
-	flashlight.shadow_enabled = game != null and game.settings_shadows()
+	flashlight.shadow_enabled = game != null and game.flashlight_shadows()
 	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand)
 	fps_arms = FpsArms.new(); cam.add_child(fps_arms); vm.fps_arms = fps_arms
 	vm.set_weapon(weapon())

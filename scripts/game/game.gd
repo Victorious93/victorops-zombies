@@ -102,11 +102,14 @@ func _build_env() -> void:
 	env.background_color = Color(0.01, 0.012, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.26, 0.3, 0.42)
-	env.ambient_light_energy = 0.2
+	env.ambient_light_energy = 0.32   # pre-power: moody but readable
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.06, 0.07, 0.09)
 	env.fog_density = 0.055
+	# low ground mist (height fog is per-pixel math only: mobile-safe, no volumetric buffers)
+	env.fog_height = 0.5; env.fog_height_density = 0.3
+	env.fog_aerial_perspective = 0.25
 	env.glow_enabled = true
 	env.glow_intensity = 0.7
 	env.glow_bloom = 0.08
@@ -125,6 +128,11 @@ static func save_settings(s: GameSettings) -> void:
 	var cf := ConfigFile.new(); cf.set_value("voz", "settings", s.to_dict()); cf.save(SETTINGS_PATH)
 
 func settings_shadows() -> bool: return settings.data().shadows
+## The gun flashlight only casts shadows once the room lights are on. Before power it would be the
+## sole shadowed light, and in the GL Compatibility renderer a lone shadowed spot samples an unset
+## shadow atlas and floods surfaces with inf/NaN (the blown-out white/black pre-power world).
+func flashlight_shadows() -> bool: return flashlight_casts_shadows(settings_shadows(), facility != null and facility.power_on)
+static func flashlight_casts_shadows(shadows_setting: bool, power_on: bool) -> bool: return shadows_setting and power_on
 
 func apply_settings() -> void:
 	var d := settings.data()
@@ -139,7 +147,7 @@ func apply_settings() -> void:
 	if player:
 		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
 		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
-		if player.flashlight: player.flashlight.shadow_enabled = d.shadows
+		if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	if touch:
 		touch.floating = settings.joystick != "fixed"; touch.fire_scale = settings.fire_size
 		touch.button_scale = settings.button_scale; touch.opacity = settings.button_opacity
@@ -805,6 +813,7 @@ func throw_power(lever: Node3D) -> void:
 	sfx.play("power_on")
 	hud.banner("Power restored", 3.0)
 	env.ambient_light_energy = 0.5
+	if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	player.add_trauma(0.3)
 
 func perk_prompt(p: Player, id: String) -> String:

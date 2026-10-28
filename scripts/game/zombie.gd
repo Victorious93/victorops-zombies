@@ -157,7 +157,8 @@ static func _rim_mat(src: StandardMaterial3D) -> StandardMaterial3D:
 
 ## Skin variations: 4 shared tints x grime/blood detail per type (shared materials keep batching).
 var skin := randi() % 4
-const SKINS := [Color(0.5, 0.58, 0.44), Color(0.46, 0.5, 0.45), Color(0.56, 0.55, 0.42), Color(0.42, 0.5, 0.48)]   ## v7: rotting grey-green
+const SKINS := [Color(0.68, 0.76, 0.6), Color(0.64, 0.68, 0.62), Color(0.74, 0.72, 0.58), Color(0.6, 0.68, 0.66)]   ## v7: rotting grey-green
+const FILL := 0.12   ## self-fill emission so dark variants stay readable
 static var _skin_cache := {}
 static var _grime: Texture2D
 static func grime_tex() -> Texture2D:
@@ -188,9 +189,11 @@ static func _skin_mat(src: StandardMaterial3D, type: String, idx: int) -> Standa
 		m.detail_albedo = grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 		m.roughness = 0.7; m.metallic_specular = 0.35   # clammy
 		m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1; m.uv1_scale = Vector3(1.6, 1.6, 1.6)
-		m.rim_enabled = true; m.rim = 0.6; m.rim_tint = 0.5
+		m.rim_enabled = true; m.rim = 0.85; m.rim_tint = 0.35
+		# faint self-fill (no per-zombie light): bodies keep a readable silhouette even outside lamp pools
+		m.emission_enabled = true; m.emission = Color(tint.r, tint.g, tint.b) * 0.5; m.emission_energy_multiplier = FILL
 		if type == "bloater":
-			m.emission_enabled = true; m.emission = Color(0.25, 0.4, 0.05); m.emission_energy_multiplier = 0.25
+			m.emission = Color(0.25, 0.4, 0.05); m.emission_energy_multiplier = 0.3
 		_skin_cache[key] = m
 	return _skin_cache[key]
 

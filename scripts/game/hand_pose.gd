@@ -5,7 +5,8 @@ extends SkeletonModifier3D
 
 var targets: Array = []          ## [right, left] Node3D
 var curl := [0.9, 0.8]
-var wrist_offset := [Basis.from_euler(Vector3(0.0, 0.0, 1.35)), Basis.from_euler(Vector3(0.0, 0.0, -1.35))]
+## knuckles up/out, palm toward the grip, fingers wrapping across it (tuned per-weapon in probe renders)
+var wrist_offset := [Basis.from_euler(Vector3(1.57, 0.0, 0.0)), Basis.from_euler(Vector3(1.57, 0.0, 0.0))]
 const FINGERS := ["index", "middle", "ring", "pinky"]
 
 func _process_modification() -> void:

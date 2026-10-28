@@ -7,6 +7,8 @@ extends Node3D
 ## gun sways/bobs/recoils and the hands follow it.
 
 const SCALE := 0.1
+const FORE_REACH := 0.5
+const GLOVE_COLOR := Color(0.17, 0.16, 0.12)
 var skel: Skeleton3D
 var ik: TwoBoneIK3D
 var hands: HandPose
@@ -20,13 +22,14 @@ func _init() -> void:
 	name = "FpsArms"
 	var scn: Node3D = load("res://assets/models/fps_arms.glb").instantiate()
 	scn.scale = Vector3.ONE * SCALE
-	scn.position = Vector3(0, -0.2, 0.0)   # head bone sits ~at the eye; shoulders a little behind/below
+	scn.position = Vector3(0, -0.24, -0.04)   # head bone sits ~at the eye; shoulders a little behind/below
 	add_child(scn)
 	skel = scn.find_children("*", "Skeleton3D", true, false)[0]
 	mat = StandardMaterial3D.new()
-	mat.albedo_texture = load("res://assets/models/fps_arms_arm_albedo_pale.png")
-	mat.albedo_color = Color(0.3, 0.32, 0.24)     # olive tactical sleeves + gloves (multiplied over the skin map)
-	mat.roughness = 0.75; mat.rim_enabled = true; mat.rim = 0.35; mat.rim_tint = 0.4
+	# olive tactical sleeves + gloves: a flat dyed-fabric albedo (the pale skin map multiplied by a tint
+	# still read as bare skin under the viewmodel fill light, so it is not used)
+	mat.albedo_color = GLOVE_COLOR
+	mat.roughness = 0.85; mat.rim_enabled = true; mat.rim = 0.3; mat.rim_tint = 0.5
 	for mi in scn.find_children("*", "MeshInstance3D", true, false):
 		(mi as MeshInstance3D).material_override = mat
 		(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -54,7 +57,9 @@ func attach(gun: Node3D, grip: Vector3, fore: Vector3, two_handed: bool) -> void
 	target_r.position = grip + Vector3(0.035, 0.03, 0.035)
 	target_r.rotation = Vector3(-0.25, 0.0, 0.0)
 	if two_handed:
-		target_l.position = fore + Vector3(-0.035, 0.03, 0.03)
+		# support hand on the near half of the fore-end: the far end is beyond the rig's arm reach,
+		# which left the hand stretched out and floating beside the barrel
+		target_l.position = grip.lerp(fore, FORE_REACH) + Vector3(-0.03, 0.02, 0.0)
 		target_l.rotation = Vector3(-0.1, 0.0, 0.0)
 	else:   # pistol: support hand cups the firing hand
 		target_l.position = grip + Vector3(-0.04, 0.035, 0.045)

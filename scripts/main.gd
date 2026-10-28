@@ -14,6 +14,7 @@ func _ready() -> void:
 	show_menu()
 	if args.has("shots"): _shots(args["shots"])
 	elif args.has("sim"): _sim(int(args["sim"]))
+	elif args.has("probe"): _probe(args["probe"])
 	elif args.has("clip"): _clip(args["clip"])
 	elif args.has("views"): _views(args["views"])
 	elif args.has("hud"): _hud(args["hud"], args.get("prefix", ""))
@@ -396,15 +397,15 @@ func _views(dir: String) -> void:
 		await _wait(45)
 		await _snap(sd, v[0] + ".png")
 	# zombies: close-up of each type, then a group line-up (intake, facing north)
-	pl.global_position = Vector3(0, 0.1, 6); pl.yaw = PI; pl.pitch = -0.05   # face south: the corridor light falls on the zombies, not behind them
-	for ty in (["walker", "sprinter", "bloater", "brute", "group"] if want.call("zombies") else []):
-		var list := ["walker", "sprinter", "bloater", "brute", "walker"] if ty == "group" else [ty]
+	pl.global_position = Vector3(0, 0.1, 0.5); pl.yaw = PI; pl.pitch = -0.05   # under the intake lamp, facing south: lit from the front, wall well behind
+	for ty in (["walker", "sprinter", "bloater", "brute", "warden", "group"] if want.call("zombies") else []):
+		var list := ["walker", "sprinter", "bloater", "brute", "sprinter"] if ty == "group" else [ty]
 		var zs := []
 		for i in list.size():
 			var z: Zombie = game.spawn_zombie("", list[i])
 			var x := (i - (list.size() - 1) / 2.0) * 1.6
 			z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
-			z.global_position = Vector3(x, 0.05, 6.0 + (2.6 if ty != "group" else 5.5) + absf(x) * 0.3)
+			z.global_position = Vector3(x, 0.05, 0.5 + (2.8 if ty != "group" else 4.6) + absf(x) * 0.3 + (1.2 if ty == "warden" else 0.0))
 			z.set_physics_process(false)   # hold the pose for the portrait: no chasing into the lens
 			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
 			z.model.rotation.y = PI; z._locomotion()
@@ -424,4 +425,35 @@ func _views(dir: String) -> void:
 		await _wait(40)
 		await _snap(vd, id + "_ads.png")
 		pl.bot_input.ads = false
+	get_tree().quit()
+
+## Debug probe: pre-power look, then wrist-offset variants on the sidearm (VOZ_PROBE_OFFS="x,y,z;x,y,z").
+func _probe(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	start_game()
+	game.auto_rounds = false; game.allow_tutorial = false; game.god_mode = true
+	var pl := game.player
+	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
+	await _wait(30)
+	pl.global_position = Vector3(-6, 0.1, 6); pl.yaw = -2.4; pl.pitch = -0.05; pl.velocity = Vector3.ZERO
+	await _wait(10); await _snap(dir, "a_prepower.png")
+	game.throw_power(Node3D.new())
+	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.pitch = 0.0
+	var ids := OS.get_environment("VOZ_PROBE_IDS").split(",", false)
+	if ids.is_empty(): ids = PackedStringArray(["sidearm"])
+	var offs := OS.get_environment("VOZ_PROBE_OFFS").split(";", false)
+	for id in ids:
+		pl.loadout.give(Weapons.make(id)); await _wait(30)
+		var k := 0
+		for o in offs:
+			var v := o.split_floats(",")
+			var b := Basis.from_euler(Vector3(v[0], v[1], v[2]))
+			pl.fps_arms.hands.wrist_offset = [b, Basis.from_euler(Vector3(v[0], -v[1], -v[2]))]
+			await _wait(6); await _snap(dir, "%s_%d.png" % [id, k]); k += 1
+			var fa = pl.fps_arms; var sk: Skeleton3D = fa.skel; var cam: Node3D = fa.get_parent()
+			for nm in ["bicep.l", "forearm.l", "wrist.l", "bicep.r", "wrist.r"]:
+				var gp := sk.global_transform * sk.get_bone_global_pose(sk.find_bone(nm))
+				print("PB ", id, " ", nm, " ", cam.to_local(gp.origin))
+			print("PB ", id, " tl ", cam.to_local(fa.target_l.global_position), " tr ", cam.to_local(fa.target_r.global_position))
+		if offs.is_empty(): await _snap(dir, id + "_hip.png")
 	get_tree().quit()

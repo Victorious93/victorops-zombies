@@ -13,6 +13,9 @@ var windows := {}      # id -> WindowBarricade
 var doors := {}        # id -> StaticBody3D
 var room_lights: Array = []    # white lights enabled by power
 var emergency_lights: Array = []
+var bounce_lights: Array = []
+const BOUNCE_OFF := 0.18
+const BOUNCE_ON := 0.45
 var machine_lights: Array = []
 var mats := {}
 var crate_spots: Array = []   # [pos, rot_y, area label]
@@ -323,6 +326,10 @@ func build(p_game) -> void:
 		w.visible = false; room_lights.append(w); shadow_lights.append(w)
 		shaft(Vector3(0, -1.3, 0), 2.6, 1.6, Color(1.0, 0.9, 0.7, 0.16), w)
 		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
+		# soft bounce fill (stand-in for baked GI on mobile): wide, no shadow/specular, brightens with power
+		var bf := light(Vector3(p.x, 1.2, p.z), Color(0.55, 0.6, 0.75), BOUNCE_OFF, 13.0, false)
+		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
+		bounce_lights.append(bf)
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
 	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
 	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
@@ -646,6 +653,8 @@ func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
 func set_power(on: bool) -> void:
 	for l in room_lights: l.visible = on
 	for l in emergency_lights: l.base = 0.3 if on else 1.2
+	for l in bounce_lights: l.light_energy = BOUNCE_ON if on else BOUNCE_OFF
+	for l in bounce_lights: l.light_color = Color(1.0, 0.92, 0.8) if on else Color(0.55, 0.6, 0.75)
 	for pair in machine_lights:
 		pair[0].light_energy = 1.5 if on else 0.0
 		pair[1].emission_energy_multiplier = 3.0 if on else 0.3
