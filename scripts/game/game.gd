@@ -33,6 +33,8 @@ var interactables: Array = []
 var current_prompt := ""
 var current_target = null
 var env: Environment
+var force_fps_label := false   ## captures/debug: show the perf readout regardless of the setting
+const DRAW_CALL_BUDGET := 300   ## mobile target per frame (main + viewmodel overlay)
 var auto_rounds := true
 var fx: Fx
 var settings := GameSettings.new()

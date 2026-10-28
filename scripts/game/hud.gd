@@ -353,7 +353,8 @@ func _process(dt: float) -> void:
 	var pk: Array = []
 	for id in Perks.held(p.perks): pk.append(Perks.ALL[id].name)
 	perks_lbl.text = "\n".join(pk)
-	fps_lbl.text = "%d fps" % Engine.get_frames_per_second()
+	fps_lbl.visible = game.settings.show_fps or game.force_fps_label
+	if fps_lbl.visible: fps_lbl.text = perf_text(Engine.get_frames_per_second(), RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
 	health_bar.max_value = p.max_health; health_bar.value = p.health
 	armor_bar.value = p.armor.value; armor_bar.visible = p.armor.value > 0
 	var cd: float = p.ability_cd
@@ -427,3 +428,7 @@ func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, 
 		b.add_theme_font_size_override("font_size", 28); b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		b.pressed.connect(pair[1]); over_panel.add_child(b)
 	add_child(over_panel)
+
+## "60 fps · 142 dc": draw calls flagged once they pass the mobile budget.
+static func perf_text(fps: int, draw_calls: int) -> String:
+	return "%d fps · %d dc%s" % [fps, draw_calls, " !" if draw_calls > Game.DRAW_CALL_BUDGET else ""]

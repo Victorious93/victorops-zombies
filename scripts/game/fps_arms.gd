@@ -8,6 +8,11 @@ extends Node3D
 
 const SCALE := 0.1
 const FORE_REACH := 0.5
+## v7.2: support hand sits on the left flank of the fore-end and rolls palm-in so it reads on screen
+## instead of hiding under the receiver; shoulders 10 cm further forward so the left arm is not straight.
+const SUPPORT_OFFSET := Vector3(-0.06, 0.05, 0.0)
+const SUPPORT_ROLL := 0.6
+const SHOULDER_POS := Vector3(0, -0.24, -0.14)
 const GLOVE_COLOR := Color(0.17, 0.16, 0.12)
 var skel: Skeleton3D
 var ik: TwoBoneIK3D
@@ -22,7 +27,7 @@ func _init() -> void:
 	name = "FpsArms"
 	var scn: Node3D = load("res://assets/models/fps_arms.glb").instantiate()
 	scn.scale = Vector3.ONE * SCALE
-	scn.position = Vector3(0, -0.24, -0.04)   # head bone sits ~at the eye; shoulders a little behind/below
+	scn.position = SHOULDER_POS   # head bone sits ~at the eye; shoulders a little behind/below
 	add_child(scn)
 	skel = scn.find_children("*", "Skeleton3D", true, false)[0]
 	mat = StandardMaterial3D.new()
@@ -59,8 +64,8 @@ func attach(gun: Node3D, grip: Vector3, fore: Vector3, two_handed: bool) -> void
 	if two_handed:
 		# support hand on the near half of the fore-end: the far end is beyond the rig's arm reach,
 		# which left the hand stretched out and floating beside the barrel
-		target_l.position = grip.lerp(fore, FORE_REACH) + Vector3(-0.03, 0.02, 0.0)
-		target_l.rotation = Vector3(-0.1, 0.0, 0.0)
+		target_l.position = grip.lerp(fore, FORE_REACH) + SUPPORT_OFFSET
+		target_l.rotation = Vector3(-0.1, 0.0, SUPPORT_ROLL)
 	else:   # pistol: support hand cups the firing hand
 		target_l.position = grip + Vector3(-0.04, 0.035, 0.045)
 		target_l.rotation = Vector3(-0.25, 0.0, 0.0)
