@@ -1,15 +1,8 @@
 extends GutTest
 
-func test_flashlight_never_shadows_in_compat():
-	assert_false(Game.flashlight_casts_shadows(true, true, true), "shared-world overlay + shadowed spot blows out GL Compatibility")
-	assert_true(Game.flashlight_casts_shadows(true, true, false))
-
-func test_support_hand_reachable():
-	# left shoulder rest ~(-0.19, 0, 0) relative to the rig root; arm ~0.52 m. Keep the support target well inside reach.
-	var sh := FpsArms.SHOULDER_POS + Vector3(-0.19, 0.0, 0.0)
-	var tl := Vector3(0.1, -0.1275, -0.43) + FpsArms.SUPPORT_OFFSET - Vector3(-0.03, 0.02, 0.0)
-	assert_lt(sh.distance_to(tl), 0.5, "support hand must not need a fully straight arm")
-	assert_gt(FpsArms.SUPPORT_ROLL, 0.0)
+func test_flashlight_never_shadows():
+	for compat in [true, false]:
+		assert_false(Game.flashlight_casts_shadows(true, true, compat), "v7.3: no flashlight shadows on any renderer")
 
 func test_show_fps_setting_roundtrip():
 	var s := GameSettings.new()

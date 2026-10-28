@@ -3,7 +3,7 @@ extends GutTest
 
 func test_flashlight_shadow_only_after_power():
 	assert_false(Game.flashlight_casts_shadows(true, false), "lone shadowed spot before power blew out GL Compatibility")
-	assert_true(Game.flashlight_casts_shadows(true, true))
+	assert_false(Game.flashlight_casts_shadows(true, true), "v7.3: flashlight shadows off on every renderer")
 	assert_false(Game.flashlight_casts_shadows(false, true))
 
 func test_zombie_skins_readable():
