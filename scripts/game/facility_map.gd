@@ -24,6 +24,13 @@ var dust: Array = []
 var shadow_lights: Array = []
 var forge_rings: Array = []
 var forge_work := 0.0   ## seconds left on the current upgrade animation
+## v7.3: perk-machine glow after power. The old 3.0 panel / 3.2 neon / 1.5 light blew the machine front
+## out to a white slab at arm's length (glow + tonemap saturate the emission); these read as lit
+## signage without clipping.
+const MACHINE_PANEL_ON := 0.7
+const MACHINE_NEON_ON := 1.3
+const MACHINE_LIGHT_ON := 0.8
+const MACHINE_EMBLEM := 0.7
 var neon: Array = []          # [material, base energy]
 var _t := 0.0
 var alarm_lights: Array = []   ## pulsing red alarms that kick in after round 5
@@ -474,12 +481,17 @@ func apply_quality(d: Dictionary) -> void:
 func _machine(pos: Vector3, rot_y: float, color: Color, title: String, emblem := "circle") -> Node3D:
 	var root := Node3D.new(); root.position = pos; root.rotation.y = rot_y; add_child(root)
 	box(Vector3(1.2, 2.2, 0.8), Vector3(0, 1.1, 0), _pbr("metalplates006", color.darkened(0.45), 0.9, 0.6), true, 1, root)
-	var panel := box(Vector3(0.9, 0.9, 0.05), Vector3(0, 1.45, -0.42), _emit(color, 0.3), false, 1, root)
+	var pnl := _emit(color, 0.3); pnl.albedo_color = color.darkened(0.6); pnl.roughness = 0.9   # dark glass, lit from inside
+	var panel := box(Vector3(0.9, 0.9, 0.05), Vector3(0, 1.45, -0.42), pnl, false, 1, root)
 	var tube := _emit(color.lightened(0.2), 0.4)
 	for e in [[Vector3(1.26, 0.05, 0.05), Vector3(0, 2.22, -0.42)], [Vector3(1.26, 0.05, 0.05), Vector3(0, 0.02, -0.42)],
 			[Vector3(0.05, 2.2, 0.05), Vector3(0.62, 1.1, -0.42)], [Vector3(0.05, 2.2, 0.05), Vector3(-0.62, 1.1, -0.42)]]:
 		box(e[0], e[1], tube, false, 1, root)
-	var em := MeshInstance3D.new(); em.material_override = tube
+	var em := MeshInstance3D.new()
+	# v7.3: emblem gets its own matte, low-emission material; sharing the pulsing tube neon plus the
+	# flashlight hotspot made it a white-hot blob at arm's length
+	var emm := _emit(color, MACHINE_EMBLEM); emm.roughness = 1.0; emm.metallic_specular = 0.0
+	em.material_override = emm
 	match emblem:
 		"heart":
 			var sm := SphereMesh.new(); sm.radius = 0.16; sm.height = 0.32; em.mesh = sm; em.scale = Vector3(1, 1, 0.3)
@@ -492,7 +504,7 @@ func _machine(pos: Vector3, rot_y: float, color: Color, title: String, emblem :=
 	l.shaded = false; l.position = Vector3(0, 2.45, -0.42); l.rotation.y = PI; l.modulate = color.lightened(0.45)
 	l.outline_modulate = color.darkened(0.3)
 	root.add_child(l)
-	var ml := OmniLight3D.new(); ml.light_color = color; ml.light_energy = 0.0; ml.omni_range = 4.0
+	var ml := OmniLight3D.new(); ml.light_color = color; ml.light_energy = 0.0; ml.omni_range = 3.0
 	ml.position = Vector3(0, 1.5, -1.0); root.add_child(ml)
 	machine_lights.append([ml, panel.material_override if panel is MeshInstance3D else panel.get_child(1).material_override])
 	neon.append([tube, 0.4, color])
@@ -621,7 +633,7 @@ func _process(dt: float) -> void:
 			al.light_energy = 2.6 * k; alarm_mats[i].emission_energy_multiplier = 0.5 + 5.0 * k
 	for n in neon:
 		var m: StandardMaterial3D = n[0]
-		var base: float = 3.2 if on else 0.4
+		var base: float = MACHINE_NEON_ON if on else 0.4
 		m.emission_energy_multiplier = base * (0.92 + 0.08 * sin(_t * 9.0 + n[1] * 10.0)) * (0.2 if not on and fmod(_t * 1.7 + n[1], 3.0) < 0.1 else 1.0)
 
 func _wall_buy(id: String, pos: Vector3, rot_y: float) -> void:
@@ -656,5 +668,5 @@ func set_power(on: bool) -> void:
 	for l in bounce_lights: l.light_energy = BOUNCE_ON if on else BOUNCE_OFF
 	for l in bounce_lights: l.light_color = Color(1.0, 0.92, 0.8) if on else Color(0.55, 0.6, 0.75)
 	for pair in machine_lights:
-		pair[0].light_energy = 1.5 if on else 0.0
-		pair[1].emission_energy_multiplier = 3.0 if on else 0.3
+		pair[0].light_energy = MACHINE_LIGHT_ON if on else 0.0
+		pair[1].emission_energy_multiplier = MACHINE_PANEL_ON if on else 0.3
