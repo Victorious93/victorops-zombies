@@ -16,6 +16,9 @@ var hp := 100
 var max_hp := 100
 var speed := 1.1
 var runner := false
+var gait := 0  ## Gait.Tier
+var react_yaw := 0.0
+var react_roll := 0.0
 var crawler := false
 var leg_damage := 0
 var t := 0.0
@@ -65,9 +68,10 @@ func setup(p_game, p_window: WindowBarricade, round: int, p_type := "walker") ->
 	game = p_game; window = p_window; ztype = p_type
 	max_hp = ZombieTypes.health(ztype, Rounds.zombie_health(round)); hp = max_hp
 	# shamblers until round 5, then a growing share of sprinters (Frenzy rounds: everyone runs)
-	var rc := 1.0 if Rounds.is_special(round) else Rounds.runner_chance(round)
-	runner = randf() < rc
-	speed = (Rounds.RUN_SPEED if runner else Rounds.WALK_SPEED) * randf_range(0.9, 1.12)
+	# classic gait tiers: shamblers early, joggers mid, sprinting hordes later (special rounds: all sprint)
+	gait = Gait.Tier.SPRINT if Rounds.is_special(round) else Gait.pick(round, randf())
+	runner = gait != Gait.Tier.WALK
+	speed = Gait.speed(gait, round) * randf_range(0.9, 1.12)
 	variant = "zombie_b" if randf() < 0.35 else "zombie_a"
 	voice = randi() % 5 + 1
 	voice_pitch = randf_range(0.78, 1.22) * (0.88 if variant == "zombie_b" else 1.0)
@@ -267,7 +271,16 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		if heavy > 0.2: windup_t = -1.0; lunge_t = 0.0
 		if heavy > 0.12 or headshot:
 			cur_anim = ""; _play("HitReact", 0.04, 1.4); attack_anim_t = stagger_t
-	model.rotation.x = lean + clampf(-heavy * 0.9, -0.35, 0.0)  # flinch, recovers in _physics_process
+	# directional hit reaction: head snaps back, side hits twist, leg hits stumble, big hits shove
+	var side := 0.0
+	if force.length() > 0.01: side = force.normalized().dot(global_basis.x)
+	var hpart := "head" if headshot else ("leg" if part == "legs" else "torso")
+	var kind := HitReact.classify(hpart, float(dmg) / max_hp, side)
+	var pose := HitReact.pose(kind) * (0.35 if ztype == "brute" else 1.0)
+	if not crawler:
+		model.rotation.x = lean + pose.x if kind != HitReact.Kind.NONE else lean + clampf(-heavy * 0.9, -0.35, 0.0)
+		react_yaw = pose.y; react_roll = pose.z
+		if state == State.CHASE: stagger_t = maxf(stagger_t, HitReact.stagger_time(kind) * (0.4 if ztype == "brute" else 1.0))
 
 func make_crawler() -> void:
 	if not crawler and state != State.DEAD and anims.has("Crawl"): _become_crawler()
@@ -447,13 +460,21 @@ func _physics_process(dt: float) -> void:
 				if t <= 0.0:
 					t = randf_range(0.9, 1.4)
 					if ap and anims.has("Punch"): ap.seek(0.0)
+					window.rip_plank()
 					window.bar.damage(window.bar.plank_hp); window.refresh()
 					game.sfx.play_at("plank_rip", window.center(), -4, randf_range(0.9, 1.1))
+					game.sfx.play_at("plank_pull_v6", window.center(), -3, randf_range(0.9, 1.1))
 					game.fx.splinters(window.center())
 		State.VAULT:
-			t += dt / 0.8
-			var p := vault_from.lerp(window.inside_point, clampf(t, 0, 1))
-			p.y += sin(clampf(t, 0, 1) * PI) * 1.1
+			var t0 := t
+			t += dt / (1.1 if gait == Gait.Tier.WALK else 0.75)
+			if t0 <= 0.0: game.sfx.play_at("climb_v6", window.center(), -4, randf_range(0.9, 1.1))
+			# climb-in: haul up onto the sill (slow), tip over (fast), drop inside
+			var k := clampf(t, 0, 1)
+			var horiz := smoothstep(0.35, 1.0, k)
+			var p := vault_from.lerp(window.inside_point, horiz)
+			p.y += (smoothstep(0.0, 0.4, k) - smoothstep(0.6, 1.0, k)) * 1.0
+			model.rotation.x = -0.5 * sin(k * PI) if k < 0.5 else 0.6 * sin(k * PI)
 			global_position = p
 			if t >= 1.0:
 				state = State.CHASE; repath = 0.0; watch.reset()
@@ -503,6 +524,8 @@ func _physics_process(dt: float) -> void:
 	stagger_t -= dt
 	_tells(dt)
 	model.rotation.x = lerpf(model.rotation.x, lean if state == State.CHASE else 0.0, dt * 8.0) if state != State.RISE else model.rotation.x
+	react_yaw = lerpf(react_yaw, 0.0, dt * 7.0); react_roll = lerpf(react_roll, 0.0, dt * 7.0)
+	model.rotation.y = PI + react_yaw; model.rotation.z = react_roll
 	groan_cd -= dt
 	if groan_cd <= 0.0:
 		groan_cd = randf_range(3.5, 9) if not runner else randf_range(2.5, 6)

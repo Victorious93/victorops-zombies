@@ -281,64 +281,56 @@ func _clip(dir: String) -> void:
 	pl.bot_input = {mv = Vector2.ZERO, fire = false, ads = false, use = false, sprint = false}
 	pl.economy.points = 12000
 	pl.loadout.give(Weapons.make("rifle")); pl.apply_reload_perk()
-	game.round = 8   # brute round: alarm beacons + painted tally gate
-	game.hud.tally_flip(8)
+	game.round = 3
+	game.hud.tally_flip(3)
 	game.throw_power(Node3D.new())
-	game.map.open_door("east"); game.map.open_door("yard")
-	# A: brute + sprinters through the west window (0-8 s)
-	pl.global_position = Vector3(-3.0, 0.1, 3.2); pl.yaw = PI / 2 + 0.2; pl.pitch = -0.05
-	game.spawn_zombie("w_west", "brute")
-	for id in ["w_west", "w_south"]: game.spawn_zombie(id, "sprinter")
-	game.spawn_zombie("w_west", "walker")
-	await _glide(Vector3(-3.0, 0.1, 3.2), Vector3(-10, 1.4, 2), 50)
-	for z in game.zombies: if z.window: z.window.bar.damage(999); z.window.refresh()
-	await _glide(Vector3(-2.5, 0.1, 3.0), Vector3(-8, 1.4, 2.5), 110)
-	await _snap(dir, "01_brute_sprinters.png")
-	await _glide(Vector3(-2.0, 0.1, 3.0), Vector3(-7, 1.5, 3.0), 40, true)
-	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-10, 1.4, 2), 90, true)
-	# C: ragdolls - body-shot kills with force (8-12 s)
+	# A: window tear-down + climb-in (0-10 s): walkers rip planks one by one, then haul over the sill
+	var win: WindowBarricade = game.map.windows["w_west"]
+	var inward := (win.inside_point - win.outside_point); inward.y = 0; inward = inward.normalized()
+	var watch := win.inside_point + inward * 6.0; watch.y = 0.1
+	pl.global_position = watch; pl.yaw = atan2(inward.x, inward.z); pl.pitch = 0.0
+	win.bar.damage(win.bar.plank_hp * maxi(win.bar.planks() - 4, 0)); win.refresh()
+	var walkers := []
+	for k in 3:
+		var z := game.spawn_zombie("w_west", "walker")
+		if z:
+			z.drop_in = false; z.global_position = win.outside_point + Vector3(randf_range(-0.5, 0.5), 0, 0) - inward * (0.3 + k * 0.9)
+			z.state = Zombie.State.TO_WINDOW; z.gait = Gait.Tier.WALK; z.runner = false; walkers.append(z)
+	await _wait(1)
+	for k in walkers.size():
+		var z: Zombie = walkers[k]
+		if is_instance_valid(z): z.global_position = win.outside_point + Vector3(randf_range(-0.4, 0.4), 0, 0) - inward * (0.2 + k * 0.7)
+	await _glide(watch, win.center() + Vector3.UP * 0.2, 120)
+	await _snap(dir, "01_window_teardown.png")
+	await _glide(watch - inward * 0.1, win.center(), 110)
+	await _snap(dir, "02_climb_in.png")
+	await _glide(watch - inward * 0.1, win.center() - Vector3.UP * 0.3, 60)
+	# B: ADS zoom, recoil kick, muzzle flash, hitmarkers, impact sounds (10-17 s)
+	pl.bot_input.ads = true
+	await _glide(watch - inward * 0.2, win.center(), 25, true)
+	await _snap(dir, "03_ads_recoil_muzzle_flash.png")
+	await _glide(watch - inward * 0.3, win.center(), 35, true)
+	await _snap(dir, "04_hitmarker.png")
+	await _glide(watch - inward * 0.4, win.center(), 120, true)
+	pl.bot_input.ads = false; pl.bot_input.fire = false
 	for z in game.zombies.duplicate():
-		if is_instance_valid(z) and z.state != Zombie.State.DEAD and z.ztype != "brute":
-			z.take_damage(z.hp + 1, false, pl, "body", (z.global_position - pl.global_position).normalized() * 9.0)
-	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-6, 0.4, 2.8), 45)
-	await _snap(dir, "02_ragdolls.png")
-	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-7, 0.4, 2.5), 40, true)
-	for z in game.zombies.duplicate():
-		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(z.hp + 1, true, pl, "head", Vector3(-6, 0, 0))
-	# B: bloater + gas cloud in the yard (12-18 s)
-	pl.global_position = Vector3(31, 0.1, 4); pl.yaw = -PI / 2
-	game.map.open_door("pump")
-	var bl := game.spawn_zombie("w_yard_s", "bloater")
-	game.spawn_zombie("w_yard_n", "walker"); game.spawn_zombie("w_yard_n", "walker")
-	for z in game.zombies: if z.window: z.window.bar.damage(999); z.window.refresh()
-	await _wait(4)
-	if is_instance_valid(bl): bl.global_position = Vector3(38, 0.1, 5.5)
-	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.3, 5.5), 75)
-	await _snap(dir, "03_bloater.png")
-	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.3, 5.5), 40, true)
-	if is_instance_valid(bl) and bl.state != Zombie.State.DEAD: bl.take_damage(bl.hp + 1, false, pl, "body", Vector3(4, 0, 0))
-	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.0, 5.5), 60)
-	await _snap(dir, "04_gas_cloud.png")
-	# D: explosive kill -> gibs (18-22 s)
-	var live := []
-	for z in game.zombies: if is_instance_valid(z) and z.state != Zombie.State.DEAD: live.append(z)
-	for z in live: z.global_position = Vector3(36 + randf_range(-1, 1), 0.1, -4 + randf_range(-1, 1))
-	await _glide(Vector3(31, 0.1, -1), Vector3(36, 1.0, -4), 20)
-	game.explode(pl, Vector3(36, 0.4, -4), 5.0, 5000)
-	await _glide(Vector3(31.5, 0.1, -1.2), Vector3(36, 0.8, -4), 60)
-	# E: Pump Station + Marksman Mist (22-26 s)
-	pl.global_position = Vector3(36, 0.1, 8); pl.yaw = PI
-	await _glide(Vector3(36, 0.1, 13), Vector3(44, 1.2, 22), 70)
-	await _snap(dir, "05_pump_station.png")
-	await _glide(Vector3(38, 0.1, 17), Vector3(44.8, 1.3, 22), 40)
-	# F: last kill slow-mo + points tick + painted tally (26-30 s)
-	var last := game.spawn_zombie("w_pump_e", "sprinter")
-	if last: last.global_position = Vector3(42, 0.1, 22)
-	await _glide(Vector3(38, 0.1, 18), Vector3(42, 1.4, 22), 25)
-	game.to_spawn = 0
-	for z in game.zombies.duplicate(): if is_instance_valid(z) and z != last: game.zombies.erase(z); z.queue_free()
-	if is_instance_valid(last): last.take_damage(last.hp + 1, true, pl, "head", Vector3(5, 1, 3))
-	await _glide(Vector3(38, 0.1, 18), Vector3(42, 0.8, 22), 30)
-	await _snap(dir, "06_hud_slowmo_tally.png")
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(z.hp + 1, true, pl, "head", inward * 5.0)
+	# C: buy a door with points (17-23 s): judder, slide, dust, rumble
+	var door: Node3D = game.map.doors["north"]
+	var dp := door.global_position; var back := Vector3(0.6, 0, 0.4) - Vector3(dp.x, 0, dp.z)
+	back = back.normalized() if back.length() > 0.1 else Vector3(0, 0, 1)
+	pl.global_position = Vector3(dp.x, 0.1, dp.z) + back * 3.0
+	await _glide(Vector3(dp.x, 0.1, dp.z) + back * 2.6, dp + Vector3.UP * 1.3, 40)
+	await _snap(dir, "05_door_price.png")
+	game.buy_door(pl, "north")
+	await _glide(Vector3(dp.x, 0.1, dp.z) + back * 2.4, dp + Vector3.UP * 1.0, 40)
+	await _snap(dir, "06_door_opening.png")
+	await _glide(Vector3(dp.x, 0.1, dp.z) + back * 1.5, dp + Vector3.UP * 1.2 - back * 4.0, 90)
+	# D: atmospheric round sting + touch HUD (23-30 s)
+	game.round = 4
+	game.hud.banner("Round 4", 3.0); game.hud.round_flash(); game.hud.tally_flip(4)
+	game.sfx.play("round_start_v6", -1); game.duck_music(5.0); pl.add_trauma(0.45)
+	await _glide(Vector3(dp.x, 0.1, dp.z) - back * 1.0, dp + Vector3.UP * 1.2 - back * 8.0, 45)
+	await _snap(dir, "07_round_sting_touch_hud.png")
 	await _wait(100)
 	get_tree().quit()

@@ -65,3 +65,22 @@ static func stick(v: Vector2, deadzone := 0.12) -> Vector2:
 	if l < deadzone: return Vector2.ZERO
 	var k := (minf(l, 1.0) - deadzone) / (1.0 - deadzone)
 	return v / l * pow(k, 1.3)
+
+const SNAP_CONE_DEG := 12.0
+const SNAP_TIME := 0.14
+
+## Touch ADS snap: when aim is pressed, swing toward the best target inside a wider cone over SNAP_TIME.
+## Returns the total yaw/pitch (radians) to apply, or ZERO if nothing qualifies.
+static func ads_snap(origin: Vector3, fwd: Vector3, targets: Array, max_range := 25.0) -> Vector2:
+	var best := -1
+	var best_ang := deg_to_rad(SNAP_CONE_DEG)
+	for i in targets.size():
+		var to: Vector3 = targets[i] - origin
+		var d := to.length()
+		if d < 0.01 or d > max_range: continue
+		var ang := fwd.normalized().angle_to(to / d)
+		if ang < best_ang: best_ang = ang; best = i
+	if best < 0: return Vector2.ZERO
+	var to: Vector3 = (targets[best] - origin).normalized()
+	var f := fwd.normalized()
+	return Vector2(wrapf(atan2(-to.x, -to.z) - atan2(-f.x, -f.z), -PI, PI), asin(clampf(to.y, -1, 1)) - asin(clampf(f.y, -1, 1)))

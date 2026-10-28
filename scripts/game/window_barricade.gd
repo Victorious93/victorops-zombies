@@ -34,3 +34,18 @@ func refresh() -> void:
 
 func center() -> Vector3:
 	return global_position + Vector3(0, 1.0, 0)
+
+## Zombie rips the top plank: a loose copy is yanked outward, spins, drops and fades.
+func rip_plank() -> void:
+	var n := bar.planks()  # planks left before this rip
+	if n <= 0 or n > planks.size(): refresh(); return
+	var src: MeshInstance3D = planks[n - 1]
+	var loose := MeshInstance3D.new(); loose.mesh = src.mesh; loose.material_override = src.material_override
+	add_child(loose); loose.transform = src.transform
+	var out := src.position + Vector3(randf_range(-0.4, 0.4), 0.25, 0.9)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(loose, "position", out, 0.18).set_ease(Tween.EASE_OUT)
+	tw.tween_property(loose, "rotation", Vector3(randf_range(-1, 1), randf_range(-1.5, 1.5), randf_range(-2, 2)), 0.7)
+	tw.chain().tween_property(loose, "position", Vector3(out.x, 0.05, out.z + 0.6), 0.45).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.chain().tween_interval(2.5)
+	tw.chain().tween_callback(loose.queue_free)

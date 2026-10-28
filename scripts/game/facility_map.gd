@@ -211,8 +211,14 @@ func facility_open(id: String) -> bool:
 func open_door(id: String) -> void:
 	var b: Node3D = doors.get(id)
 	if b:
+		var game = get_parent()
+		if game and game.get("fx"): game.fx.dirt_burst(b.global_position + Vector3.UP * 0.2)
+		var x0: float = b.position.x
 		var tw := create_tween()
-		tw.tween_property(b, "position:y", -1.6, 0.8)
+		for i in 5:  # judder against its rusted rails before it gives way
+			tw.tween_property(b, "position:x", x0 + (0.04 if i % 2 == 0 else -0.04), 0.06)
+		tw.tween_property(b, "position:x", x0, 0.05)
+		tw.tween_property(b, "position:y", -1.6, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_callback(func(): b.queue_free(); call_deferred("rebake"))
 
 func rebake() -> void:
