@@ -377,6 +377,8 @@ func _clip(dir: String) -> void:
 	await _snap(dir, "11_lab_mood.png")
 	await _glide(Vector3(32, 0.1, 14), Vector3(30, 1.0, 18), 120, true)
 	await _snap(dir, "12_pump_mood.png")
+	await _glide(Vector3(36, 0.1, -4), Vector3(40, 1.2, -10), 90)
+	await _snap(dir, "13_yard_decals.png")
 	await _wait(30)
 	get_tree().quit()
 

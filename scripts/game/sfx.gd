@@ -59,3 +59,30 @@ func start_ambient() -> void:
 		s.loop_end = int(s.get_length() * s.mix_rate)
 	ambient = AudioStreamPlayer.new(); ambient.stream = s; ambient.volume_db = -8.0
 	add_child(ambient); ambient.play()
+
+## v7.3: per-area ambient beds, crossfaded by the player's position (original synthesised loops).
+const AREA_BEDS := [
+	[Rect2(-9, -25, 18, 14), "bed_generator"],
+	[Rect2(11, -9, 14, 18), "bed_lab"],
+	[Rect2(11, -25, 14, 14), "bed_damp"],
+	[Rect2(27, 11, 18, 18), "bed_damp"],
+	[Rect2(27, -15, 18, 24), "bed_wind"],
+]
+var beds := {}
+static func bed_for(pos: Vector3) -> String:
+	for b in AREA_BEDS:
+		if (b[0] as Rect2).grow(1.0).has_point(Vector2(pos.x, pos.z)): return b[1]
+	return ""
+func update_beds(pos: Vector3, dt: float) -> void:
+	var want := bed_for(pos)
+	if want != "" and not beds.has(want):
+		var s := stream(want) as AudioStreamWAV
+		if s == null: return
+		s = s.duplicate(); s.loop_mode = AudioStreamWAV.LOOP_FORWARD; s.loop_begin = 0
+		s.loop_end = int(s.get_length() * s.mix_rate)
+		var p := AudioStreamPlayer.new(); p.stream = s; p.volume_db = -60.0
+		add_child(p); p.play(); beds[want] = p
+	for k in beds:
+		var p: AudioStreamPlayer = beds[k]
+		var target := -10.0 if k == want else -60.0
+		p.volume_db = move_toward(p.volume_db, target, dt * 25.0)

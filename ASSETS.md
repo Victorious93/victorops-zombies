@@ -107,3 +107,4 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | UI font | Godot default font | Engine MIT / font OFL |
 | GUT 9.7.1 (`addons/gut/`, tests only, excluded from APK) | https://github.com/bitwes/Gut | MIT (fonts SIL OFL 1.1) |
 | Godot Engine 4.7.2 runtime | https://godotengine.org | MIT |
+- audio/bed_generator.wav, bed_lab.wav, bed_damp.wav, bed_wind.wav — original, synthesised by tools/gen_audio.py (v7.3 per-area ambient beds). No third-party source.

@@ -50,3 +50,9 @@ func test_decal_material_is_alpha_blended():
 	var m := Scenery.decal_material("blood")
 	assert_eq(m.transparency, BaseMaterial3D.TRANSPARENCY_ALPHA)
 	assert_not_null(m.albedo_texture)
+
+func test_area_beds_exist_and_map_to_areas() -> void:
+	assert_eq(Sfx.bed_for(Vector3(0, 0, -18)), "bed_generator")
+	assert_eq(Sfx.bed_for(Vector3(36, 0, 20)), "bed_damp")
+	assert_eq(Sfx.bed_for(Vector3(0, 0, 0)), "")
+	for b in Sfx.AREA_BEDS: assert_true(ResourceLoader.exists("res://audio/%s.wav" % b[1]), b[1])
