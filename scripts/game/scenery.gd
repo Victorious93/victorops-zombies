@@ -20,6 +20,9 @@ func build() -> void:
 	_mist()
 	_grass()
 	_height_fog()
+	_area_moods()
+	_pipes()
+	_rubble()
 
 # ---------------------------------------------------------------- geometry
 ## Broken brick parapets + pilasters on the perimeter so the skyline is not one flat 4 m line.
@@ -230,3 +233,57 @@ func _height_fog() -> void:
 	var e: Environment = map.game.env
 	e.fog_height = 0.6; e.fog_height_density = 0.12
 	e.fog_aerial_perspective = 0.25
+
+# ---------------------------------------------------------------- v7.2 map detail
+## Per-area colour so each wing reads differently: amber sodium in the generator wing, icy cold storage,
+## clinical teal lab, sickly green pump station. Unshadowed, no flicker, range-limited: cheap on mobile.
+const AREA_MOODS := [
+	[Vector3(-4, 2.6, -18), Color(1.0, 0.62, 0.25), 0.7, 8.0],   # generator wing
+	[Vector3(18, 2.6, -18), Color(0.55, 0.75, 1.0), 0.7, 8.0],   # cold storage
+	[Vector3(18, 2.6, 2), Color(0.35, 0.95, 0.85), 0.5, 8.0],    # lab
+	[Vector3(36, 2.4, 20), Color(0.55, 0.9, 0.35), 0.5, 9.0],    # pump station
+]
+func _area_moods() -> void:
+	for a in AREA_MOODS:
+		var l := map.light(a[0], a[1], a[2], a[3], false)
+		l.light_specular = 0.1; l.omni_attenuation = 1.0; l.name = "AreaMood"
+
+## Wall pipe runs: one MultiMesh (a single draw call) of cylinder segments along the inner walls.
+const PIPE_RUNS := [
+	[Vector3(-9.6, 3.3, -9), Vector3(-9.6, 3.3, 9)], [Vector3(-9, 3.4, -25.6), Vector3(9, 3.4, -25.6)],
+	[Vector3(11, 3.3, -10.4), Vector3(25, 3.3, -10.4)], [Vector3(25.6, 3.2, -25), Vector3(25.6, 3.2, -11)],
+]
+func _pipes() -> void:
+	var cyl := CylinderMesh.new(); cyl.top_radius = 0.07; cyl.bottom_radius = 0.07; cyl.height = 1.0; cyl.radial_segments = 8; cyl.rings = 1
+	var mat := StandardMaterial3D.new(); mat.albedo_color = Color(0.32, 0.3, 0.27); mat.metallic = 0.6; mat.roughness = 0.5
+	cyl.material = mat
+	var xs: Array[Transform3D] = []
+	for r in PIPE_RUNS:
+		var a: Vector3 = r[0]; var b: Vector3 = r[1]
+		var n := int(ceil(a.distance_to(b) / 2.0))
+		for i in n:
+			var p0 := a.lerp(b, float(i) / n); var p1 := a.lerp(b, float(i + 1) / n)
+			var dir := (p1 - p0); var len := dir.length() - 0.06
+			var y := dir.normalized(); var x := y.cross(Vector3.UP).normalized(); var z := x.cross(y)
+			xs.append(Transform3D(Basis(x, y * len, z), (p0 + p1) * 0.5))
+			xs.append(Transform3D(Basis(x, y * len, z).scaled(Vector3(0.7, 1, 0.7)), (p0 + p1) * 0.5 + Vector3(0, -0.22, 0)))
+	map.add_child(multimesh(cyl, xs, "PipesMM", 40.0))
+
+## Floor rubble chunks: one MultiMesh of small boxes near walls and windows.
+func _rubble() -> void:
+	var bm := BoxMesh.new(); bm.size = Vector3(0.18, 0.1, 0.14)
+	var mat := StandardMaterial3D.new(); mat.albedo_color = Color(0.36, 0.33, 0.3); mat.roughness = 1.0; bm.material = mat
+	var xs: Array[Transform3D] = []
+	for c in [Vector3(-9, 0.04, 2), Vector3(-3, 0.04, 9), Vector3(9, 0.04, 6), Vector3(-9, 0.04, -14), Vector3(18, 0.04, 9), Vector3(25, 0.04, -2), Vector3(0, 0.04, -24), Vector3(36, 0.04, 26)]:
+		for i in 14:
+			var o := Vector3(rng.randf_range(-1.4, 1.4), 0, rng.randf_range(-1.4, 1.4))
+			var b := Basis.from_euler(Vector3(rng.randf_range(-0.3, 0.3), rng.randf_range(-PI, PI), 0)).scaled(Vector3.ONE * rng.randf_range(0.5, 1.6))
+			xs.append(Transform3D(b, c + o))
+	map.add_child(multimesh(bm, xs, "RubbleMM", 28.0))
+
+static func multimesh(mesh: Mesh, xs: Array[Transform3D], nm: String, vis_end: float) -> MultiMeshInstance3D:
+	var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D; mm.mesh = mesh; mm.instance_count = xs.size()
+	for i in xs.size(): mm.set_instance_transform(i, xs[i])
+	var mmi := MultiMeshInstance3D.new(); mmi.multimesh = mm; mmi.name = nm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF; mmi.visibility_range_end = vis_end
+	return mmi

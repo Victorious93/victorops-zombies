@@ -21,3 +21,15 @@ func test_show_fps_setting_roundtrip():
 func test_perf_text_flags_budget():
 	assert_eq(Hud.perf_text(60, 120), "60 fps · 120 dc")
 	assert_true(Hud.perf_text(30, Game.DRAW_CALL_BUDGET + 1).ends_with("!"))
+
+func test_multimesh_helper_single_instance_node():
+	var xs: Array[Transform3D] = [Transform3D(), Transform3D(Basis(), Vector3(1, 0, 0))]
+	var mmi := Scenery.multimesh(BoxMesh.new(), xs, "T", 20.0)
+	assert_eq(mmi.multimesh.instance_count, 2)
+	assert_eq(mmi.visibility_range_end, 20.0)
+	assert_eq(mmi.cast_shadow, GeometryInstance3D.SHADOW_CASTING_SETTING_OFF)
+	mmi.free()
+
+func test_area_moods_are_distinct_and_cheap():
+	assert_eq(Scenery.AREA_MOODS.size(), 4)
+	for a in Scenery.AREA_MOODS: assert_lt(a[3], 10.0, "range-limited")
