@@ -32,3 +32,17 @@ func test_wrist_offset_wraps_grip():
 func test_bounce_fill_tracks_power():
 	assert_lt(FacilityMap.BOUNCE_OFF, FacilityMap.BOUNCE_ON)
 	assert_lt(FacilityMap.BOUNCE_ON, 0.6, "fill stays subtle")
+
+func test_sfx_voice_cap_and_limiter():
+	var s := Sfx.new()
+	for i in Sfx.MAX_VOICES: assert_true(s._claim("shot"))
+	assert_false(s._claim("shot"), "capped")
+	s._release("shot"); assert_true(s._claim("shot"))
+	assert_eq(Sfx.vary(1.0, "music"), 1.0)
+	var v := Sfx.vary(1.0, "shot"); assert_between(v, 0.96, 1.04)
+	Sfx.ensure_limiter(); Sfx.ensure_limiter()
+	var n := 0
+	for i in AudioServer.get_bus_effect_count(0):
+		if AudioServer.get_bus_effect(0, i) is AudioEffectHardLimiter: n += 1
+	assert_eq(n, 1, "one limiter on Master")
+	s.free()
