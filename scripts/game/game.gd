@@ -139,7 +139,12 @@ func settings_shadows() -> bool: return settings.data().shadows
 func flashlight_shadows() -> bool:
 	return flashlight_casts_shadows(settings_shadows(), facility != null and facility.power_on,
 		RenderingServer.get_current_rendering_method() == "gl_compatibility")
-static func flashlight_casts_shadows(shadows_setting: bool, power_on: bool, compat := false) -> bool: return shadows_setting and power_on and not compat
+## v7.3: off on every renderer. The same shared-world overlay runs on Mobile/Vulkan, which could not be
+## verified on the box, and a shadowed spot is the single most expensive light on a phone anyway. The
+## overhead lights and per-area moods keep their own shadow settings, so the scene still has depth.
+const FLASHLIGHT_SHADOWS := false
+static func flashlight_casts_shadows(shadows_setting: bool, power_on: bool, compat := false) -> bool:
+	return FLASHLIGHT_SHADOWS and shadows_setting and power_on and not compat
 
 func apply_settings() -> void:
 	var d := settings.data()
