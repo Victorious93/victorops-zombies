@@ -196,6 +196,7 @@ func add_interactable(pos: Vector3, radius: float, prompt: Callable, use: Callab
 
 # ---------------------------------------------------------------- loop
 func _process(dt: float) -> void:
+	if sfx and is_instance_valid(player): sfx.update_beds(player.global_position, dt)
 	if over or player == null or paused: return
 	_update_prompt()
 	_update_rounds(dt)
