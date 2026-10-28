@@ -415,11 +415,13 @@ func _views(dir: String) -> void:
 		await _snap(sd, v[0] + ".png")
 	# zombies: close-up of each type, then a group line-up (intake, facing north)
 	pl.global_position = Vector3(0, 0.1, 0.5); pl.yaw = PI; pl.pitch = -0.05   # under the intake lamp, facing south: lit from the front, wall well behind
-	for ty in (["walker", "sprinter", "bloater", "brute", "warden", "group"] if want.call("zombies") else []):
-		var list := ["walker", "sprinter", "bloater", "brute", "sprinter"] if ty == "group" else [ty]
+	for ty in (["walker", "sprinter", "bloater", "brute", "warden", "group", "outfits"] if want.call("zombies") else []):
+		var list := ["walker", "sprinter", "bloater", "brute", "sprinter"] if ty == "group" else (["walker", "walker", "walker", "walker"] if ty == "outfits" else [ty])
 		var zs := []
 		for i in list.size():
 			var z: Zombie = game.spawn_zombie("", list[i])
+			while ty == "outfits" and z.variant != "zombie_a":   # outfits are fitted to zombie_a
+				game.zombies.erase(z); z.free(); z = game.spawn_zombie("", list[i])
 			var x := (i - (list.size() - 1) / 2.0) * 1.6
 			z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
 			z.global_position = Vector3(x, 0.05, 0.5 + (2.8 if ty != "group" else 4.6) + absf(x) * 0.3 + (1.2 if ty == "warden" else 0.0))
@@ -427,9 +429,12 @@ func _views(dir: String) -> void:
 			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
 			z.model.rotation.y = PI; z._locomotion()
 			if z.zpose: z.zpose.reach_target = 1.0 if not z.runner else 0.7
+			if ty == "outfits":   # v7.4 line-up: worker, lab coat, guard, and a legless crawler
+				z.set_outfit(["worker", "labcoat", "guard", "rags"][i])
+				if i == 3: z.make_crawler(); z._locomotion()
 			zs.append(z)
 		await _wait(25)
-		await _snap(zd, ("%s_closeup.png" % ty) if ty != "group" else "group.png")
+		await _snap(zd, ("%s_closeup.png" % ty) if not ty in ["group", "outfits"] else ty + ".png")
 		for z in zs:
 			if is_instance_valid(z): z.queue_free()
 		game.zombies.clear(); await _wait(2)

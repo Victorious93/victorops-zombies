@@ -19,7 +19,7 @@ func test_light_zombies_get_every_outfit():
 func test_outfit_parts_use_real_bones():
 	for o in ["worker", "labcoat", "guard"]:
 		assert_gt(Zombie.outfit_parts(o).size(), 1, o)
-		for pt in Zombie.outfit_parts(o): assert_true(pt[0] in ["Torso", "Hips", "Head"], "%s on %s" % [o, pt[0]])
+		for pt in Zombie.outfit_parts(o): assert_true(pt[0] in ["Hips", "Head"], "%s on %s" % [o, pt[0]])
 	assert_eq(Zombie.outfit_parts("rags").size(), 0)
 
 func test_leg_damage_always_makes_a_crawler():
