@@ -3,7 +3,7 @@ extends Node3D
 ## First-person arms + gun. Gun meshes are CC0 Quaternius models; sleeves are procedural and the
 ## hands use the CC0 glove model. All motion (sway, bob, kick, reload, knife, throw) is procedural.
 
-const HIP_POS := Vector3(0.17, -0.17, -0.36)
+const HIP_POS := Vector3(0.13, -0.095, -0.42)
 const SIGHT_H := 0.055   ## red-dot height above the gun's centre line
 const ADS_POS := Vector3(0.0, -SIGHT_H, -0.27)
 
@@ -27,6 +27,8 @@ var ads_k := 0.0
 var sleeve_mat: StandardMaterial3D
 var reload_phase := -1.0
 var model_name := ""
+var overlay := false   ## render on the viewmodel layer (see ViewmodelOverlay)
+var fps_arms: FpsArms   ## set by Player before set_weapon(); null in tests -> legacy glove props
 
 func setup(sleeve: Color) -> void:
 	sleeve_mat = StandardMaterial3D.new(); sleeve_mat.albedo_color = sleeve.darkened(0.55); sleeve_mat.roughness = 0.8; sleeve_mat.rim_enabled = true; sleeve_mat.rim = 0.4
@@ -100,10 +102,10 @@ func set_weapon(w: WeaponDef) -> void:
 	arms = Node3D.new(); add_child(arms)
 	var grip := Vector3(0.0, -0.06, len * 0.18)
 	var fore := Vector3(0.0, -0.045, -len * 0.22) if len > 0.3 else Vector3(-0.01, -0.07, len * 0.12)
-	arms.add_child(_hand(grip + Vector3(0.012, -0.01, 0.02), Vector3(-0.4, PI, 0.15)))
-	arms.add_child(_hand(fore + Vector3(-0.02, -0.01, 0.0), Vector3(-0.2, PI, -0.5)))
-	_sleeve(grip + Vector3(0.02, -0.03, 0.06), grip + Vector3(0.14, -0.2, 0.42), 0.032)
-	_sleeve(fore + Vector3(-0.03, -0.03, 0.04), fore + Vector3(-0.24, -0.22, 0.5), 0.032)
+	if fps_arms: fps_arms.attach(gun, grip, fore, len > 0.3)   # rigged CC0 arms reach the gun via IK
+	else:
+		arms.add_child(_hand(grip + Vector3(0.012, -0.01, 0.02), Vector3(-0.4, PI, 0.15)))
+		arms.add_child(_hand(fore + Vector3(-0.02, -0.01, 0.0), Vector3(-0.2, PI, -0.5)))
 	# red-dot sight (unshaded so it reads in the dark)
 	sight = Node3D.new(); gun.add_child(sight)
 	var housing := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.012; tm.outer_radius = 0.016
@@ -116,6 +118,7 @@ func set_weapon(w: WeaponDef) -> void:
 	dot.material_override = dm; dot.position.z = -0.002; sight.add_child(dot)
 	sight.position = Vector3(0, SIGHT_H, -0.02)
 	ModelLib.set_shadows(self, false)
+	if overlay: ViewmodelOverlay.to_layer(self)
 	if not first: swap_t = 1.0
 
 var fill: OmniLight3D

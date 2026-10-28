@@ -15,6 +15,8 @@ func _ready() -> void:
 	if args.has("shots"): _shots(args["shots"])
 	elif args.has("sim"): _sim(int(args["sim"]))
 	elif args.has("clip"): _clip(args["clip"])
+	elif args.has("views"): _views(args["views"])
+	elif args.has("hud"): _hud(args["hud"], args.get("prefix", ""))
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -142,6 +144,36 @@ func _snap(dir: String, name: String) -> void:
 	var img := get_viewport().get_texture().get_image()
 	img.save_png(dir.path_join(name))
 	print("saved ", dir.path_join(name))
+
+## Touch HUD captures at 16:9, 19.5:9 and 20:9 (simulated notch + gesture bar on the tall phones),
+## near a wall-buy so the contextual USE button shows, plus the Settings > Controls editor.
+func _hud(dir: String, prefix: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	args["touch"] = "1"
+	start_game()
+	game.auto_rounds = false; game.allow_tutorial = false; game.god_mode = true
+	var pl := game.player
+	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
+	await _wait(40)
+	pl.bot_input = null
+	pl.global_position = Vector3(-6, 0.1, 6); pl.yaw = -2.4; pl.pitch = -0.05; pl.velocity = Vector3.ZERO
+	for a in [["16x9", Vector2i(1456, 819), 0.0, 0.0], ["19_5x9", Vector2i(1774, 819), 0.052, 0.054], ["20x9", Vector2i(1820, 819), 0.046, 0.044]]:
+		get_window().size = a[1]
+		await _wait(12)
+		var t = game.touch
+		if "safe_override" in t:
+			var sz: Vector2 = t.size
+			t.safe_override = Rect2(Vector2(sz.x * a[2], 0), Vector2(sz.x * (1.0 - 2.0 * a[2]), sz.y * (1.0 - a[3])))
+			t.set_use_available(true); t._layout()
+		await _wait(8)
+		await _snap(dir, "%shud_%s.png" % [prefix, a[0]])
+	if ClassDB.class_exists("ControlsEditor") or ResourceLoader.exists("res://scripts/game/controls_editor.gd"):
+		var ce = load("res://scripts/game/controls_editor.gd").open(game.hud, game.settings, func(): pass)
+		await _wait(10)
+		ce.preview.safe_override = game.touch.safe_override; ce.preview._layout()
+		await _wait(4)
+		await _snap(dir, "%scontrols_editor_20x9.png" % prefix)
+	get_tree().quit()
 
 func _wait(n: int) -> void:
 	for i in n: await get_tree().process_frame
@@ -333,4 +365,62 @@ func _clip(dir: String) -> void:
 	await _glide(Vector3(dp.x, 0.1, dp.z) - back * 1.0, dp + Vector3.UP * 1.2 - back * 8.0, 45)
 	await _snap(dir, "07_round_sting_touch_hud.png")
 	await _wait(100)
+	get_tree().quit()
+
+## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
+const VIEWS := [
+	["01_intake", Vector3(-6, 0.1, 6), -2.4, -0.05],
+	["02_intake_north", Vector3(0, 0.1, 6), 0.0, 0.02],
+	["03_generator", Vector3(-6, 0.1, -12.5), -2.5, 0.0],
+	["04_lab", Vector3(12, 0.1, 8), -0.7, 0.0],
+	["05_yard", Vector3(30, 0.1, 0), -1.9, 0.02],
+	["06_pump", Vector3(32, 0.1, 14), 2.6, 0.05],
+]
+func _views(dir: String) -> void:
+	var sd := dir.path_join("scenery"); var vd := dir.path_join("viewmodel"); var zd := dir.path_join("zombies")
+	DirAccess.make_dir_recursive_absolute(zd)
+	DirAccess.make_dir_recursive_absolute(sd); DirAccess.make_dir_recursive_absolute(vd)
+	start_game()
+	game.auto_rounds = false; game.allow_tutorial = false; game.god_mode = true
+	await _wait(30)
+	game.throw_power(Node3D.new())
+	for d in ["north", "east", "cold", "yard"]: game.map.open_door(d)
+	var pl := game.player
+	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
+	await _wait(60)
+	var only := OS.get_environment("VOZ_VIEWS")   # optional: "scenery", "zombies", "viewmodel" (comma list)
+	var want := func(ph: String) -> bool: return only == "" or ph in only
+	for v in (VIEWS if want.call("scenery") else []):
+		pl.global_position = v[1]; pl.yaw = v[2]; pl.pitch = v[3]; pl.velocity = Vector3.ZERO
+		await _wait(45)
+		await _snap(sd, v[0] + ".png")
+	# zombies: close-up of each type, then a group line-up (intake, facing north)
+	pl.global_position = Vector3(0, 0.1, 6); pl.yaw = 0.0; pl.pitch = 0.0
+	for ty in (["walker", "sprinter", "bloater", "brute", "group"] if want.call("zombies") else []):
+		var list := ["walker", "sprinter", "bloater", "brute", "walker"] if ty == "group" else [ty]
+		var zs := []
+		for i in list.size():
+			var z: Zombie = game.spawn_zombie("", list[i])
+			var x := (i - (list.size() - 1) / 2.0) * 1.6
+			z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
+			z.global_position = Vector3(x, 0.05, 6.0 - (3.0 if ty != "group" else 6.5) - absf(x) * 0.3)
+			z.set_physics_process(false)   # hold the pose for the portrait: no chasing into the lens
+			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
+			z.model.rotation.y = PI; z._locomotion()
+			if z.zpose: z.zpose.reach_target = 1.0 if not z.runner else 0.4
+			zs.append(z)
+		await _wait(25)
+		await _snap(zd, ("%s_closeup.png" % ty) if ty != "group" else "group.png")
+		for z in zs:
+			if is_instance_valid(z): z.queue_free()
+		game.zombies.clear(); await _wait(2)
+	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.pitch = 0.0
+	for id in (Weapons.ALL_IDS if want.call("viewmodel") else []):
+		pl.loadout.give(Weapons.make(id)); pl.apply_reload_perk()
+		await _wait(50)
+		await _snap(vd, id + "_hip.png")
+		pl.bot_input.ads = true
+		await _wait(40)
+		await _snap(vd, id + "_ads.png")
+		pl.bot_input.ads = false
 	get_tree().quit()

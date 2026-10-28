@@ -9,8 +9,8 @@ Hold an abandoned facility against endless rounds: board up windows, buy doors, 
 - `legacy/libgdx/` – previous Kotlin/libGDX version (kept for VictorLink64, see `docs/VICTORLINK64.md`)
 
 ## Controls
-Desktop: WASD move, mouse look, LMB fire, RMB aim, R reload, E use (hold to repair), 1/2 or wheel swap, Shift sprint (stamina), C/Ctrl slide while sprinting, V knife (lunge), Q ability.
-Touch: left floating stick, swipe right side to look, FIRE/AIM/RLD/USE/SWAP/SKILL/RUN buttons.
+Desktop: WASD move, mouse look, LMB fire, RMB aim, R reload, E use (hold to repair), 1/2 or wheel swap, Shift sprint (stamina), Space jump, C/Ctrl crouch (slide while sprinting), V knife (lunge), Q ability.
+Touch: left floating stick, swipe right half to look, FIRE (optional left FIRE), icon thumb arc for aim/reload/jump/crouch/grenade/swap/knife/skill, contextual Use/Buy, sprint on the left. Layout editable in Settings → Controls….
 
 ## How it plays (feel pass, v3)
 - Round 1: 6 slow shamblers at 150 HP (2 sidearm body shots or 1 knife). +100 HP per round to round 9, then ×1.1 per round. Runners from round 5, max 24 alive, 10 s break with sting + tally marks. The last zombie of a round crawls.
@@ -45,6 +45,15 @@ Package `com.victorious.zombie`, minSdk 24, targetSdk 35, arm64-v8a + armeabi-v7
 - Mobile: auto-fire, aim slowdown + magnetism, gyro (off/ADS/always), look curve, fixed/floating stick, fire-button size (Settings).
 - Performance/lighting: Medium preset at 0.75 render scale, prop visibility ranges (LOD), darker scene with rim light, gun flashlight, red alarm beacons from round 6.
 - `-- --clip=DIR` runs a scripted 30 s trailer route (use with `--fixed-fps 30 --write-movie out.avi`) and saves 6 stills.
+
+## v7 single-player polish
+
+- **Scenery:** CC0 ambientCG PBR materials (concrete, brick, asphalt, plaster, rust, wood), CC0 Quaternius props (wrecked cars, dumpsters, debris, dead trees, barriers, street lights), Poly Haven night HDRI sky, layered depth fog + mist cards, fire barrels, procedural blood/grime decals.
+- **Viewmodel:** CC0 rigged WRAD arms on a separate viewmodel layer/camera (no wall clipping, fixed 60° FOV), two-bone IK to grip and fore-end, sway/bob/sprint/ADS/reload/swap motion.
+- **Zombies:** rotting skin with wounds and blood runs, glowing eyes, procedural hunch/limp/head-twitch, reaching arms when close, arm dismemberment on heavy hits; distinct silhouettes per type.
+- **Touch HUD:** floating left stick, right-half look, big FIRE (+ optional left FIRE), thumb arc (ADS, reload, jump, crouch, grenade, swap, knife, skill), contextual Use/Buy, neon icons, safe-area aware. **Settings → Controls…** has size/opacity/fire-size sliders and a drag layout editor (saved locally; overlapping or off-screen drops are rejected).
+- **Movement:** jump (Space / touch), crouch toggle (C / Ctrl / touch); crouch while sprinting still slides.
+- Also in v7: Pact Stone quest, alt-ammo, boss round, run stats + high score, announcer.
 
 ## v6 single-player polish (classic round-based feel)
 - **Gunfeel** (`scripts/rules/gun_feel.gd`): per-weapon ADS zoom (Rail Lancer zooms hardest, Scatterbolt least) with zoom-matched aim sensitivity, extra camera kick scaled by weight (softer when aiming) and weight-based recovery, coloured hitmarkers (body / head / armor / kill / head-kill) with a hit tick, two-frame muzzle flash flicker, flesh/metal/wall impact and ricochet sounds, heavier reload beats.

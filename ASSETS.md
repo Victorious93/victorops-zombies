@@ -45,6 +45,51 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | `metalplates006_*` | MetalPlates006 | CC0 1.0 | https://ambientcg.com/view?id=MetalPlates006 |
 | `paintedplaster017_*` | PaintedPlaster017 | CC0 1.0 | https://ambientcg.com/view?id=PaintedPlaster017 |
 | `tiles074_*` | Tiles074 | CC0 1.0 | https://ambientcg.com/view?id=Tiles074 |
+| `asphalt026c_*` | Asphalt026C | CC0 1.0 | https://ambientcg.com/view?id=Asphalt026C |
+| `bricks076c_*` | Bricks076C | CC0 1.0 | https://ambientcg.com/view?id=Bricks076C |
+| `bricks090_*` | Bricks090 | CC0 1.0 | https://ambientcg.com/view?id=Bricks090 |
+| `concrete031_*` | Concrete031 | CC0 1.0 | https://ambientcg.com/view?id=Concrete031 |
+| `concrete044c_*` | Concrete044C | CC0 1.0 | https://ambientcg.com/view?id=Concrete044C |
+| `grass004_*` | Grass004 | CC0 1.0 | https://ambientcg.com/view?id=Grass004 |
+| `ground037_*` | Ground037 | CC0 1.0 | https://ambientcg.com/view?id=Ground037 |
+| `metal049a_*` | Metal049A | CC0 1.0 | https://ambientcg.com/view?id=Metal049A |
+| `paintedplaster016_*` | PaintedPlaster016 | CC0 1.0 | https://ambientcg.com/view?id=PaintedPlaster016 |
+| `planks021_*` | Planks021 | CC0 1.0 | https://ambientcg.com/view?id=Planks021 |
+| `rust004_*` | Rust004 | CC0 1.0 | https://ambientcg.com/view?id=Rust004 |
+| `tiles101_*` | Tiles101 | CC0 1.0 | https://ambientcg.com/view?id=Tiles101 |
+| `woodfloor041_*` | WoodFloor041 | CC0 1.0 | https://ambientcg.com/view?id=WoodFloor041 |
+
+## v7 scenery props (`assets/models/props/`, embedded textures included)
+
+| File | Model | Author | License | Source page (licence shown as "CC0 1.0") |
+|---|---|---|---|---|
+| `props/dead_tree.glb` | Dead Tree | Quaternius | CC0 1.0 | https://poly.pizza/m/Mcd2zYqyww |
+| `props/dead_trees.glb` | Dead Trees | Quaternius | CC0 1.0 | https://poly.pizza/m/F5I0Q7TwO5 |
+| `props/sports_car.glb` | Sports Car (wrecked) | Quaternius | CC0 1.0 | https://poly.pizza/m/1mkmFkAz5v |
+| `props/debris_pile.glb` | Debris Pile | Quaternius | CC0 1.0 | https://poly.pizza/m/WrIiMMxyEP |
+| `props/debris_papers.glb` | Debris Papers | Quaternius | CC0 1.0 | https://poly.pizza/m/MujITy1NRR |
+| `props/dumpster.glb` | Dumpster | Quaternius | CC0 1.0 | https://poly.pizza/m/PKsbolkZSr |
+| `props/tires.glb` | Tires | Quaternius | CC0 1.0 | https://poly.pizza/m/mmq7GmG1AK |
+| `props/street_light.glb` | Street Light | Quaternius | CC0 1.0 | https://poly.pizza/m/nFwrlcLvM5 |
+| `props/couch.glb` | Couch | Quaternius | CC0 1.0 | https://poly.pizza/m/mWgQ94zhDZ |
+| `props/traffic_cone.glb` | Traffic Cone | Quaternius | CC0 1.0 | https://poly.pizza/m/lAx8JytxGD |
+| `props/traffic_barrier.glb` | Traffic Barrier | Quaternius | CC0 1.0 | https://poly.pizza/m/nugx3heueH |
+| `props/pallet_broken.glb` | Pallet (broken) | Quaternius | CC0 1.0 | https://poly.pizza/m/Gp43iUyyAX |
+| `props/cardboard_boxes.glb` | Cardboard Boxes | Quaternius | CC0 1.0 | https://poly.pizza/m/bs6ikOeTrR |
+| `props/trashcan.glb` | Trash Can | Quaternius | CC0 1.0 | https://poly.pizza/m/XSwahu252t |
+| `props/rocks.glb` | Rocks | Quaternius | CC0 1.0 | https://poly.pizza/m/OQvi8PIZ40 |
+
+## v7 first-person arms
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| `models/fps_arms.glb`, `models/fps_arms_arm_albedo_pale.png` | WRAD ARMS (rigged low-poly FPS arms; tinted olive in code) | wriks | CC0 1.0 (repo LICENSE + README: "CC0 License… No attribution required") | https://github.com/wwwriks/wrad-arms |
+
+## v7 sky
+
+| File | Asset | Author | License | Source |
+|---|---|---|---|---|
+| `sky/satara_night_no_lamps_1k.hdr` | Satara Night (No Lamps), 1K HDR | Poly Haven | CC0 1.0 | https://polyhaven.com/a/satara_night_no_lamps |
 
 ## Original / project assets
 
@@ -56,6 +101,7 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | v4 polish sounds: groan4/groan5, lunge screech, swipe miss, dirt rise, land thud, heartbeat, mag release, reload cloth, rack, shot punch | Synthesized by `tools/gen_audio_v4.py` (numpy noise/formant synthesis, no samples, no voice recordings) | Original, same license as repo |
 | v5 sounds: sprinter call, brute roar/rattle/step, bloater gurgle/pop, gas hiss, crate & forge jingles, points tick, round rumble, slow-mo whoosh, gib burst | Synthesized by `tools/gen_audio_v5.py` (numpy noise/formant/tone synthesis, no samples, no voice recordings) | Original, same license as repo |
 | v6 sounds: flesh/metal/wall impacts, ricochet, heavier mag-out/mag-in/bolt, hit tick, plank pull, climb-in, door rumble+chain, atmospheric round-start sting (drone, tolling bell, breathy pad) and round-end sting (falling pad, bell) | Synthesized by `tools/gen_audio_v6.py` (numpy noise/tone/bell synthesis, no samples, no voice recordings) | Original, same license as repo |
+| v7 visuals: procedural blood/grime/crack decals, mist cards, grass tufts, fire-barrel flames, zombie gore/wound skin layer, glowing eyes, neon touch-HUD icon set | Procedural in code (`scenery.gd`, `zombie.gd`, `touch_controls.gd`) | Original, same license as repo |
 | v5 visuals: grime detail noise, screen-blood splatter, light-shaft cards, moon disc/halo, night sky, painted HUD tally, Pump Station geometry, brute plates / bloater pustules | Procedural in code (FastNoiseLite, GradientTexture2D, ProceduralSkyMaterial, primitive meshes) | Original, same license as repo |
 | Logo / launcher icon (`assets/victorops-zombies-logo.jpg`, `icons/*`) | Project's own logo | Project-owned |
 | UI font | Godot default font | Engine MIT / font OFL |

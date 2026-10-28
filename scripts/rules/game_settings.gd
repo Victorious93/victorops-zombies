@@ -21,6 +21,10 @@ var joystick := "floating" ## "floating" (appears under the thumb) | "fixed" (st
 var fire_size := 1.3       ## fire button scale 1.0 - 1.8
 var starter_gun := "smg"   ## Armory pick: which wall-buy is discounted at the spawn room
 var tutorial_done := false
+var button_scale := 1.0    ## touch HUD button size 0.7 - 1.4
+var button_opacity := 0.6  ## touch HUD opacity 0.15 - 1.0
+var left_fire := false     ## second FIRE button on the left
+var layout := {}           ## layout editor: button name -> Vector2 fraction of the safe area
 const STARTER_GUNS := ["smg", "scatter", "rifle"]
 const GYRO_MODES := ["off", "ads", "always"]
 
@@ -35,7 +39,7 @@ static func linear_to_db_safe(v: float) -> float:
 	return -80.0 if v <= 0.001 else linear_to_db(v)
 
 func to_dict() -> Dictionary:
-	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size, starter_gun = starter_gun, tutorial_done = tutorial_done}
+	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size, starter_gun = starter_gun, tutorial_done = tutorial_done, button_scale = button_scale, button_opacity = button_opacity, left_fire = left_fire, layout = _layout_out()}
 
 func from_dict(d: Dictionary) -> void:
 	set_sensitivity(float(d.get("sensitivity", 1.0)))
@@ -52,3 +56,18 @@ func from_dict(d: Dictionary) -> void:
 	starter_gun = str(d.get("starter_gun", "smg"))
 	if not STARTER_GUNS.has(starter_gun): starter_gun = "smg"
 	tutorial_done = bool(d.get("tutorial_done", false))
+	button_scale = clampf(float(d.get("button_scale", 1.0)), 0.7, 1.4)
+	button_opacity = clampf(float(d.get("button_opacity", 0.6)), 0.15, 1.0)
+	left_fire = bool(d.get("left_fire", false))
+	layout = {}
+	var lo = d.get("layout", {})
+	if lo is Dictionary:
+		for k in lo:
+			var v = lo[k]
+			if v is Vector2: layout[str(k)] = v
+			elif v is Array and v.size() == 2: layout[str(k)] = Vector2(clampf(float(v[0]), 0, 1), clampf(float(v[1]), 0, 1))
+
+func _layout_out() -> Dictionary:
+	var o := {}
+	for k in layout: o[k] = [layout[k].x, layout[k].y]
+	return o

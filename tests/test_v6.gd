@@ -61,7 +61,7 @@ func test_hit_reactions():
 func test_touch_layout_no_overlaps_on_common_screens():
 	for s in [Vector2(1280, 720), Vector2(2400, 1080), Vector2(1024, 768), Vector2(2960, 1440)]:
 		for fs in [1.0, 1.3, 1.5]:
-			var b := TouchLayout.buttons(s, fs)
+			var b := TouchLayout.buttons(s, Rect2(), 1.0, fs)
 			assert_eq(TouchLayout.overlaps(b), [], "%s fs=%s" % [s, fs])
 			for n in b:
 				var c: Vector2 = b[n][0]; var r: float = b[n][1]
@@ -69,7 +69,7 @@ func test_touch_layout_no_overlaps_on_common_screens():
 
 func test_touch_buttons_within_thumb_reach_of_fire():
 	var b := TouchLayout.buttons(Vector2(1280, 720))
-	for n in ["ads", "reload", "use", "swap"]:
+	for n in ["ads", "reload", "jump", "crouch"]:
 		assert_lt(b[n][0].distance_to(b["fire"][0]), 200.0, n)
 
 func test_ads_snap():

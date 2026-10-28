@@ -81,11 +81,15 @@ var moon_light: DirectionalLight3D
 func build_sky() -> void:
 	var moon := moon_light
 	if game == null or game.env == null or moon == null: return
-	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
-	sm.ground_bottom_color = Color(0.0, 0.0, 0.0); sm.ground_horizon_color = Color(0.05, 0.05, 0.08)
-	sm.sun_angle_max = 1.0; sm.sun_curve = 0.05; sm.energy_multiplier = 1.0
-	var sky := Sky.new(); sky.sky_material = sm; sky.radiance_size = Sky.RADIANCE_SIZE_32
+	var hdr := "res://assets/sky/satara_night_no_lamps_1k.hdr"
+	var sky := Sky.new(); sky.radiance_size = Sky.RADIANCE_SIZE_32
+	if ResourceLoader.exists(hdr):
+		var pm := PanoramaSkyMaterial.new(); pm.panorama = load(hdr); pm.energy_multiplier = 0.35   # CC0 Poly Haven HDRI
+		sky.sky_material = pm
+	else:
+		var sm := ProceduralSkyMaterial.new()
+		sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
+		sky.sky_material = sm
 	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
 	game.env.fog_sky_affect = 0.35
 	# moon disc + halo far away along -light direction
@@ -143,7 +147,8 @@ func wall(a: Vector2, b: Vector2, gaps: Array = []) -> void:
 	for c in cuts:
 		segs.append([cur, c[0]]); cur = c[1]
 	segs.append([cur, length])
-	var wm: StandardMaterial3D = mats.wall
+	var mid0 := (a + b) / 2.0   # interior partitions plaster, perimeter/outbuildings brick
+	var wm: StandardMaterial3D = mats.wall if (mid0.x > -9.9 and mid0.x < 25.9 and mid0.y > -25.9 and mid0.y < 9.9) else mats.wall_brick
 	for s in segs:
 		if s[1] - s[0] < 0.01: continue
 		_wall_piece(a, dir, along_x, s[0], s[1], 0.0, H, wm)
@@ -270,11 +275,17 @@ func _rel(root: Node3D, n: Node3D) -> Transform3D:
 
 func build(p_game) -> void:
 	game = p_game
-	mats.wall = _grimy(_pbr("paintedplaster017", Color(0.6, 0.62, 0.58), 0.35))
-	mats.wall_low = _pbr("concrete034", Color(0.7, 0.7, 0.7), 0.4)
-	mats.floor = _grimy(_pbr("tiles074", Color(0.42, 0.42, 0.4), 0.45))
-	mats.ground = _grimy(_pbr("concrete034", Color(0.5, 0.52, 0.5), 0.18))
-	mats.trim = _pbr("metal032", Color(0.35, 0.33, 0.3), 1.0, 0.6)
+	# v7 scenery: real-tiling ambientCG PBR sets (albedo + NormalGL + roughness), no blotchy overlay
+	mats.wall = _pbr("paintedplaster016", Color(0.4, 0.43, 0.38), 0.45)
+	mats.wall_brick = _pbr("bricks076c", Color(0.75, 0.7, 0.66), 0.5)
+	mats.wall_ext = _pbr("bricks090", Color(0.7, 0.68, 0.66), 0.45)
+	mats.wall_low = _pbr("concrete044c", Color(0.72, 0.72, 0.7), 0.5)
+	mats.floor = _pbr("concrete034", Color(0.5, 0.5, 0.48), 0.35)
+	mats.ground = _pbr("asphalt026c", Color(0.55, 0.56, 0.55), 0.25)
+	mats.dirt = _pbr("ground037", Color(0.6, 0.6, 0.55), 0.35)
+	mats.wood = _pbr("planks021", Color(0.7, 0.66, 0.6), 0.6)
+	mats.rust = _pbr("rust004", Color.WHITE, 0.6, 0.4)
+	mats.trim = _pbr("metal049a", Color(0.45, 0.42, 0.4), 1.0, 0.6)
 	mats.door = _pbr("metalplates006", Color(0.6, 0.62, 0.66), 0.6, 0.7)
 	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
 	mats.metal = _pbr("metal032", Color(0.7, 0.7, 0.72), 0.8, 0.8)
@@ -304,6 +315,7 @@ func build(p_game) -> void:
 	_build_pump()
 	_build_catwalk()
 	_build_props()
+	Scenery.new(self).build()
 	# ceiling lamps: emergency red (power off) + white (power on)
 	for p in [Vector3(0, H - 0.3, 0), Vector3(0, H - 0.3, -18), Vector3(18, H - 0.3, 0), Vector3(18, H - 0.3, -18)]:
 		box(Vector3(1.4, 0.08, 0.4), p + Vector3(0, 0.1, 0), mats.lamp, false)
@@ -347,8 +359,7 @@ func _build_pump() -> void:
 	wall(Vector2(26, 30), Vector2(46, 30), [{at = 12.0, w = 1.8, kind = "window", id = "w_pump_s", out = Vector2(0, 1)}])
 	wall(Vector2(46, 30), Vector2(46, 10), [{at = 10.0, w = 1.8, kind = "window", id = "w_pump_e", out = Vector2(1, 0)}])
 	# two big tanks + a pipe run (cover to kite around)
-	var tank_mat := StandardMaterial3D.new(); tank_mat.albedo_color = Color(0.22, 0.3, 0.28); tank_mat.roughness = 0.6; tank_mat.metallic = 0.5
-	tank_mat.detail_enabled = mats.wall.detail_enabled; tank_mat.detail_albedo = mats.wall.detail_albedo; tank_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	var tank_mat: StandardMaterial3D = mats.rust
 	for tp in [Vector3(31, 0, 24), Vector3(41, 0, 16)]:
 		var sb := StaticBody3D.new(); sb.position = tp; add_child(sb)
 		var mi := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 1.6; cm.bottom_radius = 1.6; cm.height = 4.0
@@ -446,7 +457,8 @@ func apply_quality(d: Dictionary) -> void:
 	for l in shadow_lights:
 		if is_instance_valid(l): l.shadow_enabled = d.shadows
 	for p in dust:
-		p.emitting = d.dust; p.visible = d.dust
+		if p is CPUParticles3D: p.emitting = d.dust
+		p.visible = d.dust
 	for z in get_tree().get_nodes_in_group("voz_zombie"):
 		ModelLib.set_shadows(z.model, d.shadows)
 

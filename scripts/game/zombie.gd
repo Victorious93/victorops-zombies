@@ -131,6 +131,9 @@ func _ready() -> void:
 		ap.speed_scale = randf_range(0.9, 1.1)
 	var sks := model.find_children("*", "Skeleton3D", true, false)
 	if not sks.is_empty(): skel = sks[0]
+	if skel:
+		zpose = ZombiePose.new(); zpose.configure(ztype); skel.add_child(zpose)
+		_eyes()
 	_dress()
 	t = 0.9; groan_cd = randf_range(1, 6)
 	if drop_in:
@@ -154,7 +157,7 @@ static func _rim_mat(src: StandardMaterial3D) -> StandardMaterial3D:
 
 ## Skin variations: 4 shared tints x grime/blood detail per type (shared materials keep batching).
 var skin := randi() % 4
-const SKINS := [Color(0.62, 0.66, 0.55), Color(0.55, 0.52, 0.5), Color(0.7, 0.6, 0.52), Color(0.5, 0.58, 0.6)]
+const SKINS := [Color(0.5, 0.58, 0.44), Color(0.46, 0.5, 0.45), Color(0.56, 0.55, 0.42), Color(0.42, 0.5, 0.48)]   ## v7: rotting grey-green
 static var _skin_cache := {}
 static var _grime: Texture2D
 static func grime_tex() -> Texture2D:
@@ -166,8 +169,12 @@ static func grime_tex() -> Texture2D:
 				var v := n.get_noise_2d(x, y) * 0.5 + 0.5
 				var b := n.get_noise_2d(x * 3.1 + 500, y * 3.1) * 0.5 + 0.5
 				# dark grime where v is low, dried blood blotches where b is high
-				var c := Color(0.45, 0.4, 0.35).lerp(Color.WHITE, smoothstep(0.25, 0.7, v))
-				if b > 0.68: c = c.lerp(Color(0.35, 0.03, 0.02), smoothstep(0.68, 0.8, b))
+				var c := Color(0.32, 0.3, 0.24).lerp(Color.WHITE, smoothstep(0.22, 0.72, v))
+				if b > 0.6: c = c.lerp(Color(0.32, 0.02, 0.02), smoothstep(0.6, 0.72, b))          # blood soak
+				var w := n.get_noise_2d(x * 5.0 + 900, y * 5.0) * 0.5 + 0.5
+				if w > 0.78: c = c.lerp(Color(0.5, 0.06, 0.05), smoothstep(0.78, 0.82, w)).lerp(Color(0.12, 0.0, 0.0), smoothstep(0.84, 0.9, w))   # open wound
+				var run := n.get_noise_2d(x * 9.0 + 200, y * 0.6) * 0.5 + 0.5
+				if run > 0.8 and b > 0.45: c = c.lerp(Color(0.25, 0.01, 0.01), 0.7)                 # vertical blood runs
 				img.set_pixel(x, y, c)
 		_grime = ImageTexture.create_from_image(img)
 	return _grime
@@ -179,12 +186,34 @@ static func _skin_mat(src: StandardMaterial3D, type: String, idx: int) -> Standa
 		m.albedo_color = Color(tint.r, tint.g, tint.b)
 		m.detail_enabled = true; m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
 		m.detail_albedo = grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
-		m.roughness = 0.85; m.metallic_specular = 0.25
-		m.rim_enabled = true; m.rim = 0.6; m.rim_tint = 0.2
+		m.roughness = 0.7; m.metallic_specular = 0.35   # clammy
+		m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1; m.uv1_scale = Vector3(1.6, 1.6, 1.6)
+		m.rim_enabled = true; m.rim = 0.6; m.rim_tint = 0.5
 		if type == "bloater":
 			m.emission_enabled = true; m.emission = Color(0.25, 0.4, 0.05); m.emission_energy_multiplier = 0.25
 		_skin_cache[key] = m
 	return _skin_cache[key]
+
+var zpose: ZombiePose
+var eyes: Array = []
+static var _eye_mat: StandardMaterial3D
+## Glowing eyes on the head bone (unshaded + bright emission so they bloom in the dark; no light per zombie).
+func _eyes() -> void:
+	var hb := skel.find_bone("Head")
+	if hb < 0: return
+	if _eye_mat == null:
+		_eye_mat = StandardMaterial3D.new(); _eye_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_eye_mat.albedo_color = Color(1.0, 0.75, 0.2) * 2.2
+	var ba := BoneAttachment3D.new(); ba.bone_name = "Head"; skel.add_child(ba)
+	var gs := skel.global_transform.basis.get_scale() if skel.is_inside_tree() else skel.basis.get_scale() * model.scale
+	var inv := Vector3(1.0 / maxf(gs.x, 0.001), 1.0 / maxf(gs.y, 0.001), 1.0 / maxf(gs.z, 0.001))
+	var head_h := HEIGHT * 0.075   # eye height above the head joint
+	for sx in [-1.0, 1.0]:
+		var mi := MeshInstance3D.new(); var sm := SphereMesh.new(); sm.radius = 0.016; sm.height = 0.032
+		sm.radial_segments = 6; sm.rings = 3; mi.mesh = sm; mi.material_override = _eye_mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.scale = inv; mi.position = Vector3(sx * 0.045, head_h, 0.11) * inv
+		ba.add_child(mi); eyes.append(mi)
 
 ## Type silhouettes: brute helmet + shoulder plates, bloater glowing pustules, sprinter bare and hunched.
 func _dress() -> void:
@@ -256,6 +285,8 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		game.sfx.play_at("plank_rip", global_position + Vector3.UP * 1.3, -12, 2.2)
 	hp -= dmg
 	flash_t = 0.07
+	if part == "body" and not headshot and hp - dmg > 0 and dmg > max_hp * 0.3 and not arm_lost and randf() < 0.35:
+		_lose_arm()
 	if part == "legs" and not crawler:
 		leg_damage += dmg
 		if leg_damage > max_hp * 0.45 and anims.has("Crawl") and hp > 0 and randf() < 0.6:
@@ -296,6 +327,19 @@ func _become_crawler() -> void:
 		game.sfx.play_at("gore", global_position, -6, randf_range(0.9, 1.1))
 
 ## Limb/head pop: collapse the bone (and its children) to nothing so the mesh tears off there.
+var arm_lost := false
+## Dismemberment: the lower arm pops off at the elbow with a blood spray (the zombie keeps coming).
+func _lose_arm() -> void:
+	if skel == null: return
+	var b := "LowerArm.L" if randf() < 0.5 else "LowerArm.R"
+	if skel.find_bone(b) < 0: b = "Arm.L_end" if randf() < 0.5 else "Arm.R_end"
+	if skel.find_bone(b) < 0: return
+	arm_lost = true; _pop_bone(b)
+	if game and game.fx:
+		var at := global_position + Vector3.UP * 1.2
+		game.fx.gibs(at, 3, self); game.fx.blood_burst(at, Vector3.UP * 0.4 + global_basis.x * (1.0 if b.ends_with("L") else -1.0), false)
+		game.sfx.play_at("gore", at, -6, randf_range(0.9, 1.1))
+
 func _pop_bone(bone: String) -> void:
 	if skel == null: return
 	var i := skel.find_bone(bone)
@@ -310,6 +354,9 @@ func head_y() -> float:
 	return HEAD_Y * (model.scale.y if model else 1.0)
 
 func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
+	if zpose: zpose.active = false
+	for e in eyes:
+		if is_instance_valid(e): e.visible = false
 	state = State.DEAD; t = 4.0
 	collision_layer = 0
 	if slow_t > 0.0 and game and game.fx:   # frozen kill shatters into ice
@@ -520,6 +567,7 @@ func _physics_process(dt: float) -> void:
 			var pl = game.player
 			if pl == null: return
 			var d := _flat_dist(pl.global_position)
+			if zpose: zpose.reach_target = 1.0 if (d < 7.0 and attack_anim_t <= 0.0 and not crawler and not runner) else (0.4 if d < 7.0 and runner else 0.0)
 			var dy: float = absf(pl.global_position.y - global_position.y)
 			lunge_cd -= dt
 			if windup_t > 0.0:

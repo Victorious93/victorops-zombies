@@ -141,7 +141,9 @@ func apply_settings() -> void:
 		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
 		if player.flashlight: player.flashlight.shadow_enabled = d.shadows
 	if touch:
-		touch.floating = settings.joystick != "fixed"; touch.fire_scale = settings.fire_size; touch._layout()
+		touch.floating = settings.joystick != "fixed"; touch.fire_scale = settings.fire_size
+		touch.button_scale = settings.button_scale; touch.opacity = settings.button_opacity
+		touch.left_fire = settings.left_fire; touch.custom = settings.layout.duplicate(); touch._layout()
 
 ## Pull the background loop down while a round sting plays, then bring it back.
 func duck_music(sec: float) -> void:
@@ -214,6 +216,7 @@ func _update_prompt() -> void:
 			var text: String = it.prompt.call(player)
 			if text == "": continue
 			best = score; current_prompt = text; current_target = it
+	if touch: touch.set_use_available(current_prompt != "")
 
 func player_use(p: Player, just_pressed: bool, repeat_tick: bool) -> void:
 	if current_target == null: return

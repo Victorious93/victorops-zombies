@@ -58,6 +58,9 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	_choice(_row(box, "Joystick"), ["floating", "fixed"], st.joystick, func(v): st.joystick = v; on_change.call())
 	_slider(_row(box, "Look curve"), 1.0, 1.8, st.look_curve, 0.05, func(x): st.look_curve = x; on_change.call())
 	_slider(_row(box, "Fire button size"), 1.0, 1.8, st.fire_size, 0.05, func(x): st.fire_size = x; on_change.call())
+	var ch := _row(box, "Touch controls")
+	var cbt := Button.new(); cbt.text = "Controls…"; cbt.custom_minimum_size = Vector2(220, 52); cbt.add_theme_font_size_override("font_size", 22)
+	cbt.pressed.connect(func(): ControlsEditor.open(root, st, on_change)); ch.add_child(cbt)
 	_slider(_row(box, "Music"), 0.0, 1.0, st.music, 0.05, func(x): st.music = x; on_change.call())
 	_slider(_row(box, "Effects"), 0.0, 1.0, st.sfx, 0.05, func(x): st.sfx = x; on_change.call())
 	for pair in buttons:
