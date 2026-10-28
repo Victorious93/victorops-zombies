@@ -47,3 +47,9 @@ func test_swap_pose_drops_then_settles_with_overshoot():
 	var mins := 0.0
 	for i in 20: mins = maxf(mins, (Viewmodel.swap_pose(0.3 - i * 0.015)[0] as Vector3).y)
 	assert_gt(mins, 0.0, "overshoots above rest before settling")
+
+func test_zombie_stride_rate_tracks_speed():
+	assert_almost_eq(Zombie.stride_rate("Walk", 1.1), 1.0, 0.001)
+	assert_lt(Zombie.stride_rate("Run", 1.0), Zombie.stride_rate("Run", 3.0))
+	assert_eq(Zombie.stride_rate("Walk", 0.0), 0.6, "never freezes mid-stride")
+	assert_eq(Zombie.stride_rate("Walk", 9.0), 1.6)

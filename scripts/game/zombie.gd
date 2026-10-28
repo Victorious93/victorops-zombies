@@ -128,7 +128,7 @@ func _ready() -> void:
 	if ap:
 		for k in ["Walk", "Run", "Crawl", "Idle"]:
 			if anims.has(k): ap.get_animation(anims[k]).loop_mode = Animation.LOOP_LINEAR
-		ap.speed_scale = randf_range(0.9, 1.1)
+		base_scale = randf_range(0.9, 1.1); ap.speed_scale = base_scale
 	var sks := model.find_children("*", "Skeleton3D", true, false)
 	if not sks.is_empty(): skel = sks[0]
 	if skel:
@@ -262,12 +262,27 @@ func _play(key: String, blend := 0.2, spd := 1.0) -> void:
 	if ap == null or not anims.has(key): return
 	if cur_anim == key and ap.is_playing(): return
 	cur_anim = key
+	if not STRIDE.has(key): ap.speed_scale = base_scale
 	ap.play(anims[key], blend, spd)
 
+## Stride matching: playback rate follows the zombie's real ground speed (smoothed), so feet don't
+## skate when it is shoved, slowed in a crowd or speeding up; nearly stopped in a jam -> idle sway.
+var ground_speed := -1.0
+var base_scale := 1.0   ## per-zombie playback variance
+const STRIDE := {"Crawl": 0.6, "Run": 3.2, "Walk": 1.1}
+static func stride_rate(clip: String, v: float) -> float:
+	var lo := 0.55 if clip == "Run" else 0.6
+	return clampf(v / STRIDE.get(clip, 1.1), lo, 1.6)
+
 func _locomotion() -> void:
-	if crawler and anims.has("Crawl"): _play("Crawl", 0.3, 1.0)
-	elif runner and anims.has("Run"): _play("Run", 0.25, speed / 3.2)
-	else: _play("Walk", 0.25, clampf(speed / 1.1, 0.7, 1.6))
+	var hv := Vector2(velocity.x, velocity.z).length()
+	ground_speed = hv if ground_speed < 0.0 else lerpf(ground_speed, hv, 0.15)
+	var clip := "Crawl" if crawler and anims.has("Crawl") else ("Run" if runner and anims.has("Run") else "Walk")
+	if ground_speed < (0.25 if cur_anim == "Idle" else 0.12) and anims.has("Idle") and not crawler and is_physics_processing() and state != State.DEAD:
+		_play("Idle", 0.35)
+		return
+	_play(clip, 0.3, 1.0)
+	if ap and cur_anim == clip: ap.speed_scale = base_scale * stride_rate(clip, ground_speed if ground_speed > 0.01 else speed)
 
 ## part: "head", "leg" or "body" (from the hit height).
 const SWIPE_DAMAGE := 45.0     ## 100 HP player: down on the third hit (2 with chip damage)
