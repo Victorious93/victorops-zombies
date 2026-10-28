@@ -86,8 +86,11 @@ func set_weapon(w: WeaponDef) -> void:
 	add_child(gun)
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
-	if w.tier > 0: _tint_upgraded(gun, w.color)
+	if w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
 	else: _shade_metal(gun)
+	var fc: Color = AltAmmo.COLORS.get(w.alt_ammo, Color(1.0, 0.8, 0.45))   # alt ammo tints the muzzle flash
+	(flash.material_override as StandardMaterial3D).albedo_color = Color(fc.r, fc.g, fc.b, (flash.material_override as StandardMaterial3D).albedo_color.a)
+	flash_light.light_color = fc
 	# small cool fill light so arms + gun are never pure silhouettes (short range: barely touches the world)
 	if fill == null:
 		fill = OmniLight3D.new(); fill.light_color = Color(0.7, 0.85, 1.0); fill.light_energy = 0.7
@@ -128,7 +131,25 @@ func _shade_metal(n: Node) -> void:
 				mi.set_surface_override_material(i, m)
 	for ch in n.get_children(): _shade_metal(ch)
 
-func _tint_upgraded(n: Node, c: Color) -> void:
+static var _camo_cache := {}
+
+## Overcharge Forge camo: a procedural blotch pattern (original, generated at runtime) in the tier's palette.
+static func camo_texture(tier: int) -> Texture2D:
+	if _camo_cache.has(tier): return _camo_cache[tier]
+	var pal := AltAmmo.camo(tier)
+	if pal.is_empty(): return null
+	var n := FastNoiseLite.new(); n.seed = 7000 + tier; n.frequency = 0.09; n.fractal_octaves = 2
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	for y in 64:
+		for x in 64:
+			var v := n.get_noise_2d(x, y)
+			var c: Color = pal[0] if v < -0.05 else (pal[1] if v > 0.22 else pal[0].lerp(pal[1], 0.45).darkened(0.3))
+			img.set_pixel(x, y, c)
+	var tex := ImageTexture.create_from_image(img)
+	_camo_cache[tier] = tex
+	return tex
+
+func _tint_upgraded(n: Node, c: Color, camo: Texture2D = null) -> void:
 	if n is MeshInstance3D:
 		var mi := n as MeshInstance3D
 		for i in mi.mesh.get_surface_count():
@@ -138,8 +159,11 @@ func _tint_upgraded(n: Node, c: Color) -> void:
 				m.albedo_color = m.albedo_color.lerp(c, 0.35); m.metallic = maxf(m.metallic, 0.55); m.roughness = 0.35
 				m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = 0.12
 				m.rim_enabled = true; m.rim = 0.8; m.rim_tint = 0.6   # reads as overcharged metal, not a flat purple blob
+				if camo:
+					m.albedo_texture = camo; m.albedo_color = Color(1, 1, 1); m.uv1_triplanar = true; m.uv1_scale = Vector3.ONE * 9.0
+					m.emission_texture = camo; m.emission = Color(1, 1, 1); m.emission_energy_multiplier = 0.35
 				mi.set_surface_override_material(i, m)
-	for ch in n.get_children(): _tint_upgraded(ch, c)
+	for ch in n.get_children(): _tint_upgraded(ch, c, camo)
 
 func fire(strength: float) -> void:
 	kick = minf(kick + strength, 2.2)

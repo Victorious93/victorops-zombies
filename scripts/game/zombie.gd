@@ -81,8 +81,9 @@ func setup(p_game, p_window: WindowBarricade, round: int, p_type := "walker") ->
 	match ztype:
 		"sprinter":
 			runner = true; speed = Rounds.RUN_SPEED * randf_range(1.15, 1.3); lean = 0.35; voice_pitch *= 1.3
-		"brute":
-			runner = false; speed = Rounds.WALK_SPEED * 1.35; variant = "zombie_a"; voice_pitch = 0.6; drop_in = false
+		"brute", "warden":
+			runner = false; speed = Rounds.WALK_SPEED * 1.35; variant = "zombie_a"; voice_pitch = 0.6 if ztype == "brute" else 0.42; drop_in = false
+			if ztype == "warden": speed = Rounds.WALK_SPEED * 1.7
 		"bloater":
 			runner = false; speed = Rounds.WALK_SPEED * 0.85; variant = "zombie_b"; voice_pitch *= 0.75
 
@@ -103,10 +104,10 @@ func _ready() -> void:
 	var sc: float = td.scale
 	match ztype:
 		"sprinter": model.scale = Vector3(0.82, 1.0, 0.82) * sc     # lean and spindly
-		"brute": model.scale = Vector3(1.25, 1.0, 1.2) * sc         # wide, armoured
+		"brute", "warden": model.scale = Vector3(1.25, 1.0, 1.2) * sc         # wide, armoured
 		"bloater": model.scale = Vector3(1.55, 0.95, 1.5) * sc      # swollen
 		_: model.scale = Vector3.ONE * sc
-	if ztype == "brute":
+	if ZombieTypes.is_heavy(ztype):
 		cap.radius = 0.5; cap.height = HEIGHT * sc; shape.position.y = HEIGHT * sc / 2
 	elif ztype == "bloater":
 		cap.radius = 0.48
@@ -196,7 +197,7 @@ func _dress() -> void:
 	var glow := StandardMaterial3D.new(); glow.albedo_color = Color(0.6, 0.95, 0.2); glow.emission_enabled = true
 	glow.emission = Color(0.55, 1.0, 0.15); glow.emission_energy_multiplier = 1.6
 	var parts: Array = []
-	if ztype == "brute":
+	if ZombieTypes.is_heavy(ztype):
 		parts = [["Head", Vector3(0.36, 0.18, 0.38), Vector3(0, 0.22, 0), plate], ["Shoulder.L", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate],
 			["Shoulder.R", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate], ["Torso", Vector3(0.5, 0.36, 0.14), Vector3(0, 0.15, 0.17), plate]]
 	else:
@@ -206,7 +207,7 @@ func _dress() -> void:
 		if skel and skel.find_bone(pt[0]) >= 0:
 			var ba := BoneAttachment3D.new(); ba.bone_name = pt[0]; skel.add_child(ba); holder = ba
 		var mi := MeshInstance3D.new()
-		if ztype == "brute":
+		if ZombieTypes.is_heavy(ztype):
 			var bm := BoxMesh.new(); bm.size = pt[1]; mi.mesh = bm
 		else:
 			var sm := SphereMesh.new(); sm.radius = pt[1].x / 2; sm.height = pt[1].x; sm.radial_segments = 8; sm.rings = 4; mi.mesh = sm
@@ -250,7 +251,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	if game and game.power.active("onetouch"): dmg = maxi(dmg, hp)
 	knifed = knife
 	dmg = ZombieTypes.damage_taken(ztype, dmg, headshot, explosive_hit)
-	if ztype == "brute" and not headshot and not explosive_hit and game and game.fx:
+	if ZombieTypes.is_heavy(ztype) and not headshot and not explosive_hit and game and game.fx:
 		game.fx.sparks(global_position + Vector3.UP * 1.3, force.normalized() * -1.0 + Vector3.UP * 0.3, Color(1, 0.8, 0.4), 8, 0.3, 4.0)
 		game.sfx.play_at("plank_rip", global_position + Vector3.UP * 1.3, -12, 2.2)
 	hp -= dmg
@@ -263,7 +264,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		die(player, headshot, force, dmg)
 		return
 	# stagger: knocked back, slowed, interrupts a wind-up on big hits
-	var heavy := float(dmg) / max_hp * (0.25 if ztype == "brute" else 1.0)
+	var heavy := float(dmg) / max_hp * (0.25 if ZombieTypes.is_heavy(ztype) else 1.0)
 	if state == State.CHASE and not crawler:
 		var f := force; f.y = 0
 		knock += f.limit_length(6.0) * clampf(heavy * 2.5, 0.15, 1.0)
@@ -276,11 +277,11 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	if force.length() > 0.01: side = force.normalized().dot(global_basis.x)
 	var hpart := "head" if headshot else ("leg" if part == "legs" else "torso")
 	var kind := HitReact.classify(hpart, float(dmg) / max_hp, side)
-	var pose := HitReact.pose(kind) * (0.35 if ztype == "brute" else 1.0)
+	var pose := HitReact.pose(kind) * (0.35 if ZombieTypes.is_heavy(ztype) else 1.0)
 	if not crawler:
 		model.rotation.x = lean + pose.x if kind != HitReact.Kind.NONE else lean + clampf(-heavy * 0.9, -0.35, 0.0)
 		react_yaw = pose.y; react_roll = pose.z
-		if state == State.CHASE: stagger_t = maxf(stagger_t, HitReact.stagger_time(kind) * (0.4 if ztype == "brute" else 1.0))
+		if state == State.CHASE: stagger_t = maxf(stagger_t, HitReact.stagger_time(kind) * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
 
 func make_crawler() -> void:
 	if not crawler and state != State.DEAD and anims.has("Crawl"): _become_crawler()
@@ -311,13 +312,16 @@ func head_y() -> float:
 func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
 	state = State.DEAD; t = 4.0
 	collision_layer = 0
+	if slow_t > 0.0 and game and game.fx:   # frozen kill shatters into ice
+		game.fx.sparks(global_position + Vector3.UP, Vector3.UP, AltAmmo.COLORS[AltAmmo.FREEZE], 18, 0.6, 5.0)
+		game.sfx.play_at("shatter_v7", global_position + Vector3.UP, -2)
 	velocity = Vector3.ZERO
 	if ztype == "bloater":
 		_burst()
 		queue_free()
 		if game: game.on_zombie_killed(self, player, headshot, knifed)
 		return
-	var gibbed := explosive_hit and (ztype != "brute")
+	var gibbed := explosive_hit and (not ZombieTypes.is_heavy(ztype))
 	if gibbed and game:
 		# explosive kill: limbs and head come off, a big burst of gore, the rest goes limp
 		for b in ["Head", "LowerArm.L", "LowerArm.R", "LowerLeg.L", "LowerLeg.R", "Arm.L", "Leg.R"]:
@@ -342,7 +346,7 @@ func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
 		if gore: game.fx.gibs(global_position + Vector3.UP * (1.5 if headshot else 1.0), 6 if headshot else 9, self, force)
 		game.on_zombie_killed(self, player, headshot, knifed)
 		if eye_light: eye_light.queue_free()
-		if ztype == "brute": game.sfx.play_at("brute_roar", global_position + Vector3.UP * 2, 2, 0.8)
+		if ZombieTypes.is_heavy(ztype): game.sfx.play_at("brute_roar", global_position + Vector3.UP * 2, 2, 0.8)
 
 ## Bloater pop: toxic burst that hurts the player nearby and leaves a lingering gas cloud.
 func _burst() -> void:
@@ -396,6 +400,39 @@ func _start_ragdoll(force: Vector3) -> bool:
 		if pb is PhysicalBone3D: (pb as PhysicalBone3D).apply_central_impulse(imp * (0.6 if explosive_hit else 0.35))
 	return true
 
+## Forge alternate-ammo status effects (AltAmmo).
+var burn_t := 0.0
+var burn_dps := 0.0
+var burn_acc := 0.0
+var burn_by = null
+var slow_t := 0.0
+var status_fx_t := 0.0
+
+func apply_status(kind: String, hit_dmg: int, by) -> void:
+	match kind:
+		AltAmmo.FIRE: burn_t = AltAmmo.BURN_TIME; burn_dps = AltAmmo.burn_dps(hit_dmg); burn_by = by
+		AltAmmo.SHOCK: stagger_t = maxf(stagger_t, AltAmmo.STUN_TIME * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
+		AltAmmo.FREEZE: slow_t = AltAmmo.SLOW_TIME
+
+func status_kind() -> String:
+	if burn_t > 0.0: return AltAmmo.FIRE
+	if slow_t > 0.0: return AltAmmo.FREEZE
+	return ""
+
+func _tick_status(dt: float) -> void:
+	slow_t = maxf(0.0, slow_t - dt)
+	if burn_t > 0.0:
+		burn_t -= dt; burn_acc += burn_dps * dt
+		if burn_acc >= 1.0:
+			var d := int(burn_acc); burn_acc -= d
+			take_damage(d, false, burn_by)
+	var k := status_kind()
+	if k == "" or game == null or game.fx == null: return
+	status_fx_t -= dt
+	if status_fx_t <= 0.0:
+		status_fx_t = 0.12
+		game.fx.sparks(global_position + Vector3.UP * randf_range(0.6, 1.6), Vector3.UP, AltAmmo.COLORS[k], 4, 0.25, 2.0)
+
 func push(v: Vector3) -> void:
 	knock += v
 
@@ -405,6 +442,7 @@ func _physics_process(dt: float) -> void:
 		var on := flash_t > 0.0
 		model.scale = Vector3.ONE * (1.03 if on else 1.0)
 	attack_anim_t -= dt
+	if state != State.DEAD: _tick_status(dt)
 	match state:
 		State.DEAD:
 			t -= dt
@@ -491,7 +529,7 @@ func _physics_process(dt: float) -> void:
 					windup_t = -1.0
 					if d < (1.25 if crawler else 1.75) and dy < 1.6 and not pl.is_downed:
 						pl.take_damage((CRAWLER_DAMAGE if crawler else SWIPE_DAMAGE) * dmg_mult, global_position)
-						if ztype == "brute": pl.add_trauma(0.5)
+						if ZombieTypes.is_heavy(ztype): pl.add_trauma(0.5)
 						game.sfx.play_at("zombie_attack", global_position + Vector3.UP, -2, voice_pitch)
 					else:
 						game.sfx.play_at("swipe_miss", global_position + Vector3.UP, -8, randf_range(0.9, 1.1))
@@ -510,7 +548,7 @@ func _physics_process(dt: float) -> void:
 					_start_swing()
 			elif ztype == "bloater" and d < ZombieTypes.BLOATER_TRIGGER and dy < 1.6:
 				die(null, false, Vector3.ZERO, 0)
-			elif not crawler and ztype != "brute" and ztype != "bloater" and stagger_t <= 0.0 and lunge_cd <= 0.0 and d < LUNGE_RANGE and d > 1.5 and dy < 1.0 and not pl.is_downed:
+			elif not crawler and not ZombieTypes.is_heavy(ztype) and ztype != "bloater" and stagger_t <= 0.0 and lunge_cd <= 0.0 and d < LUNGE_RANGE and d > 1.5 and dy < 1.0 and not pl.is_downed:
 				lunge_cd = randf_range(2.2, 3.5); lunge_t = 0.28
 				cur_anim = ""; _play("Run_Attack" if anims.has("Run_Attack") else "Run", 0.05, 1.6)
 				game.sfx.play_at("screech", global_position + Vector3.UP * 1.5, -5, voice_pitch * randf_range(0.95, 1.05))
@@ -544,7 +582,7 @@ func _tells(dt: float) -> void:
 		"sprinter":
 			tell_cd = randf_range(1.6, 2.6)
 			if d < 18.0: game.sfx.play_at("sprinter_call", global_position + Vector3.UP * 1.4, -3, randf_range(0.95, 1.1))
-		"brute":
+		"brute", "warden":
 			tell_cd = 0.75
 			game.sfx.play_at("brute_step", global_position, -2, randf_range(0.9, 1.0))
 			if randf() < 0.35: game.sfx.play_at("brute_rattle", global_position + Vector3.UP, -6)
@@ -603,6 +641,7 @@ func _nav_move(target: Vector3, dt: float, set_target := true) -> void:
 		var l := off.length()
 		if l < 0.7 and l > 0.001: sep += off / l * (0.7 - l)
 	var slow := 0.15 if stagger_t > 0.0 else (0.35 if attack_anim_t > 0.0 else 1.0)
+	if slow_t > 0.0: slow *= AltAmmo.SLOW_MULT
 	var v := (dir + sep * 1.5).normalized() * speed * slow + knock
 	knock = knock.move_toward(Vector3.ZERO, dt * 12)
 	velocity.x = v.x; velocity.z = v.z

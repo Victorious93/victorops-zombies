@@ -221,8 +221,20 @@ func open_door(id: String) -> void:
 		tw.tween_property(b, "position:y", -1.6, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_callback(func(): b.queue_free(); call_deferred("rebake"))
 
+var _rebake_pending := false
+
+## Only one async bake may run at a time; a request that lands mid-bake is queued and replayed when it ends.
 func rebake() -> void:
+	if is_baking():
+		if not _rebake_pending:
+			_rebake_pending = true
+			bake_finished.connect(_on_bake_done, CONNECT_ONE_SHOT)
+		return
 	bake_navigation_mesh(true)
+
+func _on_bake_done() -> void:
+	_rebake_pending = false
+	call_deferred("rebake")
 
 func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := false, collide := true) -> Node3D:
 	var n := ModelLib.prop(name, size, by_height)

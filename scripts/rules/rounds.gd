@@ -51,4 +51,13 @@ static func spawn_interval(round: int) -> float:
 
 ## Every 5th round is a "Frenzy" special round: fewer but faster zombies.
 static func is_special(round: int) -> bool:
-	return round >= SPECIAL_EVERY and round % SPECIAL_EVERY == 0
+	return round >= SPECIAL_EVERY and round % SPECIAL_EVERY == 0 and not is_boss(round)
+
+## Every 15th round is a boss round: the Warden arrives with a thinner escort.
+const BOSS_EVERY := 15
+static func is_boss(round: int) -> bool:
+	return round >= BOSS_EVERY and round % BOSS_EVERY == 0
+
+## Escort size on boss rounds (half a normal horde).
+static func boss_escort(round: int) -> int:
+	return maxi(4, zombie_count(round) / 2)

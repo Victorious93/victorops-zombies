@@ -12,6 +12,7 @@ const ALL := {
 	"walker":   {"hp": 1.0, "speed": 1.0, "scale": 1.0, "dmg": 1.0, "armor": 0.0, "tint": Color(1, 1, 1), "points": 0},
 	"sprinter": {"hp": 0.6, "speed": 1.9, "scale": 0.9, "dmg": 0.7, "armor": 0.0, "tint": Color(0.75, 0.85, 0.7), "points": 20},
 	"brute":    {"hp": 8.0, "speed": 0.75, "scale": 1.45, "dmg": 2.2, "armor": 0.5, "tint": Color(0.55, 0.5, 0.48), "points": 500},
+	"warden":   {"hp": 30.0, "speed": 0.9, "scale": 1.85, "dmg": 3.0, "armor": 0.6, "tint": Color(0.45, 0.35, 0.6), "points": 2500},
 	"bloater":  {"hp": 1.6, "speed": 0.7, "scale": 1.15, "dmg": 1.0, "armor": 0.0, "tint": Color(0.75, 0.9, 0.45), "points": 60},
 }
 const BLOATER_RADIUS := 3.2      ## burst damage radius (m)
@@ -51,4 +52,7 @@ static func burst_damage(dist: float) -> int:
 	return int(round(BLOATER_BURST * (1.0 - dist / BLOATER_RADIUS)))
 
 static func guaranteed_drop(type: String) -> String:
-	return "restock" if type == "brute" else ""
+	return "restock" if type == "brute" or type == "warden" else ""
+
+## Armoured, heavy types (brute mini-boss and the Warden boss) share most behaviour.
+static func is_heavy(type: String) -> bool: return type == "brute" or type == "warden"

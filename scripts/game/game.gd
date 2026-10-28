@@ -55,6 +55,15 @@ var groan_t := 6.0
 var round_times := {}        ## round -> seconds (sim report)
 var round_clock := 0.0
 var downs := 0
+## v7 side content
+var quest := WonderQuest.new()
+var pact := PactStone.new()
+var stats := RunStats.new()
+var high := HighScore.new()
+var quest_nodes: QuestNodes
+var alt_last := {}            ## weapon id -> time of the last alt-ammo proc
+var boss_pending := false
+var boss: Zombie = null
 var stuck_respawns := 0
 
 func on_zombie_stuck(_z) -> void: stuck_respawns += 1
@@ -68,6 +77,8 @@ func _ready() -> void:
 	fx = Fx.new(); fx.game = self; add_child(fx)
 	_build_env()
 	map = FacilityMap.new(); add_child(map); map.build(self); map.build_sky()
+	quest.pick_spots(rng)
+	quest_nodes = QuestNodes.new(); map.add_child(quest_nodes); quest_nodes.build(self, map)
 	map.bake_navigation_mesh(false)
 	player = Player.new(); player.game = self; player.char_id = character_id
 	player.position = Vector3(0, 0.1, 3); add_child(player)
@@ -176,6 +187,9 @@ func _process(dt: float) -> void:
 		hud.info("%s wore off" % PowerUps.ALL[id].name); sfx.play("pu_end", -6)
 	player.economy.mult = 2 if power.active("doublepay") else 1
 	round_clock += dt
+	stats.time += dt
+	if boss and (not is_instance_valid(boss) or boss.state == Zombie.State.DEAD): boss = null
+	hud.boss_bar(boss)
 	# distant groans from outside the walls
 	groan_t -= dt
 	if groan_t <= 0.0:
@@ -218,12 +232,19 @@ func _update_rounds(dt: float) -> void:
 			player.economy.on_round_start(); power.on_round_start()
 			to_spawn = Rounds.zombie_count(round)
 			spawn_cd = 1.0
-			if Rounds.is_special(round):
+			pact.on_round_start(round)
+			boss_pending = Rounds.is_boss(round)
+			if boss_pending:
+				to_spawn = Rounds.boss_escort(round)
+				hud.banner("Round %d · THE WARDEN" % round, 4.0)
+				announce("ann_boss_v7"); sfx.play("boss_roar_v7", 0)
+			elif Rounds.is_special(round):
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
 			sfx.play("sting", -6)
 			sfx.play("round_start_v6", -1)
+			if not boss_pending: announce("ann_round_v7", 1.4)
 			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
 			brute_pending = ZombieTypes.is_brute_round(round)
@@ -237,7 +258,9 @@ func _update_rounds(dt: float) -> void:
 		if spawn_cd <= 0.0 and zombies.size() < Rounds.MAX_ALIVE:
 			var ty := "brute" if brute_pending and to_spawn <= Rounds.zombie_count(round) / 2 else ZombieTypes.pick(round, rng.randf())
 			if ty == "brute": brute_pending = false
-			spawn_zombie("", ty)
+			if boss_pending and to_spawn <= Rounds.boss_escort(round) - 2: ty = "warden"; boss_pending = false
+			var nz := spawn_zombie("", ty)
+			if ty == "warden": boss = nz
 			to_spawn -= 1
 			spawn_cd = Rounds.spawn_interval(round)
 	elif zombies.size() == 1 and zombies[0].state != Zombie.State.DEAD and not zombies[0].crawler:
@@ -248,6 +271,7 @@ func _update_rounds(dt: float) -> void:
 		hud.banner("Round %d survived" % round, 3.0)
 		sfx.play("round_end", -7)
 		sfx.play("round_end_v6", -1)
+		if pact.on_round_end(round): _seal_pact()
 		duck_music(4.0)
 		tint = 0.6
 		player.health = player.max_health
@@ -268,6 +292,7 @@ func spawn_zombie(win_id := "", ztype := "walker") -> Zombie:
 	var z := Zombie.new()
 	z.setup(self, w, maxi(round, 1), ztype)
 	type_counts[ztype] = type_counts.get(ztype, 0) + 1
+	if ztype == "warden": sfx.play_at("boss_roar_v7", w.spawn_point + Vector3.UP * 2, 6)
 	if ztype == "brute": sfx.play_at("brute_roar", w.spawn_point + Vector3.UP * 2, 4)
 	z.position = w.spawn_point + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5))
 	add_child(z)
@@ -284,7 +309,7 @@ func _part_of(z: Zombie, y: float) -> String:
 
 func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
-	if gain > 0: fx.popup(at, "+%d" % gain)
+	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain
 
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
@@ -308,7 +333,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			z.take_damage(dmg, head, p, part, dir * (3.0 + w.damage * 0.02) * w.kick_mult())
 			var killed := was_alive and z.state == Zombie.State.DEAD
 			_pay(p, r.position + Vector3.UP * 0.3, before)
-			var armored := z.ztype == "brute" and not head
+			var armored := ZombieTypes.is_heavy(z.ztype) and not head
 			hud.hitmarker(killed, head, armored)
 			sfx.play("hitmarker", -10, 1.25 if head else 1.0)
 			sfx.play("hit_tick_v6", -8 if killed else -12, 0.8 if killed else (1.2 if head else 1.0))
@@ -319,6 +344,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			if killed: sfx.play("gore", -8, randf_range(0.9, 1.1))
 			fx.blood_hit(r.position, dir)
 			if w.splash > 0.0: _splash(p, r.position, w, z)
+			_alt_ammo(p, z, w, dmg, killed)
 			if pierce > 0:
 				pierce -= 1; exclude.append(z.get_rid()); from = r.position; continue
 			break
@@ -449,12 +475,20 @@ func _tracer(a: Vector3, b: Vector3, w: WeaponDef) -> void:
 func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> void:
 	zombies.erase(z)
 	kills += 1
+	stats.kills = kills
+	if headshot: stats.headshots += 1
+	if z.ztype == "warden":
+		stats.bosses += 1; hud.banner("THE WARDEN FALLS", 3.5); announce("ann_sealed_v7")
+	if pact.on_kill(z.global_position.distance_to(WonderQuest.STONE)):
+		hud.banner("The Pact Stone is sated", 2.5); sfx.play_at("pact_step_v7", WonderQuest.STONE, 0); announce("ann_pact_v7")
+		quest_nodes.stone_step(pact.step, false)
 	var pu := power.roll(rng)
 	var forced := ZombieTypes.guaranteed_drop(z.ztype)
 	if forced != "": _spawn_drop(forced, z.global_position)
 	elif pu != "" and z.window and not _outside_map(z): _spawn_drop(pu, z.global_position)
 	if ZombieTypes.ALL[z.ztype].points > 0 and p:
 		p.economy.points += ZombieTypes.ALL[z.ztype].points * p.economy.mult
+		stats.points_earned += ZombieTypes.ALL[z.ztype].points * p.economy.mult
 	# last kill of the round: brief slow-motion
 	if to_spawn == 0 and zombies.is_empty() and round >= 1 and not headless_sim():
 		slowmo_t = 1.1; Engine.time_scale = 0.3; sfx.play("slowmo", -2)
@@ -578,6 +612,9 @@ func collect_power(id: String) -> void:
 # ---------------------------------------------------------------- last stand
 func on_player_downed(p: Player) -> void:
 	downs += 1
+	stats.downs = downs
+	pact.on_down()
+	announce("ann_laststand_v7", 0.6)
 	sfx.play("downed", 0)
 	tint = 1.0
 	if p.last_stand.will_revive:
@@ -596,8 +633,99 @@ func on_player_bled_out(p: Player) -> void:
 	over = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	hud.banner("", 0)
-	hud.show_game_over(round, kills)
+	stats.parts = quest.count(); stats.pact = pact.done
+	var run := {"round": round, "kills": kills, "points": stats.points_earned, "headshots": stats.headshots}
+	var prev := high.load_best().duplicate()
+	var is_best := high.submit(run)
+	hud.show_game_over(round, kills, stats, prev, is_best)
+	announce("ann_gameover_v7", 0.4)
+	if is_best: announce("ann_highscore_v7", 2.6)
 	sfx.play("round_end", 0, 0.7)
+
+## Voice-like announcer sting (synthesised) with the music ducked under it.
+func announce(id: String, delay := 0.0) -> void:
+	if delay <= 0.0:
+		sfx.play(id, 0); duck_music(2.5); return
+	get_tree().create_timer(delay, true, false, true).timeout.connect(func(): sfx.play(id, 0); duck_music(2.5))
+
+## Forge alternate ammo: chance per hit to burn, arc or freeze.
+func _alt_ammo(p: Player, z: Zombie, w: WeaponDef, dmg: int, killed: bool) -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	if not AltAmmo.procs(w.alt_ammo, rng.randf(), now - float(alt_last.get(w.id, -99.0))): return
+	alt_last[w.id] = now
+	var at := z.global_position + Vector3.UP * 1.2
+	match w.alt_ammo:
+		AltAmmo.FIRE:
+			sfx.play_at("alt_fire_v7", at, -2)
+			if not killed: z.apply_status(AltAmmo.FIRE, dmg, p)
+			fx.sparks(at, Vector3.UP, AltAmmo.COLORS[AltAmmo.FIRE], 16, 0.5, 3.0)
+		AltAmmo.FREEZE:
+			sfx.play_at("alt_freeze_v7", at, -2)
+			if not killed: z.apply_status(AltAmmo.FREEZE, dmg, p)
+			fx.sparks(at, Vector3.UP, AltAmmo.COLORS[AltAmmo.FREEZE], 14, 0.5, 2.0)
+		AltAmmo.SHOCK:
+			sfx.play_at("alt_shock_v7", at, -1)
+			var n := 0
+			for o in zombies.duplicate():
+				if n >= AltAmmo.CHAIN_TARGETS: break
+				if o == z or not is_instance_valid(o) or o.state == Zombie.State.DEAD: continue
+				if o.global_position.distance_to(z.global_position) > AltAmmo.CHAIN_RANGE: continue
+				var to: Vector3 = o.global_position + Vector3.UP * 1.2
+				_arc(at, to)
+				o.apply_status(AltAmmo.SHOCK, dmg, p)
+				o.take_damage(AltAmmo.chain_damage(dmg), false, p)
+				n += 1
+			if not killed: z.apply_status(AltAmmo.SHOCK, dmg, p)
+			fx.sparks(at, Vector3.UP, AltAmmo.COLORS[AltAmmo.SHOCK], 12, 0.3, 4.0)
+
+func _arc(a: Vector3, b: Vector3) -> void:
+	var mi := MeshInstance3D.new(); var im := ImmediateMesh.new(); mi.mesh = im
+	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; m.albedo_color = AltAmmo.COLORS[AltAmmo.SHOCK]
+	im.surface_begin(Mesh.PRIMITIVE_LINE_STRIP, m)
+	for i in 9:
+		var f := i / 8.0
+		var j := Vector3(rng.randf_range(-0.25, 0.25), rng.randf_range(-0.25, 0.25), rng.randf_range(-0.25, 0.25)) if i > 0 and i < 8 else Vector3.ZERO
+		im.surface_add_vertex(a.lerp(b, f) + j)
+	im.surface_end(); add_child(mi)
+	get_tree().create_timer(0.12).timeout.connect(mi.queue_free)
+
+# ---------------------------------------------------------------- wonder weapon quest + Pact Stone
+func collect_part(p: Player, part: String) -> void:
+	if not quest.collect(part): return
+	quest_nodes.part_taken(part)
+	sfx.play("part_pickup_v7", -2); announce("ann_part_v7", 0.3)
+	hud.banner("%s found  ·  %d / 3" % [WonderQuest.PART_NAMES[part], quest.count()], 2.5)
+
+func use_bench(p: Player) -> void:
+	if quest.build():
+		quest_nodes.bench_built(); sfx.play_at("wonder_build_v7", WonderQuest.BENCH + Vector3.UP, 0)
+		announce("ann_built_v7", 1.2); hud.banner("The Gloam Harp is assembled", 3.0); p.add_trauma(0.3)
+	elif quest.take():
+		quest_nodes.bench_taken()
+		var w := Weapons.make(Weapons.QUEST_WONDER)
+		p.loadout.give(w); p.apply_reload_perk(); sfx.play("buy", -4); hud.info("Got the Gloam Harp!")
+	elif not quest.has_all():
+		_deny("Find the missing parts")
+
+func use_pact(p: Player) -> void:
+	var step := pact.current()
+	if step == "awaken" or step == "tithe":
+		if not pact.pay(p.economy): _deny("Not enough points"); return
+		sfx.play_at("pact_step_v7", WonderQuest.STONE, 0); announce("ann_pact_v7", 0.5)
+		hud.banner("Pact Stone: %s" % PactStone.STEP_TEXT[pact.current()], 2.5)
+		quest_nodes.stone_step(pact.step, false); p.add_trauma(0.25)
+	elif step != "":
+		hud.info(pact.prompt())
+
+func _seal_pact() -> void:
+	quest_nodes.stone_step(pact.step, true)
+	hud.banner("PACT SEALED", 4.0); announce("ann_sealed_v7", 0.8)
+	player.economy.points += PactStone.REWARD_POINTS
+	for s in player.loadout.slots: s.refill()
+	for id in ["ironhide", "quickhand", "marksman", "lazarus"]:
+		if not player.perks.has(id) and Perks.ALL.has(id):
+			player.perks[id] = true; player.set_max_health_from_perks(); player.apply_reload_perk()
+			hud.info("The stone grants %s" % Perks.ALL[id].name); break
 
 func bark(text: String) -> void:
 	hud.bark(text)
@@ -709,14 +837,15 @@ func use_forge(p: Player) -> void:
 	forge_busy = OverchargeForge.FORGE_TIME
 	var held: Ammo = p.loadout.slots[slot]
 	held.reload_left = OverchargeForge.FORGE_TIME   # can't fire it while it's in the machine
-	sfx.play("forge"); sfx.play("forge_jingle", -5); hud.info("%s working..." % OverchargeForge.NAME)
+	sfx.play("forge"); sfx.play("forge_jingle", -5); announce("ann_forge_v7", 0.4); hud.info("%s working..." % OverchargeForge.NAME)
 	map.forge_working(OverchargeForge.FORGE_TIME)
 	var tw := create_tween(); tw.tween_property(self, "forge_busy", 0.0, OverchargeForge.FORGE_TIME)
 	tw.tween_callback(func():
 		if p.loadout.slots.size() > slot and p.loadout.slots[slot] == held: held.swap(up)
 		else: p.loadout.give(up)
 		p.apply_reload_perk()
-		sfx.play("forge_done", 0); hud.banner(up.display_name(), 2.5))
+		sfx.play("forge_done", 0)
+		hud.banner(up.display_name() + ("  ·  " + AltAmmo.NAMES[up.alt_ammo] if up.alt_ammo != "" else ""), 2.5))
 
 func crate_prompt(p: Player) -> String:
 	match crate_node.state:

@@ -346,6 +346,7 @@ func try_fire(moving: bool) -> void:
 	var model: String = vm.model_name
 	game.sfx.play(SHOT_SOUND.get(model, "shot_pistol"), -7.0 if w.automatic else -4.0, randf_range(0.95, 1.05) * (0.88 if w.tier > 0 else 1.0))
 	if w.tier > 0: game.sfx.play("shot_energy", -16, 1.6)
+	if w.id == Weapons.QUEST_WONDER: game.sfx.play("gloam_fire_v7", -2, randf_range(0.95, 1.05))
 	if model != "raygun" and model != "launcher":
 		var b := cam.global_basis
 		game.fx.shell(vm.gun.global_position + b.x * 0.03 + b.y * 0.03, b.x, b.y, model == "shotgun")

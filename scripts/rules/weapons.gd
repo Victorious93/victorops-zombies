@@ -19,13 +19,18 @@ static func make(id: String) -> WeaponDef:
 			recoil_pattern = [Vector2(1, 0.5), Vector2(1.1, 0.2), Vector2(0.9, 0.6)], upgrade_name = "Meatgrinder 9000", color = Color(0.28, 0.27, 0.22)})
 		"nova": return WeaponDef.new("nova", "Nova Disruptor", 1000, 0.5).setup({weight = 0.9, splash = 90.0, mag_size = 6, reserve_mags = 5, reload_time = 2.5, spread_deg = 0.3, recoil = 3.0, ads_time = 0.2,
 			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Supernova Disruptor", color = Color(0.2, 0.85, 0.7)})
+		"gloam": return WeaponDef.new("gloam", "Gloam Harp", 900, 0.45).setup({weight = 1.1, pierce = 6, mag_size = 10, reserve_mags = 6, reload_time = 2.2, spread_deg = 0.2, recoil = 2.5, ads_time = 0.22,
+			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Gloam Requiem", color = Color(0.35, 0.95, 0.85)})
 	return null
+
+## Built from the three hidden parts (WonderQuest); never offered by the Mystery Crate.
+const QUEST_WONDER := "gloam"
 
 const ALL_IDS := ["sidearm", "scatter", "rifle", "cannon", "smg", "lmg", "nova"]
 ## The crate-only wonder weapon (original design: a resonance-field projector).
 const WONDER := "nova"
 ## CC0 Quaternius models (see ASSETS.md) used for each weapon's viewmodel and wall-buy.
-const MODELS := {"sidearm": "pistol", "scatter": "shotgun", "rifle": "rifle", "cannon": "launcher", "smg": "smg", "lmg": "lmg", "nova": "raygun"}
+const MODELS := {"sidearm": "pistol", "scatter": "shotgun", "rifle": "rifle", "cannon": "launcher", "smg": "smg", "lmg": "lmg", "nova": "raygun", "gloam": "raygun"}
 const STARTER := "sidearm"
 
 ## Wall-buy chalk outlines: weapon id -> price (500-1500). Buying it again while owned refills ammo at half price.
