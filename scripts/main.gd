@@ -388,6 +388,7 @@ const VIEWS := [
 	["04_lab", Vector3(12, 0.1, 8), -0.7, 0.0],
 	["05_yard", Vector3(30, 0.1, 0), -1.9, 0.02],
 	["06_pump", Vector3(32, 0.1, 14), 2.6, 0.05],
+	["07_ironhide_close", Vector3(-7.0, 0.1, -14.0), PI / 2, 0.1],
 ]
 func _views(dir: String) -> void:
 	var sd := dir.path_join("scenery"); var vd := dir.path_join("viewmodel"); var zd := dir.path_join("zombies")

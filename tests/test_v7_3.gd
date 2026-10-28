@@ -28,3 +28,25 @@ func test_support_hand_reaches_fore_end_on_every_gun():
 		var sk := fa.skel
 		var w := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("wrist.l"))).origin
 		assert_lt(w.distance_to(fa.target_l.global_position), 0.02, "%s: left wrist reaches its fore-end target" % id)
+
+func test_perk_machine_glow_toned_down():
+	assert_lt(FacilityMap.MACHINE_PANEL_ON, 1.5, "panel must not clip to white at close range")
+	assert_lt(FacilityMap.MACHINE_NEON_ON, 2.0)
+	assert_lt(FacilityMap.MACHINE_LIGHT_ON, 1.2)
+
+func test_decal_xform_lies_on_surface():
+	var t := Scenery.decal_xform(Vector3(1, 0, 2), 2.0, Vector3.UP, 0.7)
+	assert_almost_eq(t.basis.z.normalized().dot(Vector3.UP), 1.0, 0.001, "quad faces up off the floor")
+	assert_almost_eq(t.origin.y, Scenery.DECAL_LIFT, 0.0001)
+	var w := Scenery.decal_xform(Vector3(-9.75, 1, 0), 1.0, Vector3.RIGHT, 0.0)
+	assert_almost_eq(w.basis.z.normalized().dot(Vector3.RIGHT), 1.0, 0.001, "wall quad faces into the room")
+
+func test_decal_zones_cover_every_area_with_all_kinds():
+	assert_eq(Scenery.DECAL_ZONES.size(), 6)
+	for z in Scenery.DECAL_ZONES:
+		for i in [1, 2, 3]: assert_gt(int(z[i]), 0)
+
+func test_decal_material_is_alpha_blended():
+	var m := Scenery.decal_material("blood")
+	assert_eq(m.transparency, BaseMaterial3D.TRANSPARENCY_ALPHA)
+	assert_not_null(m.albedo_texture)
