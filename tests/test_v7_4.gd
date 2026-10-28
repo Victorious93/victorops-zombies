@@ -17,10 +17,13 @@ func test_light_zombies_get_every_outfit():
 	assert_eq(Zombie.pick_outfit("bloater", 1), "")
 
 func test_outfit_parts_use_real_bones():
+	var m = load("res://assets/models/zombie_a.glb").instantiate()
+	var sk: Skeleton3D = m.find_children("*", "Skeleton3D", true, false)[0]
 	for o in ["worker", "labcoat", "guard"]:
 		assert_gt(Zombie.outfit_parts(o).size(), 1, o)
-		for pt in Zombie.outfit_parts(o): assert_true(pt[0] in ["Hips", "Head"], "%s on %s" % [o, pt[0]])
+		for pt in Zombie.outfit_parts(o): assert_gt(sk.find_bone(pt[0]), -1, "%s on %s" % [o, pt[0]])
 	assert_eq(Zombie.outfit_parts("rags").size(), 0)
+	m.free()
 
 func test_leg_damage_always_makes_a_crawler():
 	var src := FileAccess.get_file_as_string("res://scripts/game/zombie.gd")
