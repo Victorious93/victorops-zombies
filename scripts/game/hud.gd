@@ -25,6 +25,7 @@ var dmg_t := 0.0
 var over_panel: Control
 var fps_lbl: Label
 var hit_head := false
+var hit_mark := 0
 var dmg_angle := NAN
 var feed_lbl: Label
 var feed_t := 0.0
@@ -136,7 +137,7 @@ func _draw_center() -> void:
 	else:
 		hit.draw_circle(c, 2.0, Color(1, 0.3, 0.2))
 	if hit_t > 0.0:
-		var col := Color(1, 0.15, 0.1, hit_t / 0.25) if hit_kill else (Color(1, 0.85, 0.2, hit_t / 0.25) if hit_head else Color(1, 1, 1, hit_t / 0.25))
+		var col := GunFeel.hitmarker_color(hit_mark); col.a = hit_t / 0.25
 		var s := 1.0 + (0.4 if hit_kill else 0.0) + hit_t
 		for d in [Vector2(1, 1), Vector2(-1, 1), Vector2(1, -1), Vector2(-1, -1)]:
 			hit.draw_line(c + d * 7 * s, c + d * 16 * s, col, 3.0 if not hit_kill else 4.0)
@@ -158,7 +159,8 @@ func _draw_center() -> void:
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
 
-func hitmarker(kill: bool, head := false) -> void:
+func hitmarker(kill: bool, head := false, armored := false) -> void:
+	hit_mark = GunFeel.hitmarker(kill, head, armored)
 	if game and game.tutorial: game.tutorial.event("shoot")
 	hit_t = 0.25; hit_kill = kill; hit_head = head
 

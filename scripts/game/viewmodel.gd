@@ -145,7 +145,7 @@ func fire(strength: float) -> void:
 	kick = minf(kick + strength, 2.2)
 	flash.visible = true; flash.rotation.z = randf() * TAU
 	flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * clampf(0.8 + strength * 0.35, 0.9, 1.8)
-	flash_light.light_energy = clampf(2.5 + strength * 2.0, 3.0, 7.0); flash_t = 0.05
+	flash_light.light_energy = clampf(2.5 + strength * 2.0, 3.0, 7.0); flash_t = 0.06
 
 func add_sway(look_delta: Vector2) -> void:
 	sway += look_delta * 0.6
@@ -193,5 +193,8 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 		grenade_hand.visible = throw_t > 0.0 and p < 0.75
 		grenade_hand.position = Vector3(-0.15, lerpf(-0.2, 0.05, p), lerpf(-0.3, -0.65, p))
 	if flash_t > 0.0:
+		var was := flash_t
 		flash_t -= dt
+		if was > 0.025 and flash_t <= 0.025:  # second frame: smaller, twisted, dimmer flicker
+			flash.scale *= 0.6; flash.rotation.z += 0.8; flash_light.light_energy *= 0.45
 		if flash_t <= 0.0: flash.visible = false; flash_light.light_energy = 0.0

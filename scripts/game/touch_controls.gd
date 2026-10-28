@@ -29,20 +29,8 @@ func _ready() -> void:
 	_layout()
 
 func _layout() -> void:
-	var s := size
-	var u := s.y / 720.0
-	buttons = {
-		"fire": [Vector2(s.x - 160 * u, s.y - 190 * u), 85 * u * fire_scale, "FIRE"],
-		"ads": [Vector2(s.x - 300 * u, s.y - 110 * u), 55 * u, "AIM"],
-		"reload": [Vector2(s.x - 290 * u, s.y - 260 * u), 50 * u, "RLD"],
-		"use": [Vector2(s.x - 150 * u, s.y - 380 * u), 55 * u, "USE"],
-		"swap": [Vector2(s.x - 60 * u, s.y - 330 * u), 45 * u, "SWAP"],
-		"skill": [Vector2(s.x - 300 * u, s.y - 390 * u), 45 * u, "SKILL"],
-		"knife": [Vector2(s.x - 400 * u, s.y - 300 * u), 42 * u, "KNIFE"],
-		"grenade": [Vector2(s.x - 60 * u, s.y - 450 * u), 42 * u, "NADE"],
-		"sprint": [Vector2(330 * u, s.y - 300 * u), 45 * u, "RUN"],
-		"pause": [Vector2(s.x / 2, 40 * u), 28 * u, "II"],
-	}
+	# thumb-arc layout around FIRE (see TouchLayout; tested for overlaps on common screens)
+	buttons = TouchLayout.buttons(size, fire_scale)
 	queue_redraw()
 
 func consume_look() -> Vector2:

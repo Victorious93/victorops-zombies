@@ -46,6 +46,12 @@ Package `com.victorious.zombie`, minSdk 24, targetSdk 35, arm64-v8a + armeabi-v7
 - Performance/lighting: Medium preset at 0.75 render scale, prop visibility ranges (LOD), darker scene with rim light, gun flashlight, red alarm beacons from round 6.
 - `-- --clip=DIR` runs a scripted 30 s trailer route (use with `--fixed-fps 30 --write-movie out.avi`) and saves 6 stills.
 
+## v6 single-player polish (classic round-based feel)
+- **Gunfeel** (`scripts/rules/gun_feel.gd`): per-weapon ADS zoom (Rail Lancer zooms hardest, Scatterbolt least) with zoom-matched aim sensitivity, extra camera kick scaled by weight (softer when aiming) and weight-based recovery, coloured hitmarkers (body / head / armor / kill / head-kill) with a hit tick, two-frame muzzle flash flicker, flesh/metal/wall impact and ricochet sounds, heavier reload beats.
+- **Zombies**: gait tiers by round (`scripts/rules/gait.gd`: walkers only on rounds 1-2, joggers from round 3, sprinters from round 6, mostly sprinters by round 12), planks visibly yanked off windows one by one, a two-stage climb-in over the sill, directional hit reactions (`scripts/rules/hit_react.gd`: head snap, left/right twist, leg stumble, knockback).
+- **Map flow**: buyable doors now judder, slide down with dust, rumble and a chain rattle; new atmospheric round-start and round-end stings with the music ducked underneath.
+- **Mobile**: touch buttons re-laid on two thumb arcs around FIRE (`scripts/rules/touch_layout.gd`, tested for no overlaps from 4:3 to 20:9); AIM on touch snaps toward the nearest zombie in a 12 degree cone when aim assist is on.
+
 ## v5 single-player polish
 - Special zombies (`scripts/rules/zombie_types.gd`): **Sprinter** (lean, shriek), **Brute** every 8 rounds (armor plates, body-shot armor, guaranteed RESTOCK), **Bloater** (glowing pustules, bursts into a damaging gas cloud).
 - PhysicalBone3D ragdolls (capped by quality preset) and gibs on explosive kills.

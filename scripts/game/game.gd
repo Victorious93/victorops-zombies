@@ -132,6 +132,15 @@ func apply_settings() -> void:
 	if touch:
 		touch.floating = settings.joystick != "fixed"; touch.fire_scale = settings.fire_size; touch._layout()
 
+## Pull the background loop down while a round sting plays, then bring it back.
+func duck_music(sec: float) -> void:
+	if music == null: return
+	var base := GameSettings.linear_to_db_safe(settings.music) - 10.0
+	var tw := create_tween()
+	tw.tween_property(music, "volume_db", base - 14.0, 0.4)
+	tw.tween_interval(sec)
+	tw.tween_property(music, "volume_db", base, 1.5)
+
 func _start_music() -> void:
 	var s := sfx.stream("music") as AudioStreamWAV
 	if s == null: return
@@ -213,7 +222,9 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-			sfx.play("sting", -1)
+			sfx.play("sting", -6)
+			sfx.play("round_start_v6", -1)
+			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
 			brute_pending = ZombieTypes.is_brute_round(round)
 			if brute_pending: hud.banner("Round %d · BRUTE" % round, 3.5)
@@ -235,7 +246,9 @@ func _update_rounds(dt: float) -> void:
 		round_times[round] = round_clock
 		intermission = Rounds.INTERMISSION
 		hud.banner("Round %d survived" % round, 3.0)
-		sfx.play("round_end", -2)
+		sfx.play("round_end", -7)
+		sfx.play("round_end_v6", -1)
+		duck_music(4.0)
 		tint = 0.6
 		player.health = player.max_health
 
@@ -295,8 +308,11 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			z.take_damage(dmg, head, p, part, dir * (3.0 + w.damage * 0.02) * w.kick_mult())
 			var killed := was_alive and z.state == Zombie.State.DEAD
 			_pay(p, r.position + Vector3.UP * 0.3, before)
-			hud.hitmarker(killed, head)
+			var armored := z.ztype == "brute" and not head
+			hud.hitmarker(killed, head, armored)
 			sfx.play("hitmarker", -10, 1.25 if head else 1.0)
+			sfx.play("hit_tick_v6", -8 if killed else -12, 0.8 if killed else (1.2 if head else 1.0))
+			sfx.play_at(GunFeel.impact_sound(true, armored, false), r.position, -3, randf_range(0.9, 1.1))
 			sfx.play_at("thwack", r.position, -6, randf_range(0.9, 1.1))
 			if head: sfx.play("headshot_pop", -4 if killed else -9, randf_range(0.95, 1.08))
 			if killed: sfx.play("kill_confirm", -10)
@@ -312,6 +328,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 				_shoot_fuse(p, col)
 			var n: Vector3 = r.normal
 			fx.bullet_hole(r.position, n, w.weight >= 1.2)
+			if randf() < 0.6: sfx.play_at(GunFeel.impact_sound(false, false, col is StaticBody3D and n.y < 0.5), r.position, -8, randf_range(0.85, 1.15))
 			if w.splash > 0.0: _splash(p, r.position, w, null)
 			break
 	var m: Node3D = p.vm.muzzle if p.vm and p.vm.muzzle else null
@@ -645,6 +662,8 @@ func buy_door(p: Player, id: String) -> void:
 	var err := facility.buy_door(id, p.economy)
 	if err != "": _deny(err); return
 	sfx.play("door"); sfx.play("buy", -6)
+	sfx.play("door_open_v6", -2)
+	player.add_trauma(0.25)
 	map.open_door(id)
 	hud.info("%s opened" % Facility.DOORS[id].label)
 

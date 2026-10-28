@@ -72,6 +72,8 @@ var gyro_mode := "off"
 var look_curve := 1.3
 var since_shot := 9.0
 var fov_kick := 0.0
+var snap_rem := Vector2.ZERO  ## touch ADS snap still to apply
+var touch_ads_prev := false
 var land_bob := 0.0
 var fall_speed := 0.0
 var heartbeat_t := 0.0
@@ -108,7 +110,7 @@ func weapon() -> WeaponDef: return loadout.weapon()
 func ammo() -> Ammo: return loadout.ammo()
 
 func _look(d: Vector2, base: float) -> void:
-	var k := base * sens * (0.6 if ads else 1.0)
+	var k := base * sens * lerpf(1.0, GunFeel.ads_sens(weapon().id, weapon().is_upgraded()), ads01)
 	yaw -= d.x * k
 	pitch = clampf(pitch - d.y * k, -1.45, 1.45)
 	vm.add_sway(Vector2(d.x, -d.y) * k)
@@ -146,6 +148,7 @@ func _start_reload_sfx() -> void:
 	reload_beats = {out = false, ins = false, bolt = false}
 	game.sfx.play("mag_release", -8)
 	game.sfx.play("mag_out", -6)
+	game.sfx.play("mag_out_v6", -3, randf_range(0.95, 1.05))
 	reload_beats.out = true
 
 func reload01() -> float:
@@ -190,6 +193,9 @@ func _physics_process(dt: float) -> void:
 		if auto_fire and not fire and AimAssist.on_target(cam.global_position, fwd, targets):
 			fire = true
 		want_ads = want_ads or touch.ads
+		if touch.ads and not touch_ads_prev and aim_assist:
+			snap_rem = AimAssist.ads_snap(cam.global_position, fwd, targets)
+		touch_ads_prev = touch.ads
 		use = use or touch.use
 		sprint_key = sprint_key or touch.sprint
 		if touch.take("reload"): reload()
@@ -252,8 +258,11 @@ func _physics_process(dt: float) -> void:
 		if i >= 0:
 			var n := AimAssist.nudge(cam.global_position, fwd, targets[i], dt) * (1.0 if (ads or fire) else 0.4)
 			yaw += n.x; pitch = clampf(pitch + n.y, -1.45, 1.45)
+	if snap_rem.length() > 0.0005:
+		var sd := snap_rem * clampf(dt / AimAssist.SNAP_TIME, 0, 1)
+		yaw += sd.x; pitch = clampf(pitch + sd.y, -1.45, 1.45); snap_rem -= sd
 	# look + recoil recovery + shake
-	recoil = lerpf(recoil, 0.0, clampf(dt * 8.0, 0, 1))
+	recoil = lerpf(recoil, 0.0, clampf(dt * GunFeel.recovery_rate(weapon().weight), 0, 1))
 	trauma = move_toward(trauma, 0.0, dt * 1.6)
 	shake_t += dt * 30.0
 	var sh := trauma * trauma
@@ -262,7 +271,7 @@ func _physics_process(dt: float) -> void:
 	head.rotation.z = sin(shake_t * 0.9 + 1.7) * sh * 0.06
 	var base_fov := 86.0 if sprinting or slide_t > 0.0 else 75.0
 	fov_kick = move_toward(fov_kick, 0.0, dt * 30.0)
-	cam.fov = lerpf(cam.fov, lerpf(base_fov, 55.0, ads01) + fov_kick * lerpf(1.0, 0.3, ads01), clampf(dt * 12.0, 0, 1))
+	cam.fov = lerpf(cam.fov, lerpf(base_fov, GunFeel.ads_fov(weapon().id, weapon().is_upgraded()), ads01) + fov_kick * lerpf(1.0, 0.3, ads01), clampf(dt * 12.0, 0, 1))
 	var head_y := 0.55 if is_downed else (1.0 if slide_t > 0.0 else 1.62)
 	land_bob = move_toward(land_bob, 0.0, dt * 0.9)
 	head.position.y = lerpf(head.position.y, head_y - land_bob, clampf(dt * 10.0, 0, 1))
@@ -281,9 +290,9 @@ func _physics_process(dt: float) -> void:
 		if not reload_beats.get("out", false): _start_reload_sfx()
 		# layered reload: release click -> mag out -> handling -> mag seat -> rack
 		if r01 > 0.08 and not reload_beats.get("cloth", false): reload_beats.cloth = true; game.sfx.play("reload_cloth", -12, randf_range(0.9, 1.1))
-		if r01 > 0.55 and not reload_beats.ins: reload_beats.ins = true; game.sfx.play("mag_in", -4); vm.kick += 0.25
+		if r01 > 0.55 and not reload_beats.ins: reload_beats.ins = true; game.sfx.play("mag_in", -4); game.sfx.play("mag_in_v6", -1); vm.kick += 0.25
 		if r01 > 0.85 and not reload_beats.bolt:
-			reload_beats.bolt = true; game.sfx.play("rack", -4, 1.15 - weapon().weight * 0.15); vm.kick += 0.35; add_trauma(0.04)
+			reload_beats.bolt = true; game.sfx.play("rack", -4, 1.15 - weapon().weight * 0.15); game.sfx.play("bolt_v6", -2, 1.1 - weapon().weight * 0.12); vm.kick += 0.35; add_trauma(0.04)
 	else:
 		reload_beats = {}
 	if fire and not sprinting and vm.knife_t <= 0.0 and vm.throw_t <= 0.0:
@@ -328,7 +337,7 @@ func try_fire(moving: bool) -> void:
 	var first := w.first_shot_mult(since_shot)
 	since_shot = 0.0
 	var k := lerpf(1.0, 0.6, ads01) * w.kick_mult()
-	recoil += deg_to_rad(w.recoil * kick.x) * k * first
+	recoil += deg_to_rad(w.recoil * kick.x) * k * first + GunFeel.camera_kick(w.recoil, w.weight, ads) * first * 0.5
 	yaw -= deg_to_rad(w.recoil * kick.y * 0.35 + randf_range(-0.05, 0.05) * w.recoil) * k
 	vm.fire((0.5 + w.recoil * 0.15) * w.kick_mult() * first)
 	add_trauma((0.06 + w.recoil * 0.025 * (0.5 if ads else 1.0)) * w.kick_mult() * first)
