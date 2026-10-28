@@ -3,7 +3,7 @@ extends Node3D
 ## First-person arms + gun. Gun meshes are CC0 Quaternius models; sleeves are procedural and the
 ## hands use the CC0 glove model. All motion (sway, bob, kick, reload, knife, throw) is procedural.
 
-const HIP_POS := Vector3(0.17, -0.17, -0.36)
+const HIP_POS := Vector3(0.13, -0.095, -0.42)
 const SIGHT_H := 0.055   ## red-dot height above the gun's centre line
 const ADS_POS := Vector3(0.0, -SIGHT_H, -0.27)
 
@@ -27,6 +27,8 @@ var ads_k := 0.0
 var sleeve_mat: StandardMaterial3D
 var reload_phase := -1.0
 var model_name := ""
+var overlay := false   ## render on the viewmodel layer (see ViewmodelOverlay)
+var fps_arms: FpsArms   ## set by Player before set_weapon(); null in tests -> legacy glove props
 
 func setup(sleeve: Color) -> void:
 	sleeve_mat = StandardMaterial3D.new(); sleeve_mat.albedo_color = sleeve.darkened(0.55); sleeve_mat.roughness = 0.8; sleeve_mat.rim_enabled = true; sleeve_mat.rim = 0.4
@@ -86,8 +88,11 @@ func set_weapon(w: WeaponDef) -> void:
 	add_child(gun)
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
-	if w.tier > 0: _tint_upgraded(gun, w.color)
+	if w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
 	else: _shade_metal(gun)
+	var fc: Color = AltAmmo.COLORS.get(w.alt_ammo, Color(1.0, 0.8, 0.45))   # alt ammo tints the muzzle flash
+	(flash.material_override as StandardMaterial3D).albedo_color = Color(fc.r, fc.g, fc.b, (flash.material_override as StandardMaterial3D).albedo_color.a)
+	flash_light.light_color = fc
 	# small cool fill light so arms + gun are never pure silhouettes (short range: barely touches the world)
 	if fill == null:
 		fill = OmniLight3D.new(); fill.light_color = Color(0.7, 0.85, 1.0); fill.light_energy = 0.7
@@ -97,10 +102,10 @@ func set_weapon(w: WeaponDef) -> void:
 	arms = Node3D.new(); add_child(arms)
 	var grip := Vector3(0.0, -0.06, len * 0.18)
 	var fore := Vector3(0.0, -0.045, -len * 0.22) if len > 0.3 else Vector3(-0.01, -0.07, len * 0.12)
-	arms.add_child(_hand(grip + Vector3(0.012, -0.01, 0.02), Vector3(-0.4, PI, 0.15)))
-	arms.add_child(_hand(fore + Vector3(-0.02, -0.01, 0.0), Vector3(-0.2, PI, -0.5)))
-	_sleeve(grip + Vector3(0.02, -0.03, 0.06), grip + Vector3(0.14, -0.2, 0.42), 0.032)
-	_sleeve(fore + Vector3(-0.03, -0.03, 0.04), fore + Vector3(-0.24, -0.22, 0.5), 0.032)
+	if fps_arms: fps_arms.attach(gun, grip, fore, len > 0.3)   # rigged CC0 arms reach the gun via IK
+	else:
+		arms.add_child(_hand(grip + Vector3(0.012, -0.01, 0.02), Vector3(-0.4, PI, 0.15)))
+		arms.add_child(_hand(fore + Vector3(-0.02, -0.01, 0.0), Vector3(-0.2, PI, -0.5)))
 	# red-dot sight (unshaded so it reads in the dark)
 	sight = Node3D.new(); gun.add_child(sight)
 	var housing := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.012; tm.outer_radius = 0.016
@@ -113,6 +118,7 @@ func set_weapon(w: WeaponDef) -> void:
 	dot.material_override = dm; dot.position.z = -0.002; sight.add_child(dot)
 	sight.position = Vector3(0, SIGHT_H, -0.02)
 	ModelLib.set_shadows(self, false)
+	if overlay: ViewmodelOverlay.to_layer(self)
 	if not first: swap_t = 1.0
 
 var fill: OmniLight3D
@@ -128,7 +134,25 @@ func _shade_metal(n: Node) -> void:
 				mi.set_surface_override_material(i, m)
 	for ch in n.get_children(): _shade_metal(ch)
 
-func _tint_upgraded(n: Node, c: Color) -> void:
+static var _camo_cache := {}
+
+## Overcharge Forge camo: a procedural blotch pattern (original, generated at runtime) in the tier's palette.
+static func camo_texture(tier: int) -> Texture2D:
+	if _camo_cache.has(tier): return _camo_cache[tier]
+	var pal := AltAmmo.camo(tier)
+	if pal.is_empty(): return null
+	var n := FastNoiseLite.new(); n.seed = 7000 + tier; n.frequency = 0.09; n.fractal_octaves = 2
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	for y in 64:
+		for x in 64:
+			var v := n.get_noise_2d(x, y)
+			var c: Color = pal[0] if v < -0.05 else (pal[1] if v > 0.22 else pal[0].lerp(pal[1], 0.45).darkened(0.3))
+			img.set_pixel(x, y, c)
+	var tex := ImageTexture.create_from_image(img)
+	_camo_cache[tier] = tex
+	return tex
+
+func _tint_upgraded(n: Node, c: Color, camo: Texture2D = null) -> void:
 	if n is MeshInstance3D:
 		var mi := n as MeshInstance3D
 		for i in mi.mesh.get_surface_count():
@@ -138,8 +162,11 @@ func _tint_upgraded(n: Node, c: Color) -> void:
 				m.albedo_color = m.albedo_color.lerp(c, 0.35); m.metallic = maxf(m.metallic, 0.55); m.roughness = 0.35
 				m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = 0.12
 				m.rim_enabled = true; m.rim = 0.8; m.rim_tint = 0.6   # reads as overcharged metal, not a flat purple blob
+				if camo:
+					m.albedo_texture = camo; m.albedo_color = Color(1, 1, 1); m.uv1_triplanar = true; m.uv1_scale = Vector3.ONE * 9.0
+					m.emission_texture = camo; m.emission = Color(1, 1, 1); m.emission_energy_multiplier = 0.35
 				mi.set_surface_override_material(i, m)
-	for ch in n.get_children(): _tint_upgraded(ch, c)
+	for ch in n.get_children(): _tint_upgraded(ch, c, camo)
 
 func fire(strength: float) -> void:
 	kick = minf(kick + strength, 2.2)
@@ -169,12 +196,9 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	if sprint: rot.y += 0.6; rot.z += 0.25
 	# reload: tilt + dip, magazine pull/insert beats
 	if reload01 >= 0.0:
-		var k := sin(clampf(reload01, 0, 1) * PI)
-		off += Vector3(-0.03, -0.09, 0.02) * k
-		rot += Vector3(-0.35, 0.25, 0.75) * k
-		if reload01 > 0.45 and reload01 < 0.6: off.y += sin((reload01 - 0.45) / 0.15 * PI) * 0.03
-	# swap: dip out and back
-	off.y -= sin(swap_t * PI) * 0.25
+		var rp := reload_pose(reload01); off += rp[0]; rot += rp[1]
+	# swap: drop out of frame, then raise with a roll and a small settle overshoot
+	var sp := swap_pose(swap_t); off += sp[0]; rot += sp[1]
 	# knife / throw: lower the gun while the other hand acts
 	var lower := maxf(sin(clampf(knife_t, 0, 1) * PI), sin(clampf(throw_t, 0, 1) * PI))
 	off.y -= lower * 0.18; rot.x -= lower * 0.5
@@ -198,3 +222,32 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 		if was > 0.025 and flash_t <= 0.025:  # second frame: smaller, twisted, dimmer flicker
 			flash.scale *= 0.6; flash.rotation.z += 0.8; flash_light.light_energy *= 0.45
 		if flash_t <= 0.0: flash.visible = false; flash_light.light_energy = 0.0
+
+static func _smooth(a: float, b: float, t: float) -> float: return smoothstep(a, b, t)
+
+## Keyframed reload (procedural, eased): tilt in -> mag out (drop jolt) -> mag in (upward slap)
+## -> charge (snap back) -> settle. Returns [offset, rotation] added to the hip pose.
+static func reload_pose(t: float) -> Array:
+	t = clampf(t, 0.0, 1.0)
+	var tilt := _smooth(0.0, 0.18, t) * (1.0 - _smooth(0.82, 1.0, t))
+	var off := Vector3(-0.03, -0.09, 0.02) * tilt
+	var rot := Vector3(-0.3, 0.25, 0.75) * tilt
+	off.y -= sin(clampf((t - 0.24) / 0.14, 0.0, 1.0) * PI) * 0.025          # mag out: gun dips
+	off.y += sin(clampf((t - 0.5) / 0.1, 0.0, 1.0) * PI) * 0.035            # mag in: slap up
+	rot.x += sin(clampf((t - 0.5) / 0.1, 0.0, 1.0) * PI) * 0.12
+	var ch := sin(clampf((t - 0.72) / 0.1, 0.0, 1.0) * PI)                  # charge: pulled back
+	off.z += ch * 0.04; rot.z -= ch * 0.2
+	return [off, rot]
+
+## swap_t runs 1 -> 0. First third: drop out; rest: raise with ease-out-back and a roll-in.
+static func swap_pose(swap_t: float) -> Array:
+	if swap_t <= 0.0: return [Vector3.ZERO, Vector3.ZERO]
+	var p := 1.0 - clampf(swap_t, 0.0, 1.0)
+	var down: float
+	if p < 0.3: down = _smooth(0.0, 0.3, p)
+	else:
+		var u := (p - 0.3) / 0.7
+		var c1 := 1.70158; var c3 := c1 + 1.0
+		var back := 1.0 + c3 * pow(u - 1.0, 3) + c1 * pow(u - 1.0, 2)      # ease-out-back 0 -> 1 (overshoots)
+		down = 1.0 - back
+	return [Vector3(0.02, -0.25, 0.0) * down, Vector3(-0.5, 0.0, -0.35) * down]

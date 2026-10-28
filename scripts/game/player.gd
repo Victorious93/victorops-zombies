@@ -36,6 +36,8 @@ var shake_t := 0.0
 var head: Node3D
 var cam: Camera3D
 var vm: Viewmodel
+var fps_arms: FpsArms
+var vm_overlay: ViewmodelOverlay
 var gun: Node3D:  # kept for Game.hitscan (muzzle lookup)
 	get: return vm.gun if vm else null
 var prev_fire := false
@@ -66,6 +68,8 @@ var last_stand := LastStand.new()
 var stand_loadout: Loadout = null
 var saved_loadout: Loadout = null
 var crouch_key_prev := false
+var crouched := false   ## v7 touch/keyboard crouch toggle: lower eye, slower, tighter spread
+const JUMP_V := 4.6
 ## v4 feel
 var auto_fire := false
 var gyro_mode := "off"
@@ -102,9 +106,14 @@ func _ready() -> void:
 	flashlight.spot_attenuation = 1.9; flashlight.light_specular = 0.25  # softer, wider pool: no blown-out disk on walls
 	flashlight.light_color = Color(1.0, 0.93, 0.8)
 	flashlight.position = Vector3(0.0, 0.02, -0.25); vm.add_child(flashlight)
-	flashlight.shadow_enabled = game != null and game.settings_shadows()
+	flashlight.shadow_enabled = game != null and game.flashlight_shadows()
 	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand)
+	fps_arms = FpsArms.new(); cam.add_child(fps_arms); vm.fps_arms = fps_arms
 	vm.set_weapon(weapon())
+	if game and DisplayServer.get_name() != "headless":
+		ViewmodelOverlay.to_layer(fps_arms); ViewmodelOverlay.to_layer(vm.knife); ViewmodelOverlay.to_layer(vm.grenade_hand)
+		vm_overlay = ViewmodelOverlay.new(); add_child(vm_overlay); vm_overlay.setup(cam, game.env)
+		vm.overlay = true; ViewmodelOverlay.to_layer(vm)
 
 func weapon() -> WeaponDef: return loadout.weapon()
 func ammo() -> Ammo: return loadout.ammo()
@@ -177,6 +186,7 @@ func _physics_process(dt: float) -> void:
 	var use := _key(KEY_E) or _key(KEY_F)
 	var sprint_key := _key(KEY_SHIFT)
 	var crouch := _key(KEY_C) or _key(KEY_CTRL)
+	var jump := _key(KEY_SPACE)
 	var on_touch: bool = touch != null and touch.visible
 	if bot_input != null:
 		mv = bot_input.mv; fire = bot_input.fire; want_ads = bot_input.ads; use = bot_input.use; sprint_key = bot_input.sprint
@@ -203,10 +213,14 @@ func _physics_process(dt: float) -> void:
 		if touch.take("skill"): use_ability()
 		if touch.take("knife"): melee()
 		if touch.take("grenade"): throw_grenade()
+		if touch.take("jump"): jump = true
+		if touch.take("crouch"):
+			crouch = true
+			if not sprinting: crouched = not crouched
 		if touch.take("pause"): game.toggle_pause(); return
 	mv = mv.limit_length(1.0)
 	if is_downed:
-		sprint_key = false; crouch = false
+		sprint_key = false; crouch = false; jump = false; crouched = false
 	ads = want_ads and not sprinting
 	ads01 = move_toward(ads01, 1.0 if ads else 0.0, dt / maxf(weapon().ads_time, 0.05))
 	var stam_max := STAMINA_MAX * (1.6 if perks.has("fleetfoot") else 1.0)
@@ -220,9 +234,14 @@ func _physics_process(dt: float) -> void:
 	if crouch and not crouch_key_prev and sprinting and slide_t <= 0.0 and is_on_floor():
 		slide_t = SLIDE_TIME; slide_dir = (transform.basis * Vector3(mv.x, 0, mv.y)).normalized()
 		game.sfx.play("slide", -6, randf_range(0.95, 1.05)); add_trauma(0.1)
+	elif crouch and not crouch_key_prev and not sprinting and not on_touch:
+		crouched = not crouched
 	crouch_key_prev = crouch
 	var spd: float = WALK * cdef.speed_mult * (1.15 if perks.has("fleetfoot") else 1.0)
 	if is_downed: spd *= 0.25
+	if crouched:
+		spd *= 0.55
+		if sprinting: crouched = false
 	if sprinting: spd *= 1.7 if perks.has("fleetfoot") else 1.5
 	spd *= weapon().move_mult()
 	spd *= lerpf(1.0, 0.6, ads01)
@@ -235,6 +254,8 @@ func _physics_process(dt: float) -> void:
 	velocity.x = dir.x; velocity.z = dir.z
 	var was_air := not is_on_floor()
 	velocity.y = -0.5 if is_on_floor() else velocity.y - GRAVITY * dt
+	if jump and is_on_floor() and not is_downed and slide_t <= 0.0:
+		velocity.y = JUMP_V; crouched = false
 	if was_air: fall_speed = maxf(fall_speed, -velocity.y)
 	move_and_slide()
 	if was_air and is_on_floor():
@@ -272,7 +293,7 @@ func _physics_process(dt: float) -> void:
 	var base_fov := 86.0 if sprinting or slide_t > 0.0 else 75.0
 	fov_kick = move_toward(fov_kick, 0.0, dt * 30.0)
 	cam.fov = lerpf(cam.fov, lerpf(base_fov, GunFeel.ads_fov(weapon().id, weapon().is_upgraded()), ads01) + fov_kick * lerpf(1.0, 0.3, ads01), clampf(dt * 12.0, 0, 1))
-	var head_y := 0.55 if is_downed else (1.0 if slide_t > 0.0 else 1.62)
+	var head_y := 0.55 if is_downed else (1.0 if slide_t > 0.0 else (1.15 if crouched else 1.62))
 	land_bob = move_toward(land_bob, 0.0, dt * 0.9)
 	head.position.y = lerpf(head.position.y, head_y - land_bob, clampf(dt * 10.0, 0, 1))
 	since_shot += dt
@@ -346,6 +367,7 @@ func try_fire(moving: bool) -> void:
 	var model: String = vm.model_name
 	game.sfx.play(SHOT_SOUND.get(model, "shot_pistol"), -7.0 if w.automatic else -4.0, randf_range(0.95, 1.05) * (0.88 if w.tier > 0 else 1.0))
 	if w.tier > 0: game.sfx.play("shot_energy", -16, 1.6)
+	if w.id == Weapons.QUEST_WONDER: game.sfx.play("gloam_fire_v7", -2, randf_range(0.95, 1.05))
 	if model != "raygun" and model != "launcher":
 		var b := cam.global_basis
 		game.fx.shell(vm.gun.global_position + b.x * 0.03 + b.y * 0.03, b.x, b.y, model == "shotgun")

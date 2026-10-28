@@ -29,6 +29,8 @@ var automatic := false
 var spread_deg := 0.6
 var recoil := 1.5
 var color := Color(0.6, 0.6, 0.65)
+## Overcharge Forge alternate ammo ("" / fire / shock / freeze), see AltAmmo.
+var alt_ammo := ""
 
 func _init(p_id := "", p_name := "", p_damage := 0, p_interval := 0.3) -> void:
 	id = p_id; name = p_name; damage = p_damage; fire_interval = p_interval
@@ -55,7 +57,7 @@ func display_name() -> String:
 
 func duplicate_def() -> WeaponDef:
 	var w := WeaponDef.new(id, name, damage, fire_interval)
-	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight"]:
+	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight", "alt_ammo"]:
 		w.set(k, get(k))
 	return w
 
@@ -76,4 +78,5 @@ func upgraded_version() -> WeaponDef:
 	w.mag_size = int(mag_size * (2.0 if w.tier == 1 else 1.5))  ## big mag boost on the first overcharge
 	w.reload_time = reload_time * 0.85
 	w.color = Color(0.55, 0.3, 1.0) if w.tier == 1 else Color(1.0, 0.35, 0.9)
+	w.alt_ammo = AltAmmo.for_weapon(id, w.tier)
 	return w

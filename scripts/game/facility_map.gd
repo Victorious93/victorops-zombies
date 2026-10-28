@@ -13,6 +13,9 @@ var windows := {}      # id -> WindowBarricade
 var doors := {}        # id -> StaticBody3D
 var room_lights: Array = []    # white lights enabled by power
 var emergency_lights: Array = []
+var bounce_lights: Array = []
+const BOUNCE_OFF := 0.18
+const BOUNCE_ON := 0.45
 var machine_lights: Array = []
 var mats := {}
 var crate_spots: Array = []   # [pos, rot_y, area label]
@@ -81,11 +84,15 @@ var moon_light: DirectionalLight3D
 func build_sky() -> void:
 	var moon := moon_light
 	if game == null or game.env == null or moon == null: return
-	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
-	sm.ground_bottom_color = Color(0.0, 0.0, 0.0); sm.ground_horizon_color = Color(0.05, 0.05, 0.08)
-	sm.sun_angle_max = 1.0; sm.sun_curve = 0.05; sm.energy_multiplier = 1.0
-	var sky := Sky.new(); sky.sky_material = sm; sky.radiance_size = Sky.RADIANCE_SIZE_32
+	var hdr := "res://assets/sky/satara_night_no_lamps_1k.hdr"
+	var sky := Sky.new(); sky.radiance_size = Sky.RADIANCE_SIZE_32
+	if ResourceLoader.exists(hdr):
+		var pm := PanoramaSkyMaterial.new(); pm.panorama = load(hdr); pm.energy_multiplier = 0.35   # CC0 Poly Haven HDRI
+		sky.sky_material = pm
+	else:
+		var sm := ProceduralSkyMaterial.new()
+		sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
+		sky.sky_material = sm
 	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
 	game.env.fog_sky_affect = 0.35
 	# moon disc + halo far away along -light direction
@@ -143,7 +150,8 @@ func wall(a: Vector2, b: Vector2, gaps: Array = []) -> void:
 	for c in cuts:
 		segs.append([cur, c[0]]); cur = c[1]
 	segs.append([cur, length])
-	var wm: StandardMaterial3D = mats.wall
+	var mid0 := (a + b) / 2.0   # interior partitions plaster, perimeter/outbuildings brick
+	var wm: StandardMaterial3D = mats.wall if (mid0.x > -9.9 and mid0.x < 25.9 and mid0.y > -25.9 and mid0.y < 9.9) else mats.wall_brick
 	for s in segs:
 		if s[1] - s[0] < 0.01: continue
 		_wall_piece(a, dir, along_x, s[0], s[1], 0.0, H, wm)
@@ -221,8 +229,20 @@ func open_door(id: String) -> void:
 		tw.tween_property(b, "position:y", -1.6, 1.1).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		tw.tween_callback(func(): b.queue_free(); call_deferred("rebake"))
 
+var _rebake_pending := false
+
+## Only one async bake may run at a time; a request that lands mid-bake is queued and replayed when it ends.
 func rebake() -> void:
+	if is_baking():
+		if not _rebake_pending:
+			_rebake_pending = true
+			bake_finished.connect(_on_bake_done, CONNECT_ONE_SHOT)
+		return
 	bake_navigation_mesh(true)
+
+func _on_bake_done() -> void:
+	_rebake_pending = false
+	call_deferred("rebake")
 
 func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := false, collide := true) -> Node3D:
 	var n := ModelLib.prop(name, size, by_height)
@@ -258,11 +278,17 @@ func _rel(root: Node3D, n: Node3D) -> Transform3D:
 
 func build(p_game) -> void:
 	game = p_game
-	mats.wall = _grimy(_pbr("paintedplaster017", Color(0.6, 0.62, 0.58), 0.35))
-	mats.wall_low = _pbr("concrete034", Color(0.7, 0.7, 0.7), 0.4)
-	mats.floor = _grimy(_pbr("tiles074", Color(0.42, 0.42, 0.4), 0.45))
-	mats.ground = _grimy(_pbr("concrete034", Color(0.5, 0.52, 0.5), 0.18))
-	mats.trim = _pbr("metal032", Color(0.35, 0.33, 0.3), 1.0, 0.6)
+	# v7 scenery: real-tiling ambientCG PBR sets (albedo + NormalGL + roughness), no blotchy overlay
+	mats.wall = _pbr("paintedplaster016", Color(0.4, 0.43, 0.38), 0.45)
+	mats.wall_brick = _pbr("bricks076c", Color(0.75, 0.7, 0.66), 0.5)
+	mats.wall_ext = _pbr("bricks090", Color(0.7, 0.68, 0.66), 0.45)
+	mats.wall_low = _pbr("concrete044c", Color(0.72, 0.72, 0.7), 0.5)
+	mats.floor = _pbr("concrete034", Color(0.5, 0.5, 0.48), 0.35)
+	mats.ground = _pbr("asphalt026c", Color(0.55, 0.56, 0.55), 0.25)
+	mats.dirt = _pbr("ground037", Color(0.6, 0.6, 0.55), 0.35)
+	mats.wood = _pbr("planks021", Color(0.7, 0.66, 0.6), 0.6)
+	mats.rust = _pbr("rust004", Color.WHITE, 0.6, 0.4)
+	mats.trim = _pbr("metal049a", Color(0.45, 0.42, 0.4), 1.0, 0.6)
 	mats.door = _pbr("metalplates006", Color(0.6, 0.62, 0.66), 0.6, 0.7)
 	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
 	mats.metal = _pbr("metal032", Color(0.7, 0.7, 0.72), 0.8, 0.8)
@@ -292,6 +318,7 @@ func build(p_game) -> void:
 	_build_pump()
 	_build_catwalk()
 	_build_props()
+	Scenery.new(self).build()
 	# ceiling lamps: emergency red (power off) + white (power on)
 	for p in [Vector3(0, H - 0.3, 0), Vector3(0, H - 0.3, -18), Vector3(18, H - 0.3, 0), Vector3(18, H - 0.3, -18)]:
 		box(Vector3(1.4, 0.08, 0.4), p + Vector3(0, 0.1, 0), mats.lamp, false)
@@ -299,6 +326,10 @@ func build(p_game) -> void:
 		w.visible = false; room_lights.append(w); shadow_lights.append(w)
 		shaft(Vector3(0, -1.3, 0), 2.6, 1.6, Color(1.0, 0.9, 0.7, 0.16), w)
 		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
+		# soft bounce fill (stand-in for baked GI on mobile): wide, no shadow/specular, brightens with power
+		var bf := light(Vector3(p.x, 1.2, p.z), Color(0.55, 0.6, 0.75), BOUNCE_OFF, 13.0, false)
+		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
+		bounce_lights.append(bf)
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
 	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
 	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
@@ -335,8 +366,7 @@ func _build_pump() -> void:
 	wall(Vector2(26, 30), Vector2(46, 30), [{at = 12.0, w = 1.8, kind = "window", id = "w_pump_s", out = Vector2(0, 1)}])
 	wall(Vector2(46, 30), Vector2(46, 10), [{at = 10.0, w = 1.8, kind = "window", id = "w_pump_e", out = Vector2(1, 0)}])
 	# two big tanks + a pipe run (cover to kite around)
-	var tank_mat := StandardMaterial3D.new(); tank_mat.albedo_color = Color(0.22, 0.3, 0.28); tank_mat.roughness = 0.6; tank_mat.metallic = 0.5
-	tank_mat.detail_enabled = mats.wall.detail_enabled; tank_mat.detail_albedo = mats.wall.detail_albedo; tank_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	var tank_mat: StandardMaterial3D = mats.rust
 	for tp in [Vector3(31, 0, 24), Vector3(41, 0, 16)]:
 		var sb := StaticBody3D.new(); sb.position = tp; add_child(sb)
 		var mi := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 1.6; cm.bottom_radius = 1.6; cm.height = 4.0
@@ -434,7 +464,8 @@ func apply_quality(d: Dictionary) -> void:
 	for l in shadow_lights:
 		if is_instance_valid(l): l.shadow_enabled = d.shadows
 	for p in dust:
-		p.emitting = d.dust; p.visible = d.dust
+		if p is CPUParticles3D: p.emitting = d.dust
+		p.visible = d.dust
 	for z in get_tree().get_nodes_in_group("voz_zombie"):
 		ModelLib.set_shadows(z.model, d.shadows)
 
@@ -622,6 +653,8 @@ func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
 func set_power(on: bool) -> void:
 	for l in room_lights: l.visible = on
 	for l in emergency_lights: l.base = 0.3 if on else 1.2
+	for l in bounce_lights: l.light_energy = BOUNCE_ON if on else BOUNCE_OFF
+	for l in bounce_lights: l.light_color = Color(1.0, 0.92, 0.8) if on else Color(0.55, 0.6, 0.75)
 	for pair in machine_lights:
 		pair[0].light_energy = 1.5 if on else 0.0
 		pair[1].emission_energy_multiplier = 3.0 if on else 0.3

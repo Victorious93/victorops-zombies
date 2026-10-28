@@ -353,7 +353,8 @@ func _process(dt: float) -> void:
 	var pk: Array = []
 	for id in Perks.held(p.perks): pk.append(Perks.ALL[id].name)
 	perks_lbl.text = "\n".join(pk)
-	fps_lbl.text = "%d fps" % Engine.get_frames_per_second()
+	fps_lbl.visible = game.settings.show_fps or game.force_fps_label
+	if fps_lbl.visible: fps_lbl.text = perf_text(Engine.get_frames_per_second(), RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
 	health_bar.max_value = p.max_health; health_bar.value = p.health
 	armor_bar.value = p.armor.value; armor_bar.visible = p.armor.value > 0
 	var cd: float = p.ability_cd
@@ -388,17 +389,46 @@ func _process(dt: float) -> void:
 	vignette.color.a = clampf(gas_t * 0.6 + dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
 	hit.queue_redraw()
 
-func show_game_over(round: int, kills: int) -> void:
+var boss_root: Control
+var boss_fill: ColorRect
+var boss_lbl: Label
+
+## Boss health bar across the top while the Warden lives.
+func boss_bar(z) -> void:
+	if z == null:
+		if boss_root: boss_root.visible = false
+		return
+	if boss_root == null:
+		boss_root = Control.new(); boss_root.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP)
+		boss_root.position = Vector2(-300, 70); boss_root.size = Vector2(600, 40); add_child(boss_root)
+		var bg := ColorRect.new(); bg.color = Color(0, 0, 0, 0.6); bg.position = Vector2(0, 22); bg.size = Vector2(600, 14); boss_root.add_child(bg)
+		boss_fill = ColorRect.new(); boss_fill.color = Color(0.7, 0.2, 0.9); boss_fill.position = Vector2(2, 24); boss_fill.size = Vector2(596, 10); boss_root.add_child(boss_fill)
+		boss_lbl = _lbl(22, Color(0.85, 0.6, 1.0), HORIZONTAL_ALIGNMENT_CENTER); boss_lbl.text = "THE WARDEN"; boss_lbl.size = Vector2(600, 22); boss_root.add_child(boss_lbl)
+	boss_root.visible = true
+	boss_fill.size.x = 596.0 * clampf(float(z.hp) / maxf(1.0, float(z.max_hp)), 0.0, 1.0)
+
+func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, is_best := false) -> void:
 	over_panel = VBoxContainer.new()
 	over_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	over_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var bg := ColorRect.new(); bg.color = Color(0.1, 0, 0, 0.75); bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(bg)
+	var bg := ColorRect.new(); bg.color = Color(0.1, 0, 0, 0.8); bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(bg)
 	var t := _lbl(72, Color(0.85, 0.08, 0.05), HORIZONTAL_ALIGNMENT_CENTER); t.text = "OVERRUN"
-	var s := _lbl(32, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
-	s.text = "You survived %d round%s  ·  %d kills\n%s" % [round, "" if round == 1 else "s", kills, Barks.GAME_OVER]
-	over_panel.add_child(t); over_panel.add_child(s)
+	over_panel.add_child(t)
+	var s := _lbl(28, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+	if stats: s.text = "\n".join(stats.lines(round))
+	else: s.text = "You survived %d round%s  ·  %d kills" % [round, "" if round == 1 else "s", kills]
+	over_panel.add_child(s)
+	var h := _lbl(30, Color(1.0, 0.85, 0.3) if is_best else Color(0.75, 0.75, 0.8), HORIZONTAL_ALIGNMENT_CENTER)
+	if is_best: h.text = "NEW HIGH SCORE!"
+	elif not best.is_empty(): h.text = "Best: round %d  ·  %d kills  ·  %d points" % [best.get("round", 0), best.get("kills", 0), best.get("points", 0)]
+	over_panel.add_child(h)
+	var q := _lbl(22, Color(0.8, 0.8, 0.8), HORIZONTAL_ALIGNMENT_CENTER); q.text = Barks.GAME_OVER; over_panel.add_child(q)
 	for pair in [["Play again", game.restart], ["Main menu", game.to_menu]]:
-		var b := Button.new(); b.text = pair[0]; b.custom_minimum_size = Vector2(320, 70)
-		b.add_theme_font_size_override("font_size", 30); b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		var b := Button.new(); b.text = pair[0]; b.custom_minimum_size = Vector2(320, 64)
+		b.add_theme_font_size_override("font_size", 28); b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		b.pressed.connect(pair[1]); over_panel.add_child(b)
 	add_child(over_panel)
+
+## "60 fps · 142 dc": draw calls flagged once they pass the mobile budget.
+static func perf_text(fps: int, draw_calls: int) -> String:
+	return "%d fps · %d dc%s" % [fps, draw_calls, " !" if draw_calls > Game.DRAW_CALL_BUDGET else ""]
