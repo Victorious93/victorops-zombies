@@ -19,15 +19,17 @@ func test_every_two_handed_gun_has_tuned_fore_grip():
 			assert_true(Viewmodel.FORE_GRIP.has(m), "%s needs a measured fore-end grip" % m)
 
 func test_support_hand_reaches_fore_end_on_every_gun():
-	var cam := Camera3D.new(); add_child_autofree(cam)
+	var cam := Camera3D.new(); add_child(cam)
 	var vm := Viewmodel.new(); vm.setup(Color(0.4, 0.4, 0.45)); cam.add_child(vm)
 	var fa := FpsArms.new(); cam.add_child(fa); vm.fps_arms = fa
 	for id in ["smg", "rifle", "scatter", "lmg", "cannon", "nova"]:
 		vm.set_weapon(Weapons.by_id(id))
-		await wait_frames(3); await fa.skel.skeleton_updated
+		await wait_physics_frames(3); await fa.skel.skeleton_updated
 		var sk := fa.skel
 		var w := (sk.global_transform * sk.get_bone_global_pose(sk.find_bone("wrist.l"))).origin
 		assert_lt(w.distance_to(fa.target_l.global_position), 0.02, "%s: left wrist reaches its fore-end target" % id)
+	# v7.4: free only after leaving the skeleton_updated emission (was autofree => flaky 'freed while a signal is being emitted')
+	await wait_process_frames(1); cam.queue_free(); await wait_process_frames(2)
 
 func test_perk_machine_glow_toned_down():
 	assert_lt(FacilityMap.MACHINE_PANEL_ON, 1.5, "panel must not clip to white at close range")

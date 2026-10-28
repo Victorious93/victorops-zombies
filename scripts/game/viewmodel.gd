@@ -30,6 +30,9 @@ var model_name := ""
 var overlay := false   ## render on the viewmodel layer (see ViewmodelOverlay)
 ## Fore-end grip point, as a fraction of gun length ahead of centre.
 const FORE_AT := 0.24
+## v7.4: bulky guns sit lower, further right and further out at hip so they no longer fill the view.
+const HIP_TRIM := {launcher = Vector3(0.07, -0.09, -0.16)}
+static func hip_pos(model: String) -> Vector3: return HIP_POS + HIP_TRIM.get(model, Vector3.ZERO)
 var fps_arms: FpsArms   ## set by Player before set_weapon(); null in tests -> legacy glove props
 
 func setup(sleeve: Color) -> void:
@@ -189,7 +192,7 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	sway = sway.lerp(Vector2.ZERO, clampf(dt * 8.0, 0, 1))
 	kick = lerpf(kick, 0.0, clampf(dt * 12.0, 0, 1))
 	swap_t = move_toward(swap_t, 0.0, dt * 3.0)
-	var target := HIP_POS.lerp(ADS_POS, ads_k)
+	var target := hip_pos(model_name).lerp(ADS_POS, ads_k)
 	var bob_amt := lerpf(1.0, 0.2, ads_k) * move01
 	var off := Vector3(sin(bob) * 0.012, -absf(cos(bob)) * 0.012, 0) * bob_amt
 	off += Vector3(-sway.x * 0.25, sway.y * 0.25, 0) * lerpf(1.0, 0.3, ads_k)
