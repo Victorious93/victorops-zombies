@@ -12,7 +12,7 @@ const ALL := {
 	"walker":   {"hp": 1.0, "speed": 1.0, "scale": 1.0, "dmg": 1.0, "armor": 0.0, "tint": Color(1, 1, 1), "points": 0},
 	"sprinter": {"hp": 0.6, "speed": 1.9, "scale": 0.9, "dmg": 0.7, "armor": 0.0, "tint": Color(1.0, 1.02, 0.86), "points": 20},
 	"brute":    {"hp": 8.0, "speed": 0.75, "scale": 1.45, "dmg": 2.2, "armor": 0.5, "tint": Color(0.78, 0.7, 0.66), "points": 500},
-	"warden":   {"hp": 30.0, "speed": 0.9, "scale": 1.85, "dmg": 3.0, "armor": 0.6, "tint": Color(0.45, 0.35, 0.6), "points": 2500},
+	"warden":   {"hp": 30.0, "speed": 0.9, "scale": 1.85, "dmg": 3.0, "armor": 0.6, "tint": Color(0.66, 0.54, 0.8), "points": 2500},
 	"bloater":  {"hp": 1.6, "speed": 0.7, "scale": 1.15, "dmg": 1.0, "armor": 0.0, "tint": Color(0.75, 0.9, 0.45), "points": 60},
 }
 const BLOATER_RADIUS := 3.2      ## burst damage radius (m)

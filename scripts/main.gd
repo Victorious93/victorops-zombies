@@ -157,8 +157,7 @@ func _hud(dir: String, prefix: String) -> void:
 	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
 	await _wait(40)
 	pl.bot_input = null
-	game.throw_power(Node3D.new())
-	pl.global_position = Vector3(-6, 0.1, 6); pl.yaw = -2.4; pl.pitch = -0.05; pl.velocity = Vector3.ZERO
+	pl.global_position = Vector3(-6, 0.1, 6)   # pre-power on purpose: proves the v7.1 lighting fix; pl.yaw = -2.4; pl.pitch = -0.05; pl.velocity = Vector3.ZERO
 	for a in [["16x9", Vector2i(1456, 819), 0.0, 0.0], ["19_5x9", Vector2i(1774, 819), 0.052, 0.054], ["20x9", Vector2i(1820, 819), 0.046, 0.044]]:
 		get_window().size = a[1]
 		await _wait(12)
@@ -409,7 +408,7 @@ func _views(dir: String) -> void:
 			z.set_physics_process(false)   # hold the pose for the portrait: no chasing into the lens
 			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
 			z.model.rotation.y = PI; z._locomotion()
-			if z.zpose: z.zpose.reach_target = 1.0 if not z.runner else 0.4
+			if z.zpose: z.zpose.reach_target = 1.0 if not z.runner else 0.7
 			zs.append(z)
 		await _wait(25)
 		await _snap(zd, ("%s_closeup.png" % ty) if ty != "group" else "group.png")
