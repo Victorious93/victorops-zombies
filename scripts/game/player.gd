@@ -96,8 +96,9 @@ func _ready() -> void:
 	cam.current = true
 	vm = Viewmodel.new(); vm.setup(cdef.get("color", Color(0.4, 0.4, 0.45))); cam.add_child(vm)
 	# gun-mounted flashlight: rides the viewmodel so the beam sways, kicks and dips on reload
-	flashlight = SpotLight3D.new(); flashlight.light_energy = 2.4; flashlight.spot_range = 24; flashlight.spot_angle = 24
-	flashlight.spot_attenuation = 0.8; flashlight.light_color = Color(1.0, 0.93, 0.8)
+	flashlight = SpotLight3D.new(); flashlight.light_energy = 1.5; flashlight.spot_range = 22; flashlight.spot_angle = 31
+	flashlight.spot_attenuation = 1.9; flashlight.light_specular = 0.25  # softer, wider pool: no blown-out disk on walls
+	flashlight.light_color = Color(1.0, 0.93, 0.8)
 	flashlight.position = Vector3(0.0, 0.02, -0.25); vm.add_child(flashlight)
 	flashlight.shadow_enabled = game != null and game.settings_shadows()
 	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand)
@@ -311,7 +312,7 @@ func try_fire(moving: bool) -> void:
 		return
 	var w := weapon()
 	fire_cd = w.fire_interval * cdef.fire_interval_mult
-	var spread := deg_to_rad(w.spread_deg) * lerpf(1.0, 0.3, ads01) * (1.4 if moving else 1.0) * (1.6 if slide_t > 0.0 else 1.0)
+	var spread := deg_to_rad(w.spread_deg) * lerpf(1.0, 0.3 * (Perks.MARKSMAN_ADS_SPREAD if perks.get("marksman", false) else 1.0), ads01) * (1.4 if moving else 1.0) * (1.6 if slide_t > 0.0 else 1.0)
 	var origin := cam.global_position
 	var fwd := -cam.global_basis.z
 	for i in w.pellets:

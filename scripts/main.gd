@@ -100,10 +100,33 @@ func show_menu() -> void:
 		panel.get_child(0).add_child(close)
 		close.pressed.connect(panel.queue_free)
 		menu.add_child(panel))
+	var ab := _menu_btn("Armory", 24, 240, 56); box.add_child(ab)
+	ab.pressed.connect(_show_armory)
 	var note := Label.new(); note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	note.text = "Solo · Co-op coming next · WASD/mouse, V knife, G grenade, Q ability · or touch"
 	note.add_theme_font_size_override("font_size", 18); note.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
 	box.add_child(note)
+
+## Armory: pick which wall gun hangs in the spawn room (price unchanged; the others move deeper in).
+func _show_armory() -> void:
+	var panel := PanelContainer.new(); panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var sb := StyleBoxFlat.new(); sb.bg_color = Color(0.01, 0.01, 0.04, 0.9); panel.add_theme_stylebox_override("panel", sb)
+	var v := VBoxContainer.new(); v.alignment = BoxContainer.ALIGNMENT_CENTER; v.add_theme_constant_override("separation", 18); panel.add_child(v)
+	var t := Label.new(); t.text = "ARMORY  ·  choose your spawn-room wall gun"; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	t.add_theme_font_size_override("font_size", 34); t.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0)); v.add_child(t)
+	var row := HBoxContainer.new(); row.alignment = BoxContainer.ALIGNMENT_CENTER; row.add_theme_constant_override("separation", 20); v.add_child(row)
+	var group := ButtonGroup.new()
+	for id in GameSettings.STARTER_GUNS:
+		var w := Weapons.make(id)
+		var b := _menu_btn("%s\n%d pts · %d dmg · %d mag" % [w.name, Weapons.WALL_PRICES[id], w.damage, w.mag_size], 22, 300, 96)
+		b.toggle_mode = true; b.button_group = group; b.button_pressed = settings.starter_gun == id
+		var gid: String = id
+		b.pressed.connect(func(): settings.starter_gun = gid; Game.save_settings(settings))
+		row.add_child(b)
+	var close := _menu_btn("Back", 28, 320, 64); close.pressed.connect(panel.queue_free); v.add_child(close)
+	var tut := _menu_btn("Replay tutorial", 22, 320, 56); v.add_child(tut)
+	tut.pressed.connect(func(): settings.tutorial_done = false; Game.save_settings(settings); tut.text = "Tutorial on next run")
+	menu.add_child(panel)
 
 func start_game() -> void:
 	if menu: menu.queue_free(); menu = null
@@ -129,6 +152,7 @@ func _shots(dir: String) -> void:
 	args["touch"] = "1"
 	start_game()
 	game.auto_rounds = false
+	game.allow_tutorial = false
 	await _wait(30)
 	game.round = 3
 	var pl := game.player
@@ -250,55 +274,71 @@ func _clip(dir: String) -> void:
 	args["touch"] = "1"
 	start_game()
 	game.auto_rounds = false
+	game.allow_tutorial = false
 	game.god_mode = true
 	await _wait(5)
 	var pl := game.player; _clip_pl = pl
 	pl.bot_input = {mv = Vector2.ZERO, fire = false, ads = false, use = false, sprint = false}
 	pl.economy.points = 12000
 	pl.loadout.give(Weapons.make("rifle")); pl.apply_reload_perk()
-	game.round = 6   # alarm beacons + runners
+	game.round = 8   # brute round: alarm beacons + painted tally gate
+	game.hud.tally_flip(8)
 	game.throw_power(Node3D.new())
-	game.map.open_door("east"); game.map.open_door("cold")
-	# A: window horde (0-11 s) - zombies rise outside, tear the planks, lunge through
+	game.map.open_door("east"); game.map.open_door("yard")
+	# A: brute + sprinters through the west window (0-8 s)
 	pl.global_position = Vector3(-3.0, 0.1, 3.2); pl.yaw = PI / 2 + 0.2; pl.pitch = -0.05
-	pl.health = 40.0   # low-health heartbeat + colour drain for the opening
-	for id in ["w_west", "w_west", "w_west", "w_south", "w_west", "w_south", "w_west"]: game.spawn_zombie(id)
-	await _glide(Vector3(-3.0, 0.1, 3.2), Vector3(-10, 1.2, 2), 60)
-	for z in game.zombies: z.window.bar.damage(999); z.window.refresh()
-	await _glide(Vector3(-4.0, 0.1, 2.4), Vector3(-10, 1.2, 2), 90, true)
-	await _snap(dir, "01_window_horde.png")
-	pl.take_damage(5.0, Vector3(-8, 1, 6))
-	await _glide(Vector3(-2.5, 0.1, 4.0), Vector3(-10, 1.2, 2), 90, true)
-	await _snap(dir, "02_headshots_low_hp.png")
-	await _glide(Vector3(-1.5, 0.1, 4.5), Vector3(-10, 1.2, 2), 90, true)
-	pl.health = pl.max_health
+	game.spawn_zombie("w_west", "brute")
+	for id in ["w_west", "w_south"]: game.spawn_zombie(id, "sprinter")
+	game.spawn_zombie("w_west", "walker")
+	await _glide(Vector3(-3.0, 0.1, 3.2), Vector3(-10, 1.4, 2), 50)
+	for z in game.zombies: if z.window: z.window.bar.damage(999); z.window.refresh()
+	await _glide(Vector3(-2.5, 0.1, 3.0), Vector3(-8, 1.4, 2.5), 110)
+	await _snap(dir, "01_brute_sprinters.png")
+	await _glide(Vector3(-2.0, 0.1, 3.0), Vector3(-7, 1.5, 3.0), 40, true)
+	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-10, 1.4, 2), 90, true)
+	# C: ragdolls - body-shot kills with force (8-12 s)
+	for z in game.zombies.duplicate():
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD and z.ztype != "brute":
+			z.take_damage(z.hp + 1, false, pl, "body", (z.global_position - pl.global_position).normalized() * 9.0)
+	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-6, 0.4, 2.8), 45)
+	await _snap(dir, "02_ragdolls.png")
+	await _glide(Vector3(-1.0, 0.1, 3.4), Vector3(-7, 0.4, 2.5), 40, true)
 	for z in game.zombies.duplicate():
 		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(z.hp + 1, true, pl, "head", Vector3(-6, 0, 0))
-	# B: Mystery Crate (11-16 s)
-	var cp: Vector3 = game.crate_node.global_position
-	var front: Vector3 = cp + game.crate_node.global_basis.z * 2.4; front.y = 0.1
-	await _glide(front, cp + Vector3.UP * 0.8, 50)
-	game.use_crate(pl)
-	await _glide(front + (cp - front).normalized() * 0.4, cp + Vector3.UP * 1.0, 60)
-	await _snap(dir, "03_mystery_crate.png")
-	await _glide(front, cp + Vector3.UP * 1.0, 40)
-	game.use_crate(pl)   # take the weapon
-	# C: Overcharge Forge (16-22 s)
-	pl.global_position = Vector3(18, 0.1, -16.5); pl.yaw = 0.0
-	await _glide(Vector3(18, 0.1, -19.3), Vector3(18, 1.2, -23), 50)
-	game.use_forge(pl)
-	await _glide(Vector3(18, 0.1, -19.6), Vector3(18, 1.3, -23), 70)
-	await _snap(dir, "04_overcharge_forge.png")
-	await _glide(Vector3(18, 0.1, -19.4), Vector3(18, 1.2, -23), 70)
-	# D: power-up + runners (22-30 s)
-	pl.global_position = Vector3(-1, 0.1, 5); pl.yaw = PI / 2
-	game._spawn_drop("onetouch", Vector3(-4.5, 0.4, 4.5))
-	for id in ["w_west", "w_south", "w_west"]: game.spawn_zombie(id)
-	await _glide(Vector3(-1.5, 0.1, 4.8), Vector3(-4.5, 0.5, 4.5), 50)
-	await _snap(dir, "05_powerup_alarm.png")
-	await _glide(Vector3(-4.5, 0.1, 4.5), Vector3(-9, 1.0, 4.5), 50)
-	for z in game.zombies: if is_instance_valid(z) and z.window: z.window.bar.damage(999); z.window.refresh()
-	await _glide(Vector3(-3.0, 0.1, 4.0), Vector3(-9, 1.0, 3), 110, true)
-	await _snap(dir, "06_onetouch_kills.png")
-	await _wait(30)
+	# B: bloater + gas cloud in the yard (12-18 s)
+	pl.global_position = Vector3(31, 0.1, 4); pl.yaw = -PI / 2
+	game.map.open_door("pump")
+	var bl := game.spawn_zombie("w_yard_s", "bloater")
+	game.spawn_zombie("w_yard_n", "walker"); game.spawn_zombie("w_yard_n", "walker")
+	for z in game.zombies: if z.window: z.window.bar.damage(999); z.window.refresh()
+	await _wait(4)
+	if is_instance_valid(bl): bl.global_position = Vector3(38, 0.1, 5.5)
+	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.3, 5.5), 75)
+	await _snap(dir, "03_bloater.png")
+	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.3, 5.5), 40, true)
+	if is_instance_valid(bl) and bl.state != Zombie.State.DEAD: bl.take_damage(bl.hp + 1, false, pl, "body", Vector3(4, 0, 0))
+	await _glide(Vector3(31.5, 0.1, 4.5), Vector3(38, 1.0, 5.5), 60)
+	await _snap(dir, "04_gas_cloud.png")
+	# D: explosive kill -> gibs (18-22 s)
+	var live := []
+	for z in game.zombies: if is_instance_valid(z) and z.state != Zombie.State.DEAD: live.append(z)
+	for z in live: z.global_position = Vector3(36 + randf_range(-1, 1), 0.1, -4 + randf_range(-1, 1))
+	await _glide(Vector3(31, 0.1, -1), Vector3(36, 1.0, -4), 20)
+	game.explode(pl, Vector3(36, 0.4, -4), 5.0, 5000)
+	await _glide(Vector3(31.5, 0.1, -1.2), Vector3(36, 0.8, -4), 60)
+	# E: Pump Station + Marksman Mist (22-26 s)
+	pl.global_position = Vector3(36, 0.1, 8); pl.yaw = PI
+	await _glide(Vector3(36, 0.1, 13), Vector3(44, 1.2, 22), 70)
+	await _snap(dir, "05_pump_station.png")
+	await _glide(Vector3(38, 0.1, 17), Vector3(44.8, 1.3, 22), 40)
+	# F: last kill slow-mo + points tick + painted tally (26-30 s)
+	var last := game.spawn_zombie("w_pump_e", "sprinter")
+	if last: last.global_position = Vector3(42, 0.1, 22)
+	await _glide(Vector3(38, 0.1, 18), Vector3(42, 1.4, 22), 25)
+	game.to_spawn = 0
+	for z in game.zombies.duplicate(): if is_instance_valid(z) and z != last: game.zombies.erase(z); z.queue_free()
+	if is_instance_valid(last): last.take_damage(last.hp + 1, true, pl, "head", Vector3(5, 1, 3))
+	await _glide(Vector3(38, 0.1, 18), Vector3(42, 0.8, 22), 30)
+	await _snap(dir, "06_hud_slowmo_tally.png")
+	await _wait(100)
 	get_tree().quit()

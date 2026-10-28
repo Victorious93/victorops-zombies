@@ -49,6 +49,60 @@ func _pbr(name: String, tint := Color.WHITE, scale := 0.5, metal := 0.0) -> Stan
 	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 	return m
 
+## Multiplies a large-scale grime/stain noise over a PBR set so surfaces stop looking freshly painted.
+func _grimy(m: StandardMaterial3D) -> StandardMaterial3D:
+	m.detail_enabled = true; m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	m.detail_albedo = Zombie.grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
+	return m
+
+## Mobile-friendly light shaft: an additive, Y-billboarded gradient card (no volumetrics).
+static var _shaft_mat: StandardMaterial3D
+func shaft(pos: Vector3, h: float, w: float, col: Color, parent: Node = null) -> MeshInstance3D:
+	if _shaft_mat == null:
+		var g := Gradient.new(); g.set_color(0, Color(1, 1, 1, 0.0)); g.add_point(0.15, Color(1, 1, 1, 0.55)); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
+		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill_from = Vector2(0.5, 0); gt.fill_to = Vector2(0.5, 1); gt.width = 8; gt.height = 64
+		var sideg := Gradient.new(); sideg.set_color(0, Color(1, 1, 1, 0)); sideg.add_point(0.5, Color.WHITE); sideg.set_color(sideg.get_point_count() - 1, Color(1, 1, 1, 0))
+		_shaft_mat = StandardMaterial3D.new(); _shaft_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_shaft_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD; _shaft_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_shaft_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y; _shaft_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_shaft_mat.albedo_texture = gt; _shaft_mat.vertex_color_use_as_albedo = true; _shaft_mat.disable_fog = true
+		_shaft_mat.detail_enabled = false
+		var sgt := GradientTexture2D.new(); sgt.gradient = sideg; sgt.width = 32; sgt.height = 4
+		_shaft_mat.detail_enabled = true; _shaft_mat.detail_albedo = sgt; _shaft_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2(w, h); mi.mesh = qm
+	var m := _shaft_mat.duplicate() as StandardMaterial3D; m.albedo_color = col; mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = pos
+	(parent if parent else self).add_child(mi)
+	return mi
+
+## Night sky: procedural dark gradient + a glowing moon disc in the moon light's direction.
+var moon_light: DirectionalLight3D
+func build_sky() -> void:
+	var moon := moon_light
+	if game == null or game.env == null or moon == null: return
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
+	sm.ground_bottom_color = Color(0.0, 0.0, 0.0); sm.ground_horizon_color = Color(0.05, 0.05, 0.08)
+	sm.sun_angle_max = 1.0; sm.sun_curve = 0.05; sm.energy_multiplier = 1.0
+	var sky := Sky.new(); sky.sky_material = sm; sky.radiance_size = Sky.RADIANCE_SIZE_32
+	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
+	game.env.fog_sky_affect = 0.35
+	# moon disc + halo far away along -light direction
+	var dir := moon.global_transform.basis.z.normalized()   # points toward the light source
+	var at := Vector3(18, 0, -8) + dir * 120.0
+	for pair in [[14.0, Color(0.85, 0.9, 1.0, 1.0)], [46.0, Color(0.35, 0.45, 0.8, 0.35)]]:
+		var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2.ONE * pair[0]; mi.mesh = qm
+		var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		m.disable_fog = true; m.albedo_color = pair[1]; m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		var g := Gradient.new(); g.set_color(0, Color.WHITE); g.add_point(0.45 if pair[0] < 20 else 0.05, Color.WHITE); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
+		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(0.5, 0.0); gt.width = 64; gt.height = 64
+		m.albedo_texture = gt; mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi); mi.global_position = at
+
 func _mat(c: Color, rough := 0.9, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new(); m.albedo_color = c; m.roughness = rough; m.metallic = metal
 	return m
@@ -198,10 +252,10 @@ func _rel(root: Node3D, n: Node3D) -> Transform3D:
 
 func build(p_game) -> void:
 	game = p_game
-	mats.wall = _pbr("paintedplaster017", Color(0.78, 0.8, 0.78), 0.35)
+	mats.wall = _grimy(_pbr("paintedplaster017", Color(0.6, 0.62, 0.58), 0.35))
 	mats.wall_low = _pbr("concrete034", Color(0.7, 0.7, 0.7), 0.4)
-	mats.floor = _pbr("tiles074", Color(0.75, 0.75, 0.72), 0.45)
-	mats.ground = _pbr("concrete034", Color(0.55, 0.57, 0.55), 0.18)
+	mats.floor = _grimy(_pbr("tiles074", Color(0.42, 0.42, 0.4), 0.45))
+	mats.ground = _grimy(_pbr("concrete034", Color(0.5, 0.52, 0.5), 0.18))
 	mats.trim = _pbr("metal032", Color(0.35, 0.33, 0.3), 1.0, 0.6)
 	mats.door = _pbr("metalplates006", Color(0.6, 0.62, 0.66), 0.6, 0.7)
 	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
@@ -229,6 +283,7 @@ func build(p_game) -> void:
 	wall(Vector2(10, -10), Vector2(10, -26), [{at = 8.0, w = 2.4, kind = "door", id = "cold"}])
 	wall(Vector2(10, -10), Vector2(26, -10))
 	_build_yard()
+	_build_pump()
 	_build_catwalk()
 	_build_props()
 	# ceiling lamps: emergency red (power off) + white (power on)
@@ -236,6 +291,7 @@ func build(p_game) -> void:
 		box(Vector3(1.4, 0.08, 0.4), p + Vector3(0, 0.1, 0), mats.lamp, false)
 		var w := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.9, 0.75), 2.2, 12.0)
 		w.visible = false; room_lights.append(w); shadow_lights.append(w)
+		shaft(Vector3(0, -1.3, 0), 2.6, 1.6, Color(1.0, 0.9, 0.7, 0.16), w)
 		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
 	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
@@ -249,6 +305,7 @@ func build(p_game) -> void:
 	moon.rotation_degrees = Vector3(-50, 30, 0); moon.shadow_enabled = true; add_child(moon)
 	moon.directional_shadow_max_distance = 40.0
 	shadow_lights.append(moon)
+	moon_light = moon
 	_place_machines()
 	_place_fuses()
 
@@ -264,12 +321,47 @@ func _dust(at: Vector3, extents: Vector3) -> void:
 	m.albedo_color = Color(1, 0.95, 0.85, 0.25); q.material = m
 	p.position = at; add_child(p); dust.append(p)
 
+## Pump Station: x 26..46, z 10..30, south of the Loading Yard. Open-air, flooded sump, tanks + pipes.
+func _build_pump() -> void:
+	box(Vector3(40, 1, 14), Vector3(36, -0.5, 36), mats.ground)   # ground beyond the south fence for spawns
+	box(Vector3(20, 0.02, 20), Vector3(36, 0.01, 20), mats.floor, false)
+	wall(Vector2(26, 10), Vector2(26, 30))
+	wall(Vector2(26, 30), Vector2(46, 30), [{at = 12.0, w = 1.8, kind = "window", id = "w_pump_s", out = Vector2(0, 1)}])
+	wall(Vector2(46, 30), Vector2(46, 10), [{at = 10.0, w = 1.8, kind = "window", id = "w_pump_e", out = Vector2(1, 0)}])
+	# two big tanks + a pipe run (cover to kite around)
+	var tank_mat := StandardMaterial3D.new(); tank_mat.albedo_color = Color(0.22, 0.3, 0.28); tank_mat.roughness = 0.6; tank_mat.metallic = 0.5
+	tank_mat.detail_enabled = mats.wall.detail_enabled; tank_mat.detail_albedo = mats.wall.detail_albedo; tank_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	for tp in [Vector3(31, 0, 24), Vector3(41, 0, 16)]:
+		var sb := StaticBody3D.new(); sb.position = tp; add_child(sb)
+		var mi := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 1.6; cm.bottom_radius = 1.6; cm.height = 4.0
+		mi.mesh = cm; mi.material_override = tank_mat; mi.position.y = 2.0; sb.add_child(mi)
+		var cs := CollisionShape3D.new(); var cy := CylinderShape3D.new(); cy.radius = 1.6; cy.height = 4.0; cs.shape = cy; cs.position.y = 2.0; sb.add_child(cs)
+		box(Vector3(3.4, 0.12, 0.12), tp + Vector3(0, 3.2, 0), mats.stripe, false)
+	for x in [27.0, 27.6]:
+		box(Vector3(0.3, 0.3, 16.0), Vector3(x, 2.4 + (x - 27.0), 20.0), mats.metal, false)
+	box(Vector3(10.0, 0.35, 0.35), Vector3(36, 2.6, 28.8), mats.metal, false)
+	# flooded sump: a dark glossy sheet
+	var wm := StandardMaterial3D.new(); wm.albedo_color = Color(0.05, 0.09, 0.08); wm.roughness = 0.05; wm.metallic = 0.3
+	box(Vector3(5, 0.03, 4), Vector3(37, 0.03, 23), wm, false)
+	prop("barrel", 0.95, Vector3(43.5, 0, 27), 0.3, true)
+	prop("barrel_explosive", 0.95, Vector3(33.5, 0, 14), 0.0, true)
+	prop("debris", 1.4, Vector3(29, 0, 19), 2.0, false, false)
+	label("PUMP STATION", Vector3(36, 3.4, 29.7), PI, 64, Color(0.4, 1.0, 0.8))
+	var gl := light(Vector3(36, 3.6, 20), Color(0.45, 1.0, 0.75), 1.8, 14.0)
+	shadow_lights.append(gl)
+	for sp in [Vector3(32, 3.0, 18), Vector3(40, 3.0, 25)]:
+		shaft(sp, 6.0, 2.2, Color(0.4, 0.9, 0.75, 0.10))
+	_dust(Vector3(36, 2, 20), Vector3(8, 1.5, 8))
+
 func _build_yard() -> void:
+	for sp in [Vector3(31, 3.0, -4), Vector3(40, 3.0, 4), Vector3(37, 3.0, -12)]:
+		shaft(sp, 6.0, 2.4, Color(0.45, 0.55, 0.9, 0.11))
 	# Loading Yard: x 26..46, z -16..10, open-air with a chain-link perimeter and two windows on x=46
 	wall(Vector2(46, 10), Vector2(46, -16), [
 		{at = 6.0, w = 1.8, kind = "window", id = "w_yard_s", out = Vector2(1, 0)},
 		{at = 18.0, w = 1.8, kind = "window", id = "w_yard_n", out = Vector2(1, 0)}])
-	for seg in [[Vector2(26, 10), Vector2(46, 10)], [Vector2(26, -16), Vector2(46, -16)]]:
+	wall(Vector2(26, 10), Vector2(46, 10), [{at = 10.0, w = 2.6, kind = "door", id = "pump"}])
+	for seg in [[Vector2(26, -16), Vector2(46, -16)]]:
 		var a: Vector2 = seg[0]; var b: Vector2 = seg[1]
 		box(Vector3(b.x - a.x, H, T), Vector3((a.x + b.x) / 2, H / 2, a.y), mats.wall_low)
 	# raised loading dock with two ramps (verticality)
@@ -373,7 +465,7 @@ func _front(root: Node3D) -> Vector3:
 	return root.to_global(Vector3(0, 1.0, -1.0))
 
 func _place_machines() -> void:
-	var perk_spots := {"ironhide": [Vector3(-8.8, 0, -14), -PI / 2, "heart"], "quickhand": [Vector3(24.8, 0, 6), PI / 2, "circle"], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2, "bolt"], "lazarus": [Vector3(3.5, 0, 9.1), 0.0, "heart"]}
+	var perk_spots := {"marksman": [Vector3(44.8, 0, 22), PI / 2, "circle"], "ironhide": [Vector3(-8.8, 0, -14), -PI / 2, "heart"], "quickhand": [Vector3(24.8, 0, 6), PI / 2, "circle"], "fleetfoot": [Vector3(8.8, 0, 7.5), PI / 2, "bolt"], "lazarus": [Vector3(3.5, 0, 9.1), 0.0, "heart"]}
 	for id in perk_spots:
 		var pd: Dictionary = Perks.ALL[id]
 		var m := _machine(perk_spots[id][0], perk_spots[id][1], pd.color, pd.name, perk_spots[id][2])
@@ -407,9 +499,13 @@ func _place_machines() -> void:
 	game.crate_it = game.add_interactable(Vector3.ZERO, 2.2, func(pl): return game.crate_prompt(pl), func(pl): game.use_crate(pl))
 	move_crate(crate_spots[0][0], crate_spots[0][1])
 	# Wall-buys
-	_wall_buy("smg", Vector3(-9.75, 1.6, -3), PI / 2)
-	_wall_buy("rifle", Vector3(-9.75, 1.6, -20), PI / 2)
-	_wall_buy("scatter", Vector3(14, 1.6, 9.75), PI)
+	# Armory (menu): the chosen starter gun hangs in the spawn room; the others take the remaining spots.
+	var order: Array = GameSettings.STARTER_GUNS.duplicate()
+	var starter: String = game.settings.starter_gun if game.settings and game.settings.starter_gun in order else "smg"
+	order.erase(starter); order.push_front(starter)
+	_wall_buy(order[0], Vector3(-9.75, 1.6, -3), PI / 2)
+	_wall_buy(order[1], Vector3(-9.75, 1.6, -20), PI / 2)
+	_wall_buy(order[2], Vector3(14, 1.6, 9.75), PI)
 	# Armor racks
 	_armor_rack("light", Vector3(-4, 0, -9.6), 0.0)
 	_armor_rack("medium", Vector3(25.6, 0, -4), -PI / 2)

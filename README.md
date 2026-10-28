@@ -45,3 +45,11 @@ Package `com.victorious.zombie`, minSdk 24, targetSdk 35, arm64-v8a + armeabi-v7
 - Mobile: auto-fire, aim slowdown + magnetism, gyro (off/ADS/always), look curve, fixed/floating stick, fire-button size (Settings).
 - Performance/lighting: Medium preset at 0.75 render scale, prop visibility ranges (LOD), darker scene with rim light, gun flashlight, red alarm beacons from round 6.
 - `-- --clip=DIR` runs a scripted 30 s trailer route (use with `--fixed-fps 30 --write-movie out.avi`) and saves 6 stills.
+
+## v5 single-player polish
+- Special zombies (`scripts/rules/zombie_types.gd`): **Sprinter** (lean, shriek), **Brute** every 8 rounds (armor plates, body-shot armor, guaranteed RESTOCK), **Bloater** (glowing pustules, bursts into a damaging gas cloud).
+- PhysicalBone3D ragdolls (capped by quality preset) and gibs on explosive kills.
+- Neon cyan->magenta HUD with a painted tally, points tick-up, screen blood; round-start rumble, last-kill slow-mo, crate/forge jingles.
+- 30 s skippable first-run tutorial (move, shoot, rebuild, buy) - replay it from the menu Armory.
+- **Pump Station** expansion south of the Loading Yard (1250) with the new **Marksman Mist** perk (2500: headshots x3 instead of x2, tighter ADS).
+- Menu **Armory**: choose which wall gun hangs in the spawn room.

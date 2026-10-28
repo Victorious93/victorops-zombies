@@ -21,6 +21,10 @@ var round := 0
 var to_spawn := 0
 var spawn_cd := 0.0
 var intermission := 4.0
+var brute_pending := false
+var gas_clouds: Array = []   ## {node, pos, life}
+var slowmo_t := 0.0
+var type_counts := {}        ## sim/test stats: spawned per zombie type
 var zombies: Array = []
 var pickups: Array = []
 var over := false
@@ -41,6 +45,10 @@ var tint := 0.0
 var paused := false
 var power := PowerUps.new()
 var drops: Array = []        ## power-up pickups on the floor
+var tutorial: Tutorial
+var allow_tutorial := true     ## scripted clips/shots turn this off
+var _tut_frames := 0
+var _tut_last := Vector3.INF
 var god_mode := false        ## screenshots only
 var forge_busy := 0.0
 var groan_t := 6.0
@@ -59,7 +67,7 @@ func _ready() -> void:
 	sfx = Sfx.new(); add_child(sfx)
 	fx = Fx.new(); fx.game = self; add_child(fx)
 	_build_env()
-	map = FacilityMap.new(); add_child(map); map.build(self)
+	map = FacilityMap.new(); add_child(map); map.build(self); map.build_sky()
 	map.bake_navigation_mesh(false)
 	player = Player.new(); player.game = self; player.char_id = character_id
 	player.position = Vector3(0, 0.1, 3); add_child(player)
@@ -152,6 +160,9 @@ func _process(dt: float) -> void:
 	_update_pickups(dt)
 	_update_grenades(dt)
 	_update_drops(dt)
+	_update_gas(dt)
+	_update_slowmo(dt)
+	_update_tutorial(dt)
 	for id in power.update(dt):
 		hud.info("%s wore off" % PowerUps.ALL[id].name); sfx.play("pu_end", -6)
 	player.economy.mult = 2 if power.active("doublepay") else 1
@@ -203,6 +214,9 @@ func _update_rounds(dt: float) -> void:
 			else:
 				hud.banner("Round %d" % round, 3.0)
 			sfx.play("sting", -1)
+			sfx.play("rumble", -3); player.add_trauma(0.45)
+			brute_pending = ZombieTypes.is_brute_round(round)
+			if brute_pending: hud.banner("Round %d · BRUTE" % round, 3.5)
 			tint = 1.0
 			hud.round_flash(); hud.tally_flip(round)
 			if round > 1:
@@ -210,7 +224,9 @@ func _update_rounds(dt: float) -> void:
 	elif to_spawn > 0:
 		spawn_cd -= dt
 		if spawn_cd <= 0.0 and zombies.size() < Rounds.MAX_ALIVE:
-			spawn_zombie()
+			var ty := "brute" if brute_pending and to_spawn <= Rounds.zombie_count(round) / 2 else ZombieTypes.pick(round, rng.randf())
+			if ty == "brute": brute_pending = false
+			spawn_zombie("", ty)
 			to_spawn -= 1
 			spawn_cd = Rounds.spawn_interval(round)
 	elif zombies.size() == 1 and zombies[0].state != Zombie.State.DEAD and not zombies[0].crawler:
@@ -232,12 +248,14 @@ func respawn_window_for(z: Zombie) -> WindowBarricade:
 		if d < bd: bd = d; best = w
 	return best
 
-func spawn_zombie(win_id := "") -> Zombie:
+func spawn_zombie(win_id := "", ztype := "walker") -> Zombie:
 	var ids := facility.active_windows()
 	if win_id == "": win_id = ids[rng.randi() % ids.size()]
 	var w: WindowBarricade = map.windows[win_id]
 	var z := Zombie.new()
-	z.setup(self, w, maxi(round, 1))
+	z.setup(self, w, maxi(round, 1), ztype)
+	type_counts[ztype] = type_counts.get(ztype, 0) + 1
+	if ztype == "brute": sfx.play_at("brute_roar", w.spawn_point + Vector3.UP * 2, 4)
 	z.position = w.spawn_point + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5))
 	add_child(z)
 	zombies.append(z)
@@ -247,7 +265,7 @@ func spawn_zombie(win_id := "") -> Zombie:
 func _part_of(z: Zombie, y: float) -> String:
 	var rel := y - z.global_position.y
 	if z.crawler: return "head" if rel > 0.55 else "body"
-	if rel > Zombie.HEAD_Y: return "head"
+	if rel > z.head_y(): return "head"
 	if rel < Zombie.LEG_Y: return "legs"
 	return "body"
 
@@ -270,7 +288,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			var z: Zombie = r.collider
 			var part := _part_of(z, r.position.y)
 			var head := part == "head"
-			var dmg := w.damage * (2 if head else 1)
+			var dmg := int(w.damage * (Perks.head_mult(p.perks) if head else 1.0))
 			var before := p.economy.points
 			p.economy.on_hit()
 			var was_alive := z.state != Zombie.State.DEAD
@@ -374,7 +392,9 @@ func explode(p: Player, at: Vector3, radius: float, dmg: int) -> void:
 		if d > radius: continue
 		var before := p.economy.points
 		var dirv: Vector3 = (z.global_position - at); dirv.y = 0
+		z.explosive_hit = true
 		z.take_damage(int(dmg * Equipment.grenade_falloff(d / radius * Equipment.GRENADE_RADIUS_M)), false, p, "legs" if d < radius * 0.5 else "body", dirv.normalized() * 8.0 + Vector3.UP * 4.0)
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.explosive_hit = false
 		_pay(p, z.global_position + Vector3.UP * 1.8, before)
 	var pd := player.global_position.distance_to(at)
 	player.add_trauma(clampf(1.2 - pd / (radius * 3.0), 0.0, 0.9))
@@ -413,7 +433,14 @@ func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> v
 	zombies.erase(z)
 	kills += 1
 	var pu := power.roll(rng)
-	if pu != "" and z.window and not _outside_map(z): _spawn_drop(pu, z.global_position)
+	var forced := ZombieTypes.guaranteed_drop(z.ztype)
+	if forced != "": _spawn_drop(forced, z.global_position)
+	elif pu != "" and z.window and not _outside_map(z): _spawn_drop(pu, z.global_position)
+	if ZombieTypes.ALL[z.ztype].points > 0 and p:
+		p.economy.points += ZombieTypes.ALL[z.ztype].points * p.economy.mult
+	# last kill of the round: brief slow-motion
+	if to_spawn == 0 and zombies.is_empty() and round >= 1 and not headless_sim():
+		slowmo_t = 1.1; Engine.time_scale = 0.3; sfx.play("slowmo", -2)
 	if p:
 		var before := p.economy.points
 		p.economy.on_kill(headshot, knife)
@@ -421,6 +448,46 @@ func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> v
 		hud.kill_feed(headshot)
 	if rng.randf() < ArmorState.DROP_CHANCE:
 		_drop_armor(z.global_position)
+
+func headless_sim() -> bool:
+	return DisplayServer.get_name() == "headless"
+
+func _update_slowmo(dt: float) -> void:
+	if slowmo_t <= 0.0: return
+	slowmo_t -= dt / maxf(Engine.time_scale, 0.05)   # real seconds
+	Engine.time_scale = 1.0 if slowmo_t <= 0.0 else lerpf(1.0, 0.3, clampf(slowmo_t / 0.6, 0.0, 1.0))
+
+## Bloater gas: a lingering green cloud that hurts while the player stands in it.
+func gas_cloud(at: Vector3) -> void:
+	var root := Node3D.new(); add_child(root); root.global_position = Vector3(at.x, maxf(at.y, 0.0) + 0.7, at.z)
+	var p := CPUParticles3D.new(); p.amount = maxi(6, int(30 * fx.particle_scale)); p.lifetime = 2.5
+	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_SPHERE; p.emission_sphere_radius = ZombieTypes.BLOATER_RADIUS * 0.6
+	p.gravity = Vector3(0, 0.15, 0); p.initial_velocity_max = 0.3; p.scale_amount_min = 2.0; p.scale_amount_max = 3.4
+	var qm := QuadMesh.new(); qm.size = Vector2.ONE
+	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.albedo_texture = fx._soft_tex; m.albedo_color = Color(0.45, 0.8, 0.15, 0.34); m.vertex_color_use_as_albedo = true
+	qm.material = m; p.mesh = qm
+	var g := Gradient.new(); g.set_color(0, Color(1, 1, 1, 0)); g.add_point(0.3, Color(1, 1, 1, 1)); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
+	p.color_ramp = g
+	root.add_child(p)
+	var l := OmniLight3D.new(); l.light_color = Color(0.5, 1.0, 0.2); l.light_energy = 1.1; l.omni_range = 5.0; l.position.y = 0.4
+	root.add_child(l)
+	gas_clouds.append({node = root, pos = root.global_position, life = ZombieTypes.GAS_TIME, tick = 0.0})
+
+func _update_gas(dt: float) -> void:
+	for g in gas_clouds.duplicate():
+		g.life -= dt
+		if g.life <= 0.0:
+			(g.node as Node3D).queue_free(); gas_clouds.erase(g); continue
+		if g.life < 1.0: ((g.node as Node3D).get_child(0) as CPUParticles3D).emitting = false
+		var off: Vector3 = player.global_position - g.pos; off.y = 0
+		if off.length() < ZombieTypes.BLOATER_RADIUS * 0.85:
+			g.tick -= dt
+			if g.tick <= 0.0:
+				g.tick = 0.5
+				player.take_damage(int(ZombieTypes.GAS_DPS * 0.5), g.pos)
+				hud.gas_flash()
 
 func _drop_armor(at: Vector3) -> void:
 	var mi := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(0.4, 0.5, 0.15)
@@ -547,8 +614,28 @@ func use_ability(p: Player) -> void:
 func _deny(msg: String) -> void:
 	hud.info(msg); sfx.play("deny", -6)
 
+func _update_tutorial(dt: float) -> void:
+	_tut_frames += 1
+	if _tut_frames == 3 and allow_tutorial and not settings.tutorial_done and DisplayServer.get_name() != "headless":
+		tutorial = Tutorial.new(); hud.show_tutorial(true)
+	if tutorial == null: return
+	var pos := player.global_position
+	if _tut_last != Vector3.INF: tutorial.event("move", Vector2(pos.x - _tut_last.x, pos.z - _tut_last.z).length())
+	_tut_last = pos
+	tutorial.update(dt)
+	hud.set_tutorial(tutorial.prompt())
+	if tutorial.done(): end_tutorial()
+
+func end_tutorial() -> void:
+	if tutorial: tutorial.skip()
+	tutorial = null
+	hud.show_tutorial(false)
+	if not settings.tutorial_done:
+		settings.tutorial_done = true; save_settings(settings)
+
 func repair_window(p: Player, w: WindowBarricade) -> void:
 	var n := w.bar.repair_planks(p.cdef.repair_planks_per_use)
+	if n > 0 and tutorial: tutorial.event("rebuild")
 	if n > 0:
 		if p.economy.on_repair(n, p.cdef.repair_points_mult) == 0 and p.economy.repair_earned >= Economy.REPAIR_CAP_PER_ROUND:
 			hud.info("Repair points maxed this round")
@@ -603,7 +690,7 @@ func use_forge(p: Player) -> void:
 	forge_busy = OverchargeForge.FORGE_TIME
 	var held: Ammo = p.loadout.slots[slot]
 	held.reload_left = OverchargeForge.FORGE_TIME   # can't fire it while it's in the machine
-	sfx.play("forge"); hud.info("%s working..." % OverchargeForge.NAME)
+	sfx.play("forge"); sfx.play("forge_jingle", -5); hud.info("%s working..." % OverchargeForge.NAME)
 	map.forge_working(OverchargeForge.FORGE_TIME)
 	var tw := create_tween(); tw.tween_property(self, "forge_busy", 0.0, OverchargeForge.FORGE_TIME)
 	tw.tween_callback(func():
@@ -624,6 +711,7 @@ func use_crate(p: Player) -> void:
 			var id := crate.buy(p.economy, rng, p.weapon().id)
 			if id == "": _deny("Not enough points"); return
 			crate_node.start(id); sfx.play_at("crate", crate_node.global_position + Vector3.UP)
+			sfx.play_at("crate_jingle", crate_node.global_position + Vector3.UP, -4)
 			if crate_mover.on_roll(rng): crate_node.move_after = true
 		CrateNode.State.READY:
 			var w := Weapons.make(crate_node.take())
@@ -646,6 +734,7 @@ func buy_wall(p: Player, id: String) -> void:
 		a.refill(); sfx.play("buy", -4); hud.info("Ammo refilled"); return
 	if not p.economy.spend(Weapons.WALL_PRICES[id]): _deny("Not enough points"); return
 	p.loadout.give(Weapons.make(id)); p.apply_reload_perk()
+	if tutorial: tutorial.event("buy")
 	sfx.play("buy", -4); hud.info("Bought %s" % Weapons.make(id).name)
 
 func buy_armor(p: Player, pack_id: String) -> void:

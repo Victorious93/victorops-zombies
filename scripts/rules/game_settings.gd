@@ -3,9 +3,9 @@ extends RefCounted
 ## Player settings + graphics presets (pure data; saved to user://settings.cfg by the game).
 
 const PRESETS := {
-	"low": {"label": "Low (30 fps phones)", "scale": 0.6, "shadows": false, "glow": false, "fog": true, "particles": 0.4, "max_lights": 6, "msaa": 0, "dust": false},
-	"medium": {"label": "Medium (60 fps mid-range)", "scale": 0.75, "shadows": false, "glow": true, "fog": true, "particles": 0.7, "max_lights": 10, "msaa": 0, "dust": true},
-	"high": {"label": "High", "scale": 1.0, "shadows": true, "glow": true, "fog": true, "particles": 1.0, "max_lights": 16, "msaa": 2, "dust": true},
+	"low": {"label": "Low (30 fps phones)", "scale": 0.6, "shadows": false, "glow": false, "fog": true, "particles": 0.4, "max_lights": 6, "msaa": 0, "dust": false, "ragdolls": 3},
+	"medium": {"label": "Medium (60 fps mid-range)", "scale": 0.75, "shadows": false, "glow": true, "fog": true, "particles": 0.7, "max_lights": 10, "msaa": 0, "dust": true, "ragdolls": 5},
+	"high": {"label": "High", "scale": 1.0, "shadows": true, "glow": true, "fog": true, "particles": 1.0, "max_lights": 16, "msaa": 2, "dust": true, "ragdolls": 8},
 }
 const ORDER := ["low", "medium", "high"]
 
@@ -19,6 +19,9 @@ var gyro := "off"          ## "off" | "ads" | "always": phone gyroscope adds to 
 var look_curve := 1.3      ## 1.0 linear - 1.8 accelerated
 var joystick := "floating" ## "floating" (appears under the thumb) | "fixed" (stays in the corner)
 var fire_size := 1.3       ## fire button scale 1.0 - 1.8
+var starter_gun := "smg"   ## Armory pick: which wall-buy is discounted at the spawn room
+var tutorial_done := false
+const STARTER_GUNS := ["smg", "scatter", "rifle"]
 const GYRO_MODES := ["off", "ads", "always"]
 
 static func default_preset(is_mobile: bool) -> String:
@@ -32,7 +35,7 @@ static func linear_to_db_safe(v: float) -> float:
 	return -80.0 if v <= 0.001 else linear_to_db(v)
 
 func to_dict() -> Dictionary:
-	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size}
+	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size, starter_gun = starter_gun, tutorial_done = tutorial_done}
 
 func from_dict(d: Dictionary) -> void:
 	set_sensitivity(float(d.get("sensitivity", 1.0)))
@@ -46,3 +49,6 @@ func from_dict(d: Dictionary) -> void:
 	look_curve = clampf(float(d.get("look_curve", 1.3)), 1.0, 1.8)
 	joystick = "fixed" if str(d.get("joystick", "floating")) == "fixed" else "floating"
 	fire_size = clampf(float(d.get("fire_size", 1.3)), 1.0, 1.8)
+	starter_gun = str(d.get("starter_gun", "smg"))
+	if not STARTER_GUNS.has(starter_gun): starter_gun = "smg"
+	tutorial_done = bool(d.get("tutorial_done", false))

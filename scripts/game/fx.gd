@@ -16,7 +16,7 @@ var _soft_tex: Texture2D
 var _mats := {}
 
 func _ready() -> void:
-	_blood_tex = _radial(Color(0.35, 0.0, 0.0, 0.95), Color(0.2, 0.0, 0.0, 0.0), 128, true)
+	_blood_tex = _radial(Color(0.2, 0.0, 0.01, 0.95), Color(0.1, 0.0, 0.0, 0.0), 128, true)
 	_hole_tex = _radial(Color(0.03, 0.03, 0.03, 1.0), Color(0.15, 0.13, 0.1, 0.0), 32, false)
 	_soft_tex = _radial(Color(1, 1, 1, 1), Color(1, 1, 1, 0), 32, false)
 
@@ -93,7 +93,7 @@ func blood_hit(at: Vector3, dir: Vector3) -> void:
 
 func blood_pool(at: Vector3) -> void:
 	var m := surface_quad(at + Vector3.UP * 0.01, Vector3.UP, 0.2, _quad_mat("blood", _blood_tex))
-	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(6.0, 9.0), 1.8).set_ease(Tween.EASE_OUT)
+	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(3.5, 5.5), 2.4).set_ease(Tween.EASE_OUT)
 
 func sparks(at: Vector3, normal: Vector3, color: Color, amount: int, life := 0.18, spd := 4.0, size := 0.03) -> void:
 	var p := CPUParticles3D.new()
@@ -128,7 +128,11 @@ func gibs(at: Vector3, n: int, z: Node3D = null, force := Vector3.ZERO) -> void:
 		rb.linear_velocity = Vector3(randf_range(-3, 3), randf_range(2, 5), randf_range(-3, 3)) + force * 0.4
 		rb.angular_velocity = Vector3(randf_range(-10, 10), randf_range(-10, 10), randf_range(-10, 10))
 		gibs_alive.append(rb)
-		get_tree().create_timer(randf_range(4.0, 6.0)).timeout.connect(func(): if is_instance_valid(rb): rb.queue_free(); gibs_alive.erase(rb))
+		var rid := rb.get_instance_id()
+		get_tree().create_timer(randf_range(4.0, 6.0)).timeout.connect(func():
+			var o := instance_from_id(rid)
+			if o: (o as Node).queue_free()
+			gibs_alive = gibs_alive.filter(func(g): return is_instance_valid(g)))
 	while gibs_alive.size() > MAX_GIBS:
 		var old = gibs_alive.pop_front()
 		if is_instance_valid(old): old.queue_free()

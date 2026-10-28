@@ -37,6 +37,16 @@ var pu_lbl: Label
 var stand_lbl: Label
 var stamina_bar: ProgressBar
 var shown_round := 0
+const NEON_A := Color(0.1, 0.95, 1.0)    ## cyan
+const NEON_B := Color(1.0, 0.15, 0.85)   ## magenta
+var deco: Control            ## neon frame strokes + painted tally
+var blood_rect: TextureRect  ## screen-space blood splatter when hurt
+var blood_a := 0.0
+var gas_t := 0.0
+var shown_points := 0.0
+var tick_cd := 0.0
+var tut_panel: Control
+var tut_lbl: Label
 
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
@@ -58,8 +68,16 @@ func _place(c: Control, preset: int, offset: Vector2, sz := Vector2(400, 60)) ->
 func _ready() -> void:
 	vignette = ColorRect.new(); vignette.color = Color(0.6, 0, 0, 0); vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE; add_child(vignette)
-	round_lbl = _lbl(88, Color(0.75, 0.05, 0.03)); _place(round_lbl, Control.PRESET_TOP_LEFT, Vector2(28, 8), Vector2(300, 110))
-	points_lbl = _lbl(40, Color(1, 0.92, 0.6), HORIZONTAL_ALIGNMENT_RIGHT); _place(points_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 20))
+	blood_rect = TextureRect.new(); blood_rect.texture = _blood_screen_tex(); blood_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	blood_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); blood_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	blood_rect.modulate.a = 0.0; add_child(blood_rect)
+	deco = Control.new(); deco.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); deco.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	deco.draw.connect(_draw_deco); add_child(deco)
+	# the painted tally is drawn by _draw_deco; the label only shows numbers past 10
+	round_lbl = _lbl(80, NEON_B.lerp(Color.WHITE, 0.15)); _place(round_lbl, Control.PRESET_TOP_LEFT, Vector2(40, 14), Vector2(300, 110))
+	round_lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.0, 0.12, 0.95)); round_lbl.add_theme_constant_override("outline_size", 14)
+	points_lbl = _lbl(42, Color(0.92, 1.0, 1.0), HORIZONTAL_ALIGNMENT_RIGHT); _place(points_lbl, Control.PRESET_TOP_RIGHT, Vector2(-30, 18))
+	points_lbl.add_theme_color_override("font_outline_color", Color(0.0, 0.25, 0.35, 0.95)); points_lbl.add_theme_constant_override("outline_size", 10)
 	perks_lbl = _lbl(22, Color(0.9, 0.9, 0.9), HORIZONTAL_ALIGNMENT_RIGHT); _place(perks_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 70), Vector2(500, 90))
 	fps_lbl = _lbl(16, Color(0.6, 0.6, 0.6), HORIZONTAL_ALIGNMENT_RIGHT); _place(fps_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 150), Vector2(200, 30))
 	ammo_lbl = _lbl(42, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT); _place(ammo_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-430, -70))
@@ -69,8 +87,8 @@ func _ready() -> void:
 	bark_lbl = _lbl(30, Color(1, 0.85, 0.3), HORIZONTAL_ALIGNMENT_CENTER); _place(bark_lbl, Control.PRESET_CENTER, Vector2(0, -60), Vector2(900, 50))
 	info_lbl = _lbl(24, Color(0.7, 1, 0.8), HORIZONTAL_ALIGNMENT_CENTER); _place(info_lbl, Control.PRESET_CENTER, Vector2(0, 170), Vector2(900, 40))
 	ability_lbl = _lbl(20, Color(0.7, 0.85, 1)); _place(ability_lbl, Control.PRESET_BOTTOM_LEFT, Vector2(28, -130), Vector2(400, 30))
-	health_bar = _bar(Color(0.8, 0.1, 0.1)); _place(health_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -90), Vector2(260, 16))
-	armor_bar = _bar(Color(0.3, 0.6, 1.0)); _place(armor_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -66), Vector2(260, 12))
+	health_bar = _bar(Color(0.95, 0.12, 0.35)); _place(health_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -90), Vector2(260, 16))
+	armor_bar = _bar(NEON_A); _place(armor_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -66), Vector2(260, 12))
 	armor_bar.max_value = 200
 	hit = Control.new(); hit.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); hit.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hit.draw.connect(_draw_center); add_child(hit)
@@ -100,7 +118,9 @@ func set_touch_layout(on: bool) -> void:
 func _bar(c: Color) -> ProgressBar:
 	var b := ProgressBar.new(); b.show_percentage = false
 	var fg := StyleBoxFlat.new(); fg.bg_color = c
-	var bg := StyleBoxFlat.new(); bg.bg_color = Color(0, 0, 0, 0.5)
+	fg.corner_radius_top_right = 6; fg.corner_radius_bottom_right = 6
+	var bg := StyleBoxFlat.new(); bg.bg_color = Color(0.03, 0.0, 0.08, 0.6)
+	bg.border_color = Color(NEON_A.r, NEON_A.g, NEON_A.b, 0.5); bg.set_border_width_all(1); bg.border_width_bottom = 2
 	b.add_theme_stylebox_override("fill", fg); b.add_theme_stylebox_override("background", bg)
 	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return b
@@ -139,6 +159,7 @@ func _draw_center() -> void:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
 
 func hitmarker(kill: bool, head := false) -> void:
+	if game and game.tutorial: game.tutorial.event("shoot")
 	hit_t = 0.25; hit_kill = kill; hit_head = head
 
 func kill_feed(head: bool) -> void:
@@ -163,6 +184,109 @@ static func tally(r: int) -> String:
 	if r <= 0: return ""
 	if r <= 5: return "卌" if r == 5 else "|".repeat(r)
 	return str(r)
+
+## Rounds 1-10 are painted as tally strokes (two gates of five); past that a big neon number.
+static func painted_strokes(r: int) -> int:
+	return r if r <= 10 else 0
+
+## Hand-painted look: each stroke is a tapered quad with per-round jitter, coloured cyan -> magenta.
+func _draw_deco() -> void:
+	var p = game.player if game else null
+	if p == null or game.over: return
+	var n := painted_strokes(shown_round)
+	var rs := RandomNumberGenerator.new()
+	var sc := round_lbl.scale.y
+	for i in n:
+		rs.seed = i * 977 + 13
+		var grp := i / 5; var k := i % 5
+		var base := Vector2(44 + grp * 120, 20)
+		var col := NEON_A.lerp(NEON_B, float(i) / 9.0)
+		var a: Vector2; var b: Vector2
+		if k < 4:
+			a = base + Vector2(k * 22 + rs.randf_range(-3, 3), rs.randf_range(0, 6))
+			b = a + Vector2(rs.randf_range(-5, 5), 76 * sc)
+		else:   # the gate slash
+			a = base + Vector2(-10, 62 * sc); b = base + Vector2(84, 10)
+		_stroke(a, b, 11.0, col, rs)
+	# neon underline for points + a slim corner bracket
+	var vp := deco.size
+	var y := 72.0
+	for j in 24:
+		var t0 := j / 24.0
+		deco.draw_line(Vector2(vp.x - 250 + t0 * 220, y), Vector2(vp.x - 250 + (t0 + 1.0 / 24.0) * 220, y), NEON_A.lerp(NEON_B, t0), 3.0)
+	deco.draw_line(Vector2(24, 120), Vector2(24, 18), Color(NEON_A, 0.55), 2.0)
+	deco.draw_line(Vector2(24, 18), Vector2(60, 18), Color(NEON_A, 0.55), 2.0)
+
+func _stroke(a: Vector2, b: Vector2, w: float, col: Color, rs: RandomNumberGenerator) -> void:
+	var d := (b - a).normalized(); var nrm := d.orthogonal()
+	var pts := PackedVector2Array()
+	var steps := 6
+	for s2 in steps + 1:
+		var t := float(s2) / steps
+		var ww := w * (0.55 + 0.45 * sin(t * PI)) * rs.randf_range(0.85, 1.1)
+		pts.append(a.lerp(b, t) + nrm * ww * 0.5)
+	for s2 in range(steps, -1, -1):
+		var t := float(s2) / steps
+		var ww := w * (0.55 + 0.45 * sin(t * PI)) * rs.randf_range(0.85, 1.1)
+		pts.append(a.lerp(b, t) - nrm * ww * 0.5)
+	var glow := PackedVector2Array()
+	for q in pts: glow.append(q + Vector2(2, 3))
+	deco.draw_colored_polygon(glow, Color(0.03, 0.0, 0.08, 0.8))
+	deco.draw_colored_polygon(pts, col)
+	deco.draw_line(a + nrm * 1.5, b + nrm * 1.5, Color(1, 1, 1, 0.35), 2.0)   # wet highlight
+
+func _blood_screen_tex() -> Texture2D:
+	var w := 320; var h := 180
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	var rs := RandomNumberGenerator.new(); rs.seed = 4242
+	var blobs: Array = []
+	for i in 46:
+		# splats hug the screen edges, more at the corners
+		var side := rs.randi() % 4
+		var pos := Vector2(rs.randf() * w, rs.randf() * h)
+		match side:
+			0: pos.x = rs.randf_range(0, w * 0.16)
+			1: pos.x = w - rs.randf_range(0, w * 0.16)
+			2: pos.y = rs.randf_range(0, h * 0.18)
+			3: pos.y = h - rs.randf_range(0, h * 0.18)
+		blobs.append([pos, rs.randf_range(4, 22)])
+	var field := PackedFloat32Array(); field.resize(w * h)
+	for bl in blobs:
+		var c: Vector2 = bl[0]; var r: float = bl[1]
+		for y in range(maxi(0, int(c.y - r)), mini(h, int(c.y + r) + 1)):
+			for x in range(maxi(0, int(c.x - r)), mini(w, int(c.x + r) + 1)):
+				var v := 1.0 - Vector2(x, y).distance_to(c) / r
+				if v > field[y * w + x]: field[y * w + x] = v
+	for y in h:
+		for x in w:
+			var v := field[y * w + x]
+			if v > 0.0: img.set_pixel(x, y, Color(0.32 - v * 0.12, 0.0, 0.01, smoothstep(0.0, 0.25, v) * 0.92))
+	return ImageTexture.create_from_image(img)
+
+## Onboarding strip: neon-bordered prompt + SKIP button, top-centre.
+func show_tutorial(on: bool) -> void:
+	if on and tut_panel == null:
+		tut_panel = PanelContainer.new()
+		var sb := StyleBoxFlat.new(); sb.bg_color = Color(0.02, 0.02, 0.06, 0.78)
+		sb.border_color = NEON_A; sb.set_border_width_all(2); sb.set_corner_radius_all(6); sb.content_margin_left = 18; sb.content_margin_right = 12
+		sb.content_margin_top = 8; sb.content_margin_bottom = 8
+		tut_panel.add_theme_stylebox_override("panel", sb)
+		var row := HBoxContainer.new(); row.add_theme_constant_override("separation", 18); tut_panel.add_child(row)
+		tut_lbl = _lbl(26, Color(0.85, 1.0, 1.0)); row.add_child(tut_lbl)
+		var skip := Button.new(); skip.text = "SKIP ▸"; skip.add_theme_font_size_override("font_size", 22)
+		skip.add_theme_color_override("font_color", NEON_B); skip.focus_mode = Control.FOCUS_NONE
+		skip.pressed.connect(game.end_tutorial); row.add_child(skip)
+		tut_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_TOP); tut_panel.position.y = 96
+		add_child(tut_panel)
+	if tut_panel: tut_panel.visible = on
+
+func set_tutorial(text: String) -> void:
+	if tut_lbl == null: return
+	tut_lbl.text = text
+	tut_panel.reset_size(); tut_panel.position.x = (get_viewport().get_visible_rect().size.x - tut_panel.size.x) / 2
+
+func gas_flash() -> void:
+	gas_t = 0.6
 
 func round_flash() -> void:
 	round_t = 1.0
@@ -198,7 +322,20 @@ func _process(dt: float) -> void:
 	if p == null: return
 	if shown_round == 0 and game.round > 0 and round_lbl.scale.y > 0.5: shown_round = game.round
 	round_lbl.text = tally(shown_round)
-	points_lbl.text = str(p.economy.points)
+	# points tick up instead of jumping, with a soft tick and a little pop
+	var target := float(p.economy.points)
+	if absf(target - shown_points) < 0.5 or shown_points > target: shown_points = target
+	else:
+		var before := int(shown_points)
+		shown_points = move_toward(shown_points, target, maxf(60.0, (target - shown_points) * 6.0) * dt)
+		tick_cd -= dt
+		if int(shown_points) != before and tick_cd <= 0.0:
+			tick_cd = 0.06; points_lbl.scale = Vector2.ONE * 1.12; points_lbl.pivot_offset = points_lbl.size * Vector2(1, 0.5)
+			if game.sfx: game.sfx.play("tick", -14, randf_range(0.95, 1.08))
+	points_lbl.text = str(int(shown_points))
+	points_lbl.scale = points_lbl.scale.lerp(Vector2.ONE, clampf(dt * 12, 0, 1))
+	round_lbl.visible = painted_strokes(shown_round) == 0
+	deco.queue_redraw()
 	var a: Ammo = p.ammo()
 	ammo_lbl.text = "RELOADING" if a.reloading() else "%d / %d" % [a.rounds, a.reserve]
 	ammo_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.25) if a.rounds == 0 and a.reserve == 0 else (Color(1, 0.85, 0.3) if a.reserve < a.weapon.mag_size else Color.WHITE))
@@ -241,7 +378,12 @@ func _process(dt: float) -> void:
 	desat = lerpf(desat, crit, clampf(dt * 3.0, 0, 1))
 	if game.env: game.env.adjustment_saturation = lerpf(1.0, 0.2, desat)
 	low += desat * 0.25 * absf(sin(Time.get_ticks_msec() / 1000.0 * PI * 1.3))
-	vignette.color.a = clampf(dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
+	blood_a = maxf(blood_a - dt * 0.35, low * low * 0.8)
+	if dmg_t > 0.45: blood_a = minf(1.0, blood_a + 0.35)
+	blood_rect.modulate.a = blood_a
+	gas_t = maxf(0.0, gas_t - dt)
+	vignette.color = Color(0.6, 0, 0, vignette.color.a).lerp(Color(0.3, 0.6, 0.05, vignette.color.a), clampf(gas_t * 2.0, 0, 1))
+	vignette.color.a = clampf(gas_t * 0.6 + dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
 	hit.queue_redraw()
 
 func show_game_over(round: int, kills: int) -> void:
