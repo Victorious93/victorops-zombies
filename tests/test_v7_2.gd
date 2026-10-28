@@ -33,3 +33,17 @@ func test_multimesh_helper_single_instance_node():
 func test_area_moods_are_distinct_and_cheap():
 	assert_eq(Scenery.AREA_MOODS.size(), 4)
 	for a in Scenery.AREA_MOODS: assert_lt(a[3], 10.0, "range-limited")
+
+func test_reload_pose_starts_and_ends_at_rest():
+	for t in [0.0, 1.0]:
+		var r := Viewmodel.reload_pose(t)
+		assert_almost_eq((r[0] as Vector3).length(), 0.0, 0.001); assert_almost_eq((r[1] as Vector3).length(), 0.0, 0.001)
+	var mid := Viewmodel.reload_pose(0.55)
+	assert_gt((mid[1] as Vector3).z, 0.5, "tilted mid-reload")
+
+func test_swap_pose_drops_then_settles_with_overshoot():
+	assert_eq(Viewmodel.swap_pose(0.0)[0], Vector3.ZERO)
+	assert_almost_eq((Viewmodel.swap_pose(0.7)[0] as Vector3).y, -0.25, 0.01, "fully down at 30%")
+	var mins := 0.0
+	for i in 20: mins = maxf(mins, (Viewmodel.swap_pose(0.3 - i * 0.015)[0] as Vector3).y)
+	assert_gt(mins, 0.0, "overshoots above rest before settling")

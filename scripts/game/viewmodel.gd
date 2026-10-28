@@ -196,12 +196,9 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	if sprint: rot.y += 0.6; rot.z += 0.25
 	# reload: tilt + dip, magazine pull/insert beats
 	if reload01 >= 0.0:
-		var k := sin(clampf(reload01, 0, 1) * PI)
-		off += Vector3(-0.03, -0.09, 0.02) * k
-		rot += Vector3(-0.35, 0.25, 0.75) * k
-		if reload01 > 0.45 and reload01 < 0.6: off.y += sin((reload01 - 0.45) / 0.15 * PI) * 0.03
-	# swap: dip out and back
-	off.y -= sin(swap_t * PI) * 0.25
+		var rp := reload_pose(reload01); off += rp[0]; rot += rp[1]
+	# swap: drop out of frame, then raise with a roll and a small settle overshoot
+	var sp := swap_pose(swap_t); off += sp[0]; rot += sp[1]
 	# knife / throw: lower the gun while the other hand acts
 	var lower := maxf(sin(clampf(knife_t, 0, 1) * PI), sin(clampf(throw_t, 0, 1) * PI))
 	off.y -= lower * 0.18; rot.x -= lower * 0.5
@@ -225,3 +222,32 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 		if was > 0.025 and flash_t <= 0.025:  # second frame: smaller, twisted, dimmer flicker
 			flash.scale *= 0.6; flash.rotation.z += 0.8; flash_light.light_energy *= 0.45
 		if flash_t <= 0.0: flash.visible = false; flash_light.light_energy = 0.0
+
+static func _smooth(a: float, b: float, t: float) -> float: return smoothstep(a, b, t)
+
+## Keyframed reload (procedural, eased): tilt in -> mag out (drop jolt) -> mag in (upward slap)
+## -> charge (snap back) -> settle. Returns [offset, rotation] added to the hip pose.
+static func reload_pose(t: float) -> Array:
+	t = clampf(t, 0.0, 1.0)
+	var tilt := _smooth(0.0, 0.18, t) * (1.0 - _smooth(0.82, 1.0, t))
+	var off := Vector3(-0.03, -0.09, 0.02) * tilt
+	var rot := Vector3(-0.3, 0.25, 0.75) * tilt
+	off.y -= sin(clampf((t - 0.24) / 0.14, 0.0, 1.0) * PI) * 0.025          # mag out: gun dips
+	off.y += sin(clampf((t - 0.5) / 0.1, 0.0, 1.0) * PI) * 0.035            # mag in: slap up
+	rot.x += sin(clampf((t - 0.5) / 0.1, 0.0, 1.0) * PI) * 0.12
+	var ch := sin(clampf((t - 0.72) / 0.1, 0.0, 1.0) * PI)                  # charge: pulled back
+	off.z += ch * 0.04; rot.z -= ch * 0.2
+	return [off, rot]
+
+## swap_t runs 1 -> 0. First third: drop out; rest: raise with ease-out-back and a roll-in.
+static func swap_pose(swap_t: float) -> Array:
+	if swap_t <= 0.0: return [Vector3.ZERO, Vector3.ZERO]
+	var p := 1.0 - clampf(swap_t, 0.0, 1.0)
+	var down: float
+	if p < 0.3: down = _smooth(0.0, 0.3, p)
+	else:
+		var u := (p - 0.3) / 0.7
+		var c1 := 1.70158; var c3 := c1 + 1.0
+		var back := 1.0 + c3 * pow(u - 1.0, 3) + c1 * pow(u - 1.0, 2)      # ease-out-back 0 -> 1 (overshoots)
+		down = 1.0 - back
+	return [Vector3(0.02, -0.25, 0.0) * down, Vector3(-0.5, 0.0, -0.35) * down]
