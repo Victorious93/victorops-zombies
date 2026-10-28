@@ -365,7 +365,19 @@ func _clip(dir: String) -> void:
 	game.sfx.play("round_start_v6", -1); game.duck_music(5.0); pl.add_trauma(0.45)
 	await _glide(Vector3(dp.x, 0.1, dp.z) - back * 1.0, dp + Vector3.UP * 1.2 - back * 8.0, 45)
 	await _snap(dir, "07_round_sting_touch_hud.png")
-	await _wait(100)
+	await _wait(60)
+	# v7.2 extension (~19 s): reload + weapon switch, then a tour of the per-area mood lighting.
+	var cpl = game.player
+	cpl.reload(); await _wait(40); await _snap(dir, "08_reload.png")
+	await _wait(30); cpl.swap(); await _wait(12); await _snap(dir, "09_weapon_switch.png")
+	await _wait(30)
+	await _glide(Vector3(-6, 0.1, -12.5), Vector3(-9, 1.2, -15), 140)
+	await _snap(dir, "10_generator_mood.png")
+	await _glide(Vector3(12, 0.1, 8), Vector3(16, 1.2, 4), 140)
+	await _snap(dir, "11_lab_mood.png")
+	await _glide(Vector3(32, 0.1, 14), Vector3(30, 1.0, 18), 120, true)
+	await _snap(dir, "12_pump_mood.png")
+	await _wait(30)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
