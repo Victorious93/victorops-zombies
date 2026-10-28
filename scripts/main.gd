@@ -299,7 +299,7 @@ func _clip(dir: String) -> void:
 	await _wait(1)
 	for k in walkers.size():
 		var z: Zombie = walkers[k]
-		if is_instance_valid(z): z.global_position = win.outside_point + Vector3(randf_range(-0.4, 0.4), 0, 0) - inward * (0.2 + k * 0.7)
+		if is_instance_valid(z): z.model.position.y = 0.0; z.model.rotation.x = 0.0; z.global_position = win.outside_point + Vector3(randf_range(-0.4, 0.4), 0, 0) - inward * (0.2 + k * 0.7)
 	await _glide(watch, win.center() + Vector3.UP * 0.2, 120)
 	await _snap(dir, "01_window_teardown.png")
 	await _glide(watch - inward * 0.1, win.center(), 110)
