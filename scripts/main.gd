@@ -156,6 +156,7 @@ func _hud(dir: String, prefix: String) -> void:
 	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
 	await _wait(40)
 	pl.bot_input = null
+	game.throw_power(Node3D.new())
 	pl.global_position = Vector3(-6, 0.1, 6); pl.yaw = -2.4; pl.pitch = -0.05; pl.velocity = Vector3.ZERO
 	for a in [["16x9", Vector2i(1456, 819), 0.0, 0.0], ["19_5x9", Vector2i(1774, 819), 0.052, 0.054], ["20x9", Vector2i(1820, 819), 0.046, 0.044]]:
 		get_window().size = a[1]
@@ -395,7 +396,7 @@ func _views(dir: String) -> void:
 		await _wait(45)
 		await _snap(sd, v[0] + ".png")
 	# zombies: close-up of each type, then a group line-up (intake, facing north)
-	pl.global_position = Vector3(0, 0.1, 6); pl.yaw = 0.0; pl.pitch = 0.0
+	pl.global_position = Vector3(0, 0.1, 6); pl.yaw = PI; pl.pitch = -0.05   # face south: the corridor light falls on the zombies, not behind them
 	for ty in (["walker", "sprinter", "bloater", "brute", "group"] if want.call("zombies") else []):
 		var list := ["walker", "sprinter", "bloater", "brute", "walker"] if ty == "group" else [ty]
 		var zs := []
@@ -403,7 +404,7 @@ func _views(dir: String) -> void:
 			var z: Zombie = game.spawn_zombie("", list[i])
 			var x := (i - (list.size() - 1) / 2.0) * 1.6
 			z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
-			z.global_position = Vector3(x, 0.05, 6.0 - (3.0 if ty != "group" else 6.5) - absf(x) * 0.3)
+			z.global_position = Vector3(x, 0.05, 6.0 + (2.6 if ty != "group" else 5.5) + absf(x) * 0.3)
 			z.set_physics_process(false)   # hold the pose for the portrait: no chasing into the lens
 			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
 			z.model.rotation.y = PI; z._locomotion()
