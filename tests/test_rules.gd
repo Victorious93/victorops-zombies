@@ -56,7 +56,7 @@ func test_perk_unaffordable():
 	assert_false(owned.has("quickhand")); assert_eq(e.points, 100)
 
 func test_three_original_perks():
-	assert_eq(Perks.ALL.size(), 4)
+	assert_eq(Perks.ALL.size(), 5)
 	assert_eq(Perks.ALL.ironhide.name, "Iron Hide Tonic")
 
 func test_crate_probabilities():

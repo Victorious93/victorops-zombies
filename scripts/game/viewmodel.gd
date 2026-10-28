@@ -29,7 +29,7 @@ var reload_phase := -1.0
 var model_name := ""
 
 func setup(sleeve: Color) -> void:
-	sleeve_mat = StandardMaterial3D.new(); sleeve_mat.albedo_color = sleeve.darkened(0.55); sleeve_mat.roughness = 0.95
+	sleeve_mat = StandardMaterial3D.new(); sleeve_mat.albedo_color = sleeve.darkened(0.55); sleeve_mat.roughness = 0.8; sleeve_mat.rim_enabled = true; sleeve_mat.rim = 0.4
 	flash = MeshInstance3D.new(); var q := QuadMesh.new(); q.size = Vector2(0.16, 0.16); flash.mesh = q
 	var fm := StandardMaterial3D.new(); fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fm.albedo_color = Color(1.0, 0.8, 0.45); fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -87,6 +87,11 @@ func set_weapon(w: WeaponDef) -> void:
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
 	if w.tier > 0: _tint_upgraded(gun, w.color)
+	else: _shade_metal(gun)
+	# small cool fill light so arms + gun are never pure silhouettes (short range: barely touches the world)
+	if fill == null:
+		fill = OmniLight3D.new(); fill.light_color = Color(0.7, 0.85, 1.0); fill.light_energy = 0.7
+		fill.omni_range = 0.9; fill.position = Vector3(-0.25, 0.25, 0.15); fill.light_specular = 0.6; add_child(fill)
 	var len: float = ModelLib.GUN_LEN.get(model_name, 0.4)
 	# arms: right hand on the grip, left hand under the fore-end
 	arms = Node3D.new(); add_child(arms)
@@ -110,6 +115,19 @@ func set_weapon(w: WeaponDef) -> void:
 	ModelLib.set_shadows(self, false)
 	if not first: swap_t = 1.0
 
+var fill: OmniLight3D
+
+func _shade_metal(n: Node) -> void:
+	if n is MeshInstance3D:
+		var mi := n as MeshInstance3D
+		for i in mi.mesh.get_surface_count():
+			var base := mi.mesh.surface_get_material(i)
+			if base is StandardMaterial3D:
+				var m := (base as StandardMaterial3D).duplicate() as StandardMaterial3D
+				m.rim_enabled = true; m.rim = 0.5; m.rim_tint = 0.3; m.roughness = minf(m.roughness, 0.55)
+				mi.set_surface_override_material(i, m)
+	for ch in n.get_children(): _shade_metal(ch)
+
 func _tint_upgraded(n: Node, c: Color) -> void:
 	if n is MeshInstance3D:
 		var mi := n as MeshInstance3D
@@ -117,7 +135,9 @@ func _tint_upgraded(n: Node, c: Color) -> void:
 			var base := mi.mesh.surface_get_material(i)
 			if base is StandardMaterial3D:
 				var m := (base as StandardMaterial3D).duplicate() as StandardMaterial3D
-				m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = 0.6
+				m.albedo_color = m.albedo_color.lerp(c, 0.35); m.metallic = maxf(m.metallic, 0.55); m.roughness = 0.35
+				m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = 0.12
+				m.rim_enabled = true; m.rim = 0.8; m.rim_tint = 0.6   # reads as overcharged metal, not a flat purple blob
 				mi.set_surface_override_material(i, m)
 	for ch in n.get_children(): _tint_upgraded(ch, c)
 
