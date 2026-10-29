@@ -109,3 +109,4 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | Godot Engine 4.7.2 runtime | https://godotengine.org | MIT |
 - audio/bed_generator.wav, bed_lab.wav, bed_damp.wav, bed_wind.wav — original, synthesised by tools/gen_audio.py (v7.3 per-area ambient beds). No third-party source.
 | v7.4 zombie outfits (worker hi-vis + hard hat, lab coat, guard uniform + cap) | Procedural boxes in code (`zombie.gd`) | Original, same license as repo |
+| v7.5 zombie outfits refit per body (zombie_a and zombie_b), rounded shells/domes/brims instead of boxes, hats seated on the skull | Procedural Godot primitive meshes in code (`zombie.gd`, CylinderMesh/SphereMesh); no third-party assets added | Original, same license as repo |

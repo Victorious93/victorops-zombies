@@ -86,7 +86,7 @@ func setup(p_game, p_window: WindowBarricade, round: int, p_type := "walker") ->
 			if ztype == "warden": speed = Rounds.WALK_SPEED * 1.7
 		"bloater":
 			runner = false; speed = Rounds.WALK_SPEED * 0.85; variant = "zombie_b"; voice_pitch *= 0.75
-	outfit = pick_outfit(ztype, randi()) if variant == "zombie_a" else ""   # parts are fitted to zombie_a
+	outfit = pick_outfit(ztype, randi())   # v7.5: fitted per variant
 	pre_maimed = outfit != "" and randf() < 0.2
 
 func _ready() -> void:
@@ -100,7 +100,8 @@ func _ready() -> void:
 	agent.path_desired_distance = 0.6; agent.target_desired_distance = 0.5
 	agent.radius = 0.4; agent.height = 1.8
 	add_child(agent)
-	var c := ModelLib.character(variant, HEIGHT * randf_range(0.94, 1.06))
+	var ch := HEIGHT * randf_range(0.94, 1.06); set_meta("char_h", ch)
+	var c := ModelLib.character(variant, ch)
 	model = c[0]; ap = c[1]
 	var td: Dictionary = ZombieTypes.ALL[ztype]
 	var sc: float = td.scale
@@ -264,23 +265,53 @@ var outfit := ""
 var pre_maimed := false   ## spawns already missing a forearm
 static func pick_outfit(type: String, roll: int) -> String:
 	return "" if ZombieTypes.is_heavy(type) or type == "bloater" else OUTFITS[posmod(roll, OUTFITS.size())]
-## [bone, size, offset, colour, emissive]
-## [bone, size, centre, colour, emissive]. Centre/size are in zombie_a's rest-pose model space
-## (measured: torso x +-0.235, z -0.30..0.04, y 0.37..0.72; skull top y 1.36). Parts follow the bone via its rest transform.
-static func outfit_parts(o: String) -> Array:
+## v7.5: [bone, shape, size, centre, colour, emissive]. shape: "shell" (rounded elliptical tube), "dome" (rounded cap), "brim", "patch".
+## Centre/size are in the character's height-normalised model space (HEIGHT = 1.8, front = +Z), measured per variant
+## with a vertex/bone probe. zombie_a: torso y 0.6..0.95, x +-0.31, z -0.40..0.06; hips y 0.45..0.6; skull top y 1.8 (z -0.09..0.37).
+## zombie_b: body y 0.5..1.1, x +-0.22, z -0.11..0.42; head top y 1.8 (x +-0.25, z -0.15..0.36). Hats sit ON the skull, not inside it.
+const FIT := {
+	"zombie_a": {"chest": ["Torso", Vector3(0, 0.77, -0.17), Vector3(0.68, 0.36, 0.52)], "hips": ["Hips", Vector3(0, 0.5, -0.17), Vector3(0.7, 0.2, 0.52)],
+		"head": ["Head", Vector3(0, 1.69, 0.19), Vector3(0.58, 0.22, 0.56)], "badge_z": 0.09},
+	"zombie_b": {"chest": ["Body", Vector3(0, 0.84, 0.06), Vector3(0.5, 0.42, 0.58)], "hips": ["Body", Vector3(0, 0.58, 0.05), Vector3(0.5, 0.16, 0.36)],
+		"head": ["Head", Vector3(0, 1.78, 0.1), Vector3(0.54, 0.2, 0.56)], "badge_z": 0.37},
+}
+static func outfit_parts(o: String, v := "zombie_a") -> Array:
+	if not FIT.has(v): return []
+	var f: Dictionary = FIT[v]
+	var ch: Array = f.chest; var hp: Array = f.hips; var hd: Array = f.head
+	var c: Vector3 = ch[1]; var cs: Vector3 = ch[2]; var h: Vector3 = hd[1]; var hs: Vector3 = hd[2]
+	var bz: float = f.badge_z
+	var top := c.y + cs.y * 0.3
 	match o:
-		"worker": return [["Torso", Vector3(0.5, 0.34, 0.38), Vector3(0, 0.55, -0.13), Color(0.95, 0.45, 0.05), false],
-			["Torso", Vector3(0.51, 0.035, 0.39), Vector3(0, 0.48, -0.13), Color(0.85, 0.9, 0.8), true],
-			["Torso", Vector3(0.51, 0.035, 0.39), Vector3(0, 0.62, -0.13), Color(0.85, 0.9, 0.8), true],
-			["Head", Vector3(0.5, 0.1, 0.52), Vector3(0, 1.37, 0.06), Color(0.9, 0.75, 0.1), false]]
-		"labcoat": return [["Torso", Vector3(0.51, 0.36, 0.39), Vector3(0, 0.55, -0.13), Color(0.82, 0.84, 0.8), false],
-			["Hips", Vector3(0.53, 0.24, 0.4), Vector3(0, 0.27, -0.13), Color(0.78, 0.8, 0.76), false],
-			["Torso", Vector3(0.1, 0.07, 0.02), Vector3(0.12, 0.62, 0.07), Color(0.3, 0.5, 0.7), false]]
-		"guard": return [["Torso", Vector3(0.5, 0.35, 0.39), Vector3(0, 0.55, -0.13), Color(0.1, 0.13, 0.24), false],
-			["Hips", Vector3(0.52, 0.06, 0.41), Vector3(0, 0.38, -0.13), Color(0.03, 0.03, 0.03), false],
-			["Head", Vector3(0.5, 0.08, 0.56), Vector3(0, 1.36, 0.08), Color(0.08, 0.1, 0.2), false],
-			["Torso", Vector3(0.07, 0.07, 0.02), Vector3(-0.12, 0.62, 0.07), Color(0.85, 0.7, 0.2), true]]
+		"worker": return [[ch[0], "shell", cs, c, Color(0.95, 0.45, 0.05), false],
+			[ch[0], "shell", Vector3(cs.x * 1.03, 0.035, cs.z * 1.03), c - Vector3(0, cs.y * 0.22, 0), Color(0.85, 0.9, 0.8), true],
+			[ch[0], "shell", Vector3(cs.x * 1.03, 0.035, cs.z * 1.03), c + Vector3(0, cs.y * 0.18, 0), Color(0.85, 0.9, 0.8), true],
+			[hd[0], "dome", hs, h, Color(0.9, 0.75, 0.1), false],
+			[hd[0], "brim", Vector3(hs.x * 1.2, 0.03, hs.z * 1.25), h - Vector3(0, hs.y * 0.25, -0.02), Color(0.85, 0.7, 0.1), false]]
+		"labcoat": return [[ch[0], "shell", cs * Vector3(1.02, 1.04, 1.02), c, Color(0.82, 0.84, 0.8), false],
+			[hp[0], "shell", hp[2] * Vector3(1.05, 1.6, 1.05), hp[1] - Vector3(0, hp[2].y * 0.4, 0), Color(0.78, 0.8, 0.76), false],
+			[ch[0], "patch", Vector3(0.1, 0.07, 0.02), Vector3(cs.x * 0.2, top, bz), Color(0.3, 0.5, 0.7), false]]
+		"guard": return [[ch[0], "shell", cs, c, Color(0.1, 0.13, 0.24), false],
+			[hp[0], "shell", Vector3(hp[2].x * 1.04, 0.06, hp[2].z * 1.04), hp[1] + Vector3(0, hp[2].y * 0.4, 0), Color(0.03, 0.03, 0.03), false],
+			[hd[0], "dome", hs * Vector3(1.0, 0.7, 1.0), h, Color(0.08, 0.1, 0.2), false],
+			[hd[0], "brim", Vector3(hs.x * 0.8, 0.025, hs.z * 0.6), h + Vector3(0, -hs.y * 0.15, hs.z * 0.45), Color(0.04, 0.05, 0.1), false],
+			[ch[0], "patch", Vector3(0.07, 0.07, 0.02), Vector3(-cs.x * 0.2, top, bz), Color(0.85, 0.7, 0.2), true]]
 	return []
+static var _mesh_cache := {}
+## Unit-sized rounded meshes (scaled per part) — no more raw boxes.
+static func part_mesh(shape: String) -> Mesh:
+	if not _mesh_cache.has(shape):
+		var m: Mesh
+		match shape:
+			"shell", "brim":
+				var cm := CylinderMesh.new(); cm.top_radius = 0.5; cm.bottom_radius = 0.5 if shape == "brim" else 0.53
+				cm.height = 1.0; cm.radial_segments = 14; cm.rings = 2; m = cm
+			"dome":
+				var sm := SphereMesh.new(); sm.radius = 0.5; sm.height = 1.0; sm.radial_segments = 14; sm.rings = 7; m = sm
+			_:
+				var bm := BoxMesh.new(); bm.size = Vector3.ONE; m = bm
+		_mesh_cache[shape] = m
+	return _mesh_cache[shape]
 static var _cloth_cache := {}
 static func cloth_mat(c: Color, emissive: bool) -> StandardMaterial3D:
 	var k := "%s|%s" % [c.to_html(), emissive]
@@ -292,24 +323,27 @@ static func cloth_mat(c: Color, emissive: bool) -> StandardMaterial3D:
 	return _cloth_cache[k]
 var outfit_nodes: Array = []
 func set_outfit(o: String) -> void:
-	outfit = o if variant == "zombie_a" else ""; _outfit()
+	outfit = o; _outfit()
 func _outfit() -> void:
 	for n in outfit_nodes: if is_instance_valid(n): n.queue_free()
 	outfit_nodes.clear()
 	if outfit == "" or skel == null: return
 	var model_from_skel := model.global_transform.affine_inverse() * skel.global_transform
-	for pt in outfit_parts(outfit):
+	var k := model_height() / HEIGHT   # parts are authored at HEIGHT; follow the per-zombie height jitter
+	for pt in outfit_parts(outfit, variant):
 		var bi := skel.find_bone(pt[0])
 		if bi < 0: continue
-		var bone_in_model := model_from_skel * skel.get_bone_global_rest(bi)
 		var ba := BoneAttachment3D.new(); ba.bone_name = pt[0]; skel.add_child(ba); outfit_nodes.append(ba)
-		var mi := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3.ONE; mi.mesh = bm
-		mi.material_override = cloth_mat(pt[3], pt[4])
-		var want := Transform3D(Basis.from_scale(pt[1]), pt[2])   # in model space
+		var mi := MeshInstance3D.new(); mi.mesh = part_mesh(pt[1])
+		mi.material_override = cloth_mat(pt[4], pt[5])
+		var want := Transform3D(Basis.from_scale(pt[2] * k), pt[3] * k)   # in model space
 		# BoneAttachment applies the bone pose in skeleton space; undo the skeleton->model part too
 		mi.transform = (model_from_skel * skel.get_bone_global_rest(bi)).affine_inverse() * want
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		ba.add_child(mi)
+## Height of the character in model space (ModelLib normalises it to HEIGHT * jitter).
+func model_height() -> float:
+	return float(get_meta("char_h", HEIGHT))
 func _maim_silently() -> void:
 	var b := "LowerArm.L" if randf() < 0.5 else "LowerArm.R"
 	if skel and skel.find_bone(b) >= 0: arm_lost = true; _pop_bone(b)
