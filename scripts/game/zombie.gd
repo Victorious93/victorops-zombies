@@ -86,6 +86,8 @@ func setup(p_game, p_window: WindowBarricade, round: int, p_type := "walker") ->
 			if ztype == "warden": speed = Rounds.WALK_SPEED * 1.7
 		"bloater":
 			runner = false; speed = Rounds.WALK_SPEED * 0.85; variant = "zombie_b"; voice_pitch *= 0.75
+	outfit = pick_outfit(ztype, randi()) if variant == "zombie_a" else ""   # parts are fitted to zombie_a
+	pre_maimed = outfit != "" and randf() < 0.2
 
 func _ready() -> void:
 	add_to_group("voz_zombie")
@@ -135,6 +137,8 @@ func _ready() -> void:
 		zpose = ZombiePose.new(); zpose.configure(ztype); skel.add_child(zpose)
 		_eyes()
 	_dress()
+	_outfit()
+	if pre_maimed: _maim_silently()
 	t = 0.9; groan_cd = randf_range(1, 6)
 	if drop_in:
 		# climbs over the yard wall: appears on top, drops down with a thud
@@ -254,6 +258,62 @@ func _dress() -> void:
 		var l := OmniLight3D.new(); l.light_color = Color(0.5, 1.0, 0.2); l.light_energy = 0.8; l.omni_range = 2.5
 		l.position = Vector3(0, 1.0, 0); add_child(l)
 
+## v7.4 variety: procedural (original) clothing on light zombies — worker hi-vis + hard hat, lab coat, guard uniform + cap, or bare rags.
+const OUTFITS := ["worker", "labcoat", "guard", "rags"]
+var outfit := ""
+var pre_maimed := false   ## spawns already missing a forearm
+static func pick_outfit(type: String, roll: int) -> String:
+	return "" if ZombieTypes.is_heavy(type) or type == "bloater" else OUTFITS[posmod(roll, OUTFITS.size())]
+## [bone, size, offset, colour, emissive]
+## [bone, size, centre, colour, emissive]. Centre/size are in zombie_a's rest-pose model space
+## (measured: torso x +-0.235, z -0.30..0.04, y 0.37..0.72; skull top y 1.36). Parts follow the bone via its rest transform.
+static func outfit_parts(o: String) -> Array:
+	match o:
+		"worker": return [["Torso", Vector3(0.5, 0.34, 0.38), Vector3(0, 0.55, -0.13), Color(0.95, 0.45, 0.05), false],
+			["Torso", Vector3(0.51, 0.035, 0.39), Vector3(0, 0.48, -0.13), Color(0.85, 0.9, 0.8), true],
+			["Torso", Vector3(0.51, 0.035, 0.39), Vector3(0, 0.62, -0.13), Color(0.85, 0.9, 0.8), true],
+			["Head", Vector3(0.5, 0.1, 0.52), Vector3(0, 1.37, 0.06), Color(0.9, 0.75, 0.1), false]]
+		"labcoat": return [["Torso", Vector3(0.51, 0.36, 0.39), Vector3(0, 0.55, -0.13), Color(0.82, 0.84, 0.8), false],
+			["Hips", Vector3(0.53, 0.24, 0.4), Vector3(0, 0.27, -0.13), Color(0.78, 0.8, 0.76), false],
+			["Torso", Vector3(0.1, 0.07, 0.02), Vector3(0.12, 0.62, 0.07), Color(0.3, 0.5, 0.7), false]]
+		"guard": return [["Torso", Vector3(0.5, 0.35, 0.39), Vector3(0, 0.55, -0.13), Color(0.1, 0.13, 0.24), false],
+			["Hips", Vector3(0.52, 0.06, 0.41), Vector3(0, 0.38, -0.13), Color(0.03, 0.03, 0.03), false],
+			["Head", Vector3(0.5, 0.08, 0.56), Vector3(0, 1.36, 0.08), Color(0.08, 0.1, 0.2), false],
+			["Torso", Vector3(0.07, 0.07, 0.02), Vector3(-0.12, 0.62, 0.07), Color(0.85, 0.7, 0.2), true]]
+	return []
+static var _cloth_cache := {}
+static func cloth_mat(c: Color, emissive: bool) -> StandardMaterial3D:
+	var k := "%s|%s" % [c.to_html(), emissive]
+	if not _cloth_cache.has(k):
+		var m := StandardMaterial3D.new(); m.albedo_color = c; m.roughness = 0.95
+		m.detail_enabled = true; m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL; m.detail_albedo = grime_tex()
+		if emissive: m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = 0.6
+		_cloth_cache[k] = m
+	return _cloth_cache[k]
+var outfit_nodes: Array = []
+func set_outfit(o: String) -> void:
+	outfit = o if variant == "zombie_a" else ""; _outfit()
+func _outfit() -> void:
+	for n in outfit_nodes: if is_instance_valid(n): n.queue_free()
+	outfit_nodes.clear()
+	if outfit == "" or skel == null: return
+	var model_from_skel := model.global_transform.affine_inverse() * skel.global_transform
+	for pt in outfit_parts(outfit):
+		var bi := skel.find_bone(pt[0])
+		if bi < 0: continue
+		var bone_in_model := model_from_skel * skel.get_bone_global_rest(bi)
+		var ba := BoneAttachment3D.new(); ba.bone_name = pt[0]; skel.add_child(ba); outfit_nodes.append(ba)
+		var mi := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3.ONE; mi.mesh = bm
+		mi.material_override = cloth_mat(pt[3], pt[4])
+		var want := Transform3D(Basis.from_scale(pt[1]), pt[2])   # in model space
+		# BoneAttachment applies the bone pose in skeleton space; undo the skeleton->model part too
+		mi.transform = (model_from_skel * skel.get_bone_global_rest(bi)).affine_inverse() * want
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ba.add_child(mi)
+func _maim_silently() -> void:
+	var b := "LowerArm.L" if randf() < 0.5 else "LowerArm.R"
+	if skel and skel.find_bone(b) >= 0: arm_lost = true; _pop_bone(b)
+
 func _collect_meshes(n: Node) -> void:
 	if n is MeshInstance3D: meshes.append(n)
 	for c in n.get_children(): _collect_meshes(c)
@@ -307,7 +367,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		_lose_arm()
 	if part == "legs" and not crawler:
 		leg_damage += dmg
-		if leg_damage > max_hp * 0.45 and anims.has("Crawl") and hp > 0 and randf() < 0.6:
+		if leg_damage > max_hp * 0.45 and anims.has("Crawl") and hp > 0:
 			_become_crawler()
 	if hp <= 0:
 		die(player, headshot, force, dmg)

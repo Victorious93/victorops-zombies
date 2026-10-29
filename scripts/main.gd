@@ -377,6 +377,8 @@ func _clip(dir: String) -> void:
 	await _snap(dir, "11_lab_mood.png")
 	await _glide(Vector3(32, 0.1, 14), Vector3(30, 1.0, 18), 120, true)
 	await _snap(dir, "12_pump_mood.png")
+	await _glide(Vector3(36, 0.1, -4), Vector3(40, 1.2, -10), 90)
+	await _snap(dir, "13_yard_decals.png")
 	await _wait(30)
 	get_tree().quit()
 
@@ -388,6 +390,7 @@ const VIEWS := [
 	["04_lab", Vector3(12, 0.1, 8), -0.7, 0.0],
 	["05_yard", Vector3(30, 0.1, 0), -1.9, 0.02],
 	["06_pump", Vector3(32, 0.1, 14), 2.6, 0.05],
+	["07_ironhide_close", Vector3(-7.0, 0.1, -14.0), PI / 2, 0.1],
 ]
 func _views(dir: String) -> void:
 	var sd := dir.path_join("scenery"); var vd := dir.path_join("viewmodel"); var zd := dir.path_join("zombies")
@@ -412,11 +415,13 @@ func _views(dir: String) -> void:
 		await _snap(sd, v[0] + ".png")
 	# zombies: close-up of each type, then a group line-up (intake, facing north)
 	pl.global_position = Vector3(0, 0.1, 0.5); pl.yaw = PI; pl.pitch = -0.05   # under the intake lamp, facing south: lit from the front, wall well behind
-	for ty in (["walker", "sprinter", "bloater", "brute", "warden", "group"] if want.call("zombies") else []):
-		var list := ["walker", "sprinter", "bloater", "brute", "sprinter"] if ty == "group" else [ty]
+	for ty in (["walker", "sprinter", "bloater", "brute", "warden", "group", "outfits"] if want.call("zombies") else []):
+		var list := ["walker", "sprinter", "bloater", "brute", "sprinter"] if ty == "group" else (["walker", "walker", "walker", "walker"] if ty == "outfits" else [ty])
 		var zs := []
 		for i in list.size():
 			var z: Zombie = game.spawn_zombie("", list[i])
+			while ty == "outfits" and z.variant != "zombie_a":   # outfits are fitted to zombie_a
+				game.zombies.erase(z); z.free(); z = game.spawn_zombie("", list[i])
 			var x := (i - (list.size() - 1) / 2.0) * 1.6
 			z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
 			z.global_position = Vector3(x, 0.05, 0.5 + (2.8 if ty != "group" else 4.6) + absf(x) * 0.3 + (1.2 if ty == "warden" else 0.0))
@@ -424,9 +429,12 @@ func _views(dir: String) -> void:
 			var d := pl.global_position - z.global_position; z.rotation.y = atan2(-d.x, -d.z)
 			z.model.rotation.y = PI; z._locomotion()
 			if z.zpose: z.zpose.reach_target = 1.0 if not z.runner else 0.7
+			if ty == "outfits":   # v7.4 line-up: worker, lab coat, guard, and a legless crawler
+				z.set_outfit(["worker", "labcoat", "guard", "rags"][i])
+				if i == 3: z.make_crawler(); z._locomotion()
 			zs.append(z)
 		await _wait(25)
-		await _snap(zd, ("%s_closeup.png" % ty) if ty != "group" else "group.png")
+		await _snap(zd, ("%s_closeup.png" % ty) if not ty in ["group", "outfits"] else ty + ".png")
 		for z in zs:
 			if is_instance_valid(z): z.queue_free()
 		game.zombies.clear(); await _wait(2)

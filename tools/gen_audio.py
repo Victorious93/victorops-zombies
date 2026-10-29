@@ -160,3 +160,16 @@ music += flp(noise(L/SR), 400)*0.08
 save("music", music, 0.7)
 
 print("ok", sorted(os.listdir(OUT)))
+
+# ---------------------------------------------------------------- v7.3 per-area ambient beds (original synthesis, 10 s loops)
+d = 10.0; x = t(d)
+def loopfade(y, f=0.5):
+    n = int(SR*f); y[:n] *= np.linspace(0,1,n); y[-n:] *= np.linspace(1,0,n); return y
+save("bed_generator", 0.5*np.sin(2*np.pi*60*x) + 0.3*np.sin(2*np.pi*120*x)*(0.7+0.3*np.sin(2*np.pi*4*x)) + loopfade(lp(noise(d),0.05))*0.6, 0.5)
+drips = np.zeros(len(x))
+for k in range(14):
+    s = int(rng.uniform(0.2, d-0.4)*SR); dx = t(0.15); f = rng.uniform(900, 1700)
+    drips[s:s+len(dx)] += np.sin(2*np.pi*f*(1-dx*2)*dx)*env(len(dx),0.0005,0.03)
+save("bed_damp", drips*0.6 + loopfade(lp(noise(d),0.01))*1.5, 0.45)
+save("bed_wind", loopfade(lp(noise(d),0.015))*3*(0.6+0.4*np.sin(2*np.pi*0.2*x)) + 0.15*np.sin(2*np.pi*220*x)*(0.5+0.5*np.sin(2*np.pi*0.1*x)), 0.5)
+save("bed_lab", 0.25*np.sin(2*np.pi*880*x)*(np.sin(2*np.pi*0.5*x)>0.6) + 0.35*np.sin(2*np.pi*100*x) + loopfade(lp(noise(d),0.08))*0.3, 0.4)

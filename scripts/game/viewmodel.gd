@@ -28,6 +28,11 @@ var sleeve_mat: StandardMaterial3D
 var reload_phase := -1.0
 var model_name := ""
 var overlay := false   ## render on the viewmodel layer (see ViewmodelOverlay)
+## Fore-end grip point, as a fraction of gun length ahead of centre.
+const FORE_AT := 0.24
+## v7.4: bulky guns sit lower, further right and further out at hip so they no longer fill the view.
+const HIP_TRIM := {launcher = Vector3(0.07, -0.09, -0.16)}
+static func hip_pos(model: String) -> Vector3: return HIP_POS + HIP_TRIM.get(model, Vector3.ZERO)
 var fps_arms: FpsArms   ## set by Player before set_weapon(); null in tests -> legacy glove props
 
 func setup(sleeve: Color) -> void:
@@ -101,7 +106,9 @@ func set_weapon(w: WeaponDef) -> void:
 	# arms: right hand on the grip, left hand under the fore-end
 	arms = Node3D.new(); add_child(arms)
 	var grip := Vector3(0.0, -0.06, len * 0.18)
-	var fore := Vector3(0.0, -0.045, -len * 0.22) if len > 0.3 else Vector3(-0.01, -0.07, len * 0.12)
+	var fore := Vector3(-0.01, -0.07, len * 0.12)
+	if len > 0.3:   # v7.3: palm goes under the real fore-end surface, measured from the mesh
+		fore = fore_point(model_name, len)
 	if fps_arms: fps_arms.attach(gun, grip, fore, len > 0.3)   # rigged CC0 arms reach the gun via IK
 	else:
 		arms.add_child(_hand(grip + Vector3(0.012, -0.01, 0.02), Vector3(-0.4, PI, 0.15)))
@@ -185,7 +192,7 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	sway = sway.lerp(Vector2.ZERO, clampf(dt * 8.0, 0, 1))
 	kick = lerpf(kick, 0.0, clampf(dt * 12.0, 0, 1))
 	swap_t = move_toward(swap_t, 0.0, dt * 3.0)
-	var target := HIP_POS.lerp(ADS_POS, ads_k)
+	var target := hip_pos(model_name).lerp(ADS_POS, ads_k)
 	var bob_amt := lerpf(1.0, 0.2, ads_k) * move01
 	var off := Vector3(sin(bob) * 0.012, -absf(cos(bob)) * 0.012, 0) * bob_amt
 	off += Vector3(-sway.x * 0.25, sway.y * 0.25, 0) * lerpf(1.0, 0.3, ads_k)
@@ -251,3 +258,11 @@ static func swap_pose(swap_t: float) -> Array:
 		var back := 1.0 + c3 * pow(u - 1.0, 3) + c1 * pow(u - 1.0, 2)      # ease-out-back 0 -> 1 (overshoots)
 		down = 1.0 - back
 	return [Vector3(0.02, -0.25, 0.0) * down, Vector3(-0.5, 0.0, -0.35) * down]
+
+## Fore-end underside grip point (gun space) per model, tuned against hip/ADS renders
+## (v7.3 tools: /tmp/arms3.sh); falls back to a fraction of the gun length.
+const FORE_GRIP := {
+	smg = Vector3(0.0, 0.026, -0.16), rifle = Vector3(0.0, 0.034, -0.15), lmg = Vector3(0.0, 0.05, -0.15),
+	shotgun = Vector3(0.0, -0.012, -0.12), launcher = Vector3(0.0, -0.1, -0.15), raygun = Vector3(0.0, 0.0, -0.1)}
+static func fore_point(model: String, len: float) -> Vector3:
+	return FORE_GRIP.get(model, Vector3(0.0, -0.015, -len * FORE_AT))

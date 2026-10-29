@@ -152,29 +152,62 @@ static func decal_tex(kind: String) -> Texture2D:
 	var t := ImageTexture.create_from_image(img); _decal_tex[kind] = t
 	return t
 
-func decal(kind: String, pos: Vector3, size: float, normal := Vector3.UP) -> Decal:
-	var d := Decal.new(); d.texture_albedo = decal_tex(kind)
-	d.size = Vector3(size, 0.6, size)
-	var y := normal.normalized()   # decals project along local -Y, so local +Y = surface normal
-	var x := (Vector3.UP.cross(y) if absf(y.y) < 0.9 else Vector3.RIGHT).normalized()
-	d.transform = Transform3D(Basis(x, y, x.cross(y)), pos)
-	if absf(y.y) > 0.9: d.rotate_object_local(Vector3.UP, rng.randf_range(-PI, PI))
-	d.cull_mask = 1; d.upper_fade = 0.3; d.lower_fade = 0.3
-	d.distance_fade_enabled = true; d.distance_fade_begin = 22.0; d.distance_fade_length = 6.0
-	map.add_child(d)
-	return d
+## v7.3: decals are alpha-blended quads batched into one MultiMesh per kind (3 draw calls for the whole
+## map). Godot's Decal node is not supported by the GL Compatibility renderer, which is also the phone
+## fallback, so the v6 Decal nodes never showed there.
+const DECAL_KINDS := ["blood", "grime", "crack"]
+const DECAL_LIFT := 0.015          ## metres off the surface (no z-fighting, no visible float)
+var _decal_xf := {}                ## kind -> Array[Transform3D]
 
+func decal(kind: String, pos: Vector3, size: float, normal := Vector3.UP) -> void:
+	if not _decal_xf.has(kind): _decal_xf[kind] = [] as Array[Transform3D]
+	_decal_xf[kind].append(decal_xform(pos, size, normal, rng.randf_range(-PI, PI)))
+
+## Quad (faces +Z) laid on a surface: +Z = normal, spun about it, lifted DECAL_LIFT.
+static func decal_xform(pos: Vector3, size: float, normal: Vector3, spin: float) -> Transform3D:
+	var z := normal.normalized()
+	var x := (Vector3.UP.cross(z) if absf(z.y) < 0.9 else Vector3.RIGHT).normalized()
+	var b := Basis(x, z.cross(x), z).rotated(z, spin).scaled(Vector3(size, size, 1.0))
+	return Transform3D(b, pos + z * DECAL_LIFT)
+
+static func decal_material(kind: String) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new(); m.albedo_texture = decal_tex(kind)
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 0.35 if kind == "blood" else 0.95   # wet blood catches the flashlight
+	m.shadow_to_opacity = false; m.render_priority = -1
+	return m
+
+func _flush_decals() -> void:
+	for k in _decal_xf:
+		var q := QuadMesh.new(); q.material = decal_material(k)
+		var xs: Array[Transform3D] = _decal_xf[k]
+		var mm := multimesh(q, xs, "Decals_" + k, 0.0)   # map-wide batch: no range cull
+		mm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		map.add_child(mm)
+
+## Per-area dressing: [rect, blood, grime, crack] counts. Busier where the horde breaks in.
+const DECAL_ZONES := [
+	[Rect2(-9, -9, 18, 18), 6, 8, 4],     # intake hall (spawn, window fights)
+	[Rect2(-9, -25, 18, 14), 3, 10, 5],   # generator wing: oil + soot
+	[Rect2(11, -9, 14, 18), 4, 5, 3],     # lab corridor
+	[Rect2(11, -25, 14, 14), 2, 6, 6],    # cold storage: cracked slab
+	[Rect2(27, -15, 18, 24), 5, 7, 4],    # loading yard
+	[Rect2(27, 11, 18, 18), 3, 9, 3],     # pump station
+]
 func _decals() -> void:
-	var kinds := ["blood", "grime", "grime", "crack"]
-	var zones := [Rect2(-9, -9, 18, 18), Rect2(-9, -25, 18, 14), Rect2(11, -9, 14, 18), Rect2(11, -25, 14, 14), Rect2(27, -15, 18, 24), Rect2(27, 11, 18, 18)]
-	for z in zones:
-		for i in 7:
-			var k: String = kinds[rng.randi() % kinds.size()]
-			decal(k, Vector3(rng.randf_range(z.position.x, z.end.x), 0.05, rng.randf_range(z.position.y, z.end.y)), rng.randf_range(1.2, 3.2))
-	# wall smears near the windows (where the horde breaks in) + cracks high on walls
-	for w in [[Vector3(-9.75, 1.2, 2.0), Vector3.RIGHT], [Vector3(-3.0, 1.0, 9.75), Vector3.BACK * -1], [Vector3(9.75, 1.6, 6.0), Vector3.LEFT],
-			[Vector3(-9.75, 2.6, -14.0), Vector3.RIGHT], [Vector3(18.0, 2.4, 9.75), Vector3.FORWARD], [Vector3(25.75, 1.4, -2.0), Vector3.LEFT]]:
-		decal("blood" if rng.randf() < 0.5 else "crack", w[0], rng.randf_range(1.0, 1.8), w[1])
+	for z in DECAL_ZONES:
+		var r: Rect2 = z[0]
+		for kind_i in 3:
+			for i in int(z[kind_i + 1]):
+				var p := Vector3(rng.randf_range(r.position.x + 0.5, r.end.x - 0.5), 0.0, rng.randf_range(r.position.y + 0.5, r.end.y - 0.5))
+				decal(DECAL_KINDS[kind_i], p, rng.randf_range(0.8, 2.8) if kind_i != 2 else rng.randf_range(1.2, 3.0))
+	# wall smears near the windows (where the horde breaks in), cracks high on walls, grime at wall bases
+	for w in [[Vector3(-9.75, 1.2, 2.0), Vector3.RIGHT], [Vector3(-3.0, 1.0, 9.75), Vector3.FORWARD], [Vector3(9.75, 1.6, 6.0), Vector3.LEFT],
+			[Vector3(-9.75, 2.6, -14.0), Vector3.RIGHT], [Vector3(18.0, 2.4, 9.75), Vector3.FORWARD], [Vector3(25.75, 1.4, -2.0), Vector3.LEFT],
+			[Vector3(-9.75, 0.5, -20.0), Vector3.RIGHT], [Vector3(9.75, 0.5, -4.0), Vector3.LEFT], [Vector3(25.75, 0.5, 4.0), Vector3.LEFT]]:
+		var k := "grime" if w[0].y < 0.8 else ("blood" if rng.randf() < 0.5 else "crack")
+		decal(k, w[0], rng.randf_range(1.0, 1.8), w[1])
+	_flush_decals()
 
 # ---------------------------------------------------------------- mist
 func _mist() -> void:

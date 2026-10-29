@@ -7,11 +7,11 @@ extends Node3D
 ## gun sways/bobs/recoils and the hands follow it.
 
 const SCALE := 0.1
-const FORE_REACH := 0.5
-## v7.2: support hand sits on the left flank of the fore-end and rolls palm-in so it reads on screen
-## instead of hiding under the receiver; shoulders 10 cm further forward so the left arm is not straight.
-const SUPPORT_OFFSET := Vector3(-0.06, 0.05, 0.0)
-const SUPPORT_ROLL := 0.6
+## Support-hand grip in gun space: fingers run across under the fore-end, palm faces up at it.
+const SUPPORT_FINGERS := Vector3(0.85, 0.2, -0.45)
+const SUPPORT_PALM := Vector3(0.25, 1.0, 0.0)
+const PALM_FROM_WRIST := 0.045   ## metres from the wrist joint to the palm centre along the fingers
+const PALM_GAP := 0.012          ## palm surface below the fore-end underside
 const SHOULDER_POS := Vector3(0, -0.24, -0.14)
 const GLOVE_COLOR := Color(0.17, 0.16, 0.12)
 var skel: Skeleton3D
@@ -62,13 +62,27 @@ func attach(gun: Node3D, grip: Vector3, fore: Vector3, two_handed: bool) -> void
 	target_r.position = grip + Vector3(0.035, 0.03, 0.035)
 	target_r.rotation = Vector3(-0.25, 0.0, 0.0)
 	if two_handed:
-		# support hand on the near half of the fore-end: the far end is beyond the rig's arm reach,
-		# which left the hand stretched out and floating beside the barrel
-		target_l.position = grip.lerp(fore, FORE_REACH) + SUPPORT_OFFSET
-		target_l.rotation = Vector3(-0.1, 0.0, SUPPORT_ROLL)
+		# v7.3: the palm (not the wrist) sits under the fore-end, palm up, fingers wrapping across to the
+		# far side and the index finger pointing down the barrel. The wrist basis is built straight from
+		# the rig's hand axes (fingers +Y, palm +X, index side +Z in wrist space).
+		var b := support_basis()
+		target_l.basis = b
+		target_l.position = support_wrist(fore, b)
+		hands.wrist_offset[1] = Basis.IDENTITY
 	else:   # pistol: support hand cups the firing hand
 		target_l.position = grip + Vector3(-0.04, 0.035, 0.045)
 		target_l.rotation = Vector3(-0.25, 0.0, 0.0)
+		hands.wrist_offset[1] = Basis.from_euler(Vector3(1.57, 0.0, 0.0))
 	if is_inside_tree():
 		ik.set_target_node(0, ik.get_path_to(target_r)); ik.set_target_node(1, ik.get_path_to(target_l))
 	hands.curl = [0.9, 0.75 if two_handed else 0.85]
+
+## Wrist basis for the support hand: X = palm normal, Y = fingers, Z = index side.
+static func support_basis() -> Basis:
+	var n := SUPPORT_PALM.normalized()
+	var f := (SUPPORT_FINGERS - n * SUPPORT_FINGERS.dot(n)).normalized()
+	return Basis(n, f, n.cross(f))
+
+## Wrist position that puts the palm centre just under `fore` (the fore-end underside point).
+static func support_wrist(fore: Vector3, b: Basis) -> Vector3:
+	return fore - b.y * PALM_FROM_WRIST - b.x * PALM_GAP
