@@ -24,6 +24,8 @@ var knife_t := 0.0
 var throw_t := 0.0
 var swap_t := 0.0
 var ads_k := 0.0
+const FILL_HIP := Vector3(-0.25, 0.25, 0.15)
+const FILL_ADS := Vector3(-0.18, 0.08, 0.32)
 var sleeve_mat: StandardMaterial3D
 var reload_phase := -1.0
 var model_name := ""
@@ -212,6 +214,9 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	position = position.lerp(target + off, clampf(dt * 18, 0, 1))
 	rotation = rotation.lerp(rot, clampf(dt * 16, 0, 1))
 	if sight: sight.visible = ads_k > 0.2
+	if fps_arms: fps_arms.set_ads(ads_k)
+	if fill:   # ADS: fill slides toward the eye-left so the gun's back face and the support glove are not a silhouette
+		fill.position = FILL_HIP.lerp(FILL_ADS, ads_k); fill.light_energy = lerpf(0.7, 1.1, ads_k)
 	if knife_t > 0.0:
 		knife_t -= dt / 0.35
 		var p := 1.0 - clampf(knife_t, 0, 1)

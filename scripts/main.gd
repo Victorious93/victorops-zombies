@@ -404,6 +404,26 @@ func _clip(dir: String) -> void:
 		await _glide(pl.global_position, rw.center() + Vector3.UP * 0.1, 18)
 	await _snap(dir, "17_repaired.png")
 	await _wait(20)
+	# v7.8 (~12 s): Mystery Crate roll -> beam, pulses, gold reveal; then ADS under a lamp (grip + light pool)
+	var cn: CrateNode = game.crate_node
+	var cfront := cn.global_position + cn.global_basis.z * 3.4; cfront.y = 0.1
+	pl.global_position = cfront
+	await _glide(cfront, cn.global_position + Vector3.UP * 1.2, 15)
+	cn.move_after = false; cn.start("lmg")
+	await _glide(cfront, cn.global_position + Vector3.UP * 1.4, 70)
+	await _snap(dir, "18_crate_rolling_beam.png")
+	await _glide(cfront, cn.global_position + Vector3.UP * 1.3, int(CrateNode.ROLL_TIME * 30) - 70 + 6)
+	await _snap(dir, "19_crate_reveal_flash.png")
+	await _glide(cfront, cn.global_position + Vector3.UP * 1.3, 50)
+	cn.close()
+	pl.global_position = Vector3(0, 0.1, 4.5)
+	await _glide(Vector3(0, 0.1, 4.5), Vector3(0, 0.0, -1.5), 40)
+	await _snap(dir, "20_light_pool.png")
+	pl.bot_input.ads = true
+	await _glide(Vector3(0, 0.1, 4.3), Vector3(0, 0.9, -6), 45)
+	await _snap(dir, "21_ads_support_grip.png")
+	pl.bot_input.ads = false
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
@@ -466,6 +486,7 @@ func _views(dir: String) -> void:
 		game.zombies.clear(); await _wait(2)
 	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.pitch = 0.0
 	for id in (Weapons.ALL_IDS if want.call("viewmodel") else []):
+		if vonly.begins_with("vm:") and not id in vonly.substr(3).split(","): continue   # VOZ_VIEW_ONLY=vm:rifle,smg
 		pl.loadout.give(Weapons.make(id)); pl.apply_reload_perk()
 		await _wait(50)
 		await _snap(vd, id + "_hip.png")
