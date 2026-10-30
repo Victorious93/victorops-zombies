@@ -442,9 +442,10 @@ func _clip(dir: String) -> void:
 	game.throw_power(lever if lever else Node3D.new())
 	await _wait(3)
 	await _snap(dir, "24_power_flash.png")
-	await _glide(pl.global_position, Vector3(lp.x - 6, 2.0, lp.z - 16), 14)
+	pl.global_position = Vector3(0, 0.1, 7.0)   # intake: two ceiling lamps in a line catch the wave
+	await _glide(pl.global_position, Vector3(0, 2.6, -18), 6)
 	await _snap(dir, "25_power_wave.png")
-	await _glide(pl.global_position, Vector3(lp.x - 6, 2.0, lp.z - 16), 60)
+	await _glide(pl.global_position, Vector3(0, 2.4, -18), 60)
 	await _snap(dir, "26_power_on.png")
 	await _wait(20)
 	get_tree().quit()
