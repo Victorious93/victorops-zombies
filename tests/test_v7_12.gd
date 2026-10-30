@@ -118,3 +118,16 @@ func test_alien_purchase_and_rift_bench() -> void:
 	assert_not_null(up); assert_eq(up.tier, 1); assert_eq(e.points, 0)
 	assert_eq(RiftBench.cost_for(up), -1, "Mk.3 is Forge-only")
 	assert_lt(RiftBench.COST, OverchargeForge.new().cost)
+
+func test_reaper_heat_glow_is_capped() -> void:
+	for h in [-1.0, 0.0, 0.5, 1.0, 5.0, 100.0]:
+		var e := Viewmodel.heat_energy(h)
+		assert_between(e, Viewmodel.HEAT_EMIT_MIN, Viewmodel.HEAT_EMIT_MAX)
+		assert_between(Viewmodel.heat_core_alpha(h), Viewmodel.HEAT_CORE_ALPHA_MIN, Viewmodel.HEAT_CORE_ALPHA_MAX)
+		assert_between(Viewmodel.heat_core_scale(h), 1.0, Viewmodel.HEAT_CORE_SCALE_MAX)
+	assert_true(Viewmodel.HEAT_EMIT_MAX <= 1.0, "emission cap stays readable")
+	var hot := Viewmodel.heat_color(1.0)
+	assert_true(hot.r > hot.g and hot.g > hot.b, "full heat is orange, not white")
+	assert_true(maxf(hot.r, maxf(hot.g, hot.b)) * Viewmodel.HEAT_EMIT_MAX < 1.0, "never blows out to white")
+	var m := Viewmodel.alien_material()
+	assert_true(m.emission_energy_multiplier <= Viewmodel.HEAT_EMIT_MAX)

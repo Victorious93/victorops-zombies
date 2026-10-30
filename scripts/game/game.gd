@@ -402,7 +402,10 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			if head: sfx.play("headshot_pop", -4 if killed else -9, randf_range(0.95, 1.08))
 			if killed: sfx.play("kill_confirm", -10)
 			if killed: sfx.play("gore", -8, randf_range(0.9, 1.1))
-			fx.blood_hit(r.position, dir)
+			# v7.12 fix: throttle mist for very fast guns so it can't stack into dark blobs
+			var now_ms := Time.get_ticks_msec()
+			if w.fire_interval >= 0.09 or now_ms - _blood_ms >= 120:
+				_blood_ms = now_ms; fx.blood_hit(r.position, dir)
 			if w.splash > 0.0: _splash(p, r.position, w, z)
 			_alt_ammo(p, z, w, dmg, killed)
 			if pierce > 0:
@@ -526,6 +529,8 @@ func _fx_sphere(at: Vector3, radius: float, c: Color) -> MeshInstance3D:
 	var tw := create_tween(); tw.tween_property(mi, "scale", Vector3.ONE, 0.15); tw.tween_property(m, "albedo_color:a", 0.0, 0.2)
 	tw.tween_callback(mi.queue_free)
 	return mi
+
+var _blood_ms := 0
 
 func _impact(at: Vector3, c: Color) -> void:
 	_fx_sphere(at, 0.06, c)

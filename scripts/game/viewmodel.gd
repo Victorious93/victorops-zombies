@@ -120,16 +120,38 @@ func _sleeve(from: Vector3, to: Vector3, r: float) -> MeshInstance3D:
 ## v7.12 Hive Reaper look: glowing organic shell over the LMG body, a huge drum, bio-veins.
 ## `heat` (0..1, the spin-up) drives the glow.
 var alien_mat: StandardMaterial3D
+var alien_core: MeshInstance3D
+## v7.12 fix: glow is clamped so long bursts read as hot green-orange, never white blow-out.
+const HEAT_EMIT_MIN := 0.25
+const HEAT_EMIT_MAX := 0.9
+const HEAT_CORE_ALPHA_MIN := 0.35
+const HEAT_CORE_ALPHA_MAX := 0.7
+const HEAT_CORE_SCALE_MAX := 1.2
+const COOL_GLOW := Color(0.15, 0.6, 0.25)
+const HOT_GLOW := Color(0.75, 0.38, 0.06)
+static func heat_energy(h: float) -> float:
+	return clampf(lerpf(HEAT_EMIT_MIN, HEAT_EMIT_MAX, clampf(h, 0.0, 1.0)), HEAT_EMIT_MIN, HEAT_EMIT_MAX)
+static func heat_color(h: float) -> Color:
+	return COOL_GLOW.lerp(HOT_GLOW, clampf(h, 0.0, 1.0))
+static func heat_core_alpha(h: float) -> float:
+	return clampf(lerpf(HEAT_CORE_ALPHA_MIN, HEAT_CORE_ALPHA_MAX, clampf(h, 0.0, 1.0)), HEAT_CORE_ALPHA_MIN, HEAT_CORE_ALPHA_MAX)
+static func heat_core_scale(h: float) -> float:
+	return clampf(1.0 + 0.2 * clampf(h, 0.0, 1.0), 1.0, HEAT_CORE_SCALE_MAX)
 var heat := 0.0:
 	set(v):
-		heat = v
-		if alien_mat: alien_mat.emission_energy_multiplier = 0.6 + 3.0 * v
+		heat = clampf(v, 0.0, 1.0)
+		if alien_mat:
+			alien_mat.emission = heat_color(heat); alien_mat.emission_energy_multiplier = heat_energy(heat)
+		if alien_core and is_instance_valid(alien_core):
+			var cm := alien_core.material_override as StandardMaterial3D
+			var c := heat_color(heat).lightened(0.3); c.a = heat_core_alpha(heat); cm.albedo_color = c
+			alien_core.scale = Vector3.ONE * heat_core_scale(heat)
 
 static func alien_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.12, 0.2, 0.14); m.roughness = 0.35; m.metallic = 0.2
-	m.emission_enabled = true; m.emission = Color(0.25, 1.0, 0.5); m.emission_energy_multiplier = 0.6
-	m.rim_enabled = true; m.rim = 0.6
+	m.albedo_color = Color(0.08, 0.14, 0.09); m.roughness = 0.6; m.metallic = 0.1
+	m.emission_enabled = true; m.emission = COOL_GLOW; m.emission_energy_multiplier = HEAT_EMIT_MIN
+	m.rim_enabled = true; m.rim = 0.15
 	return m
 
 static func alienize(g: Node3D) -> StandardMaterial3D:
@@ -140,8 +162,9 @@ static func alienize(g: Node3D) -> StandardMaterial3D:
 	cy.top_radius = len * 0.2; cy.bottom_radius = len * 0.2; cy.height = len * 0.16; drum.mesh = cy
 	drum.material_override = m; drum.rotation.z = PI / 2; drum.position = Vector3(0, -len * 0.16, -len * 0.05); g.add_child(drum)
 	var core := MeshInstance3D.new(); var sp := SphereMesh.new(); sp.radius = len * 0.07; sp.height = len * 0.14; core.mesh = sp
-	var cm := StandardMaterial3D.new(); cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; cm.albedo_color = Color(0.5, 1.0, 0.7)
-	core.material_override = cm; core.position = drum.position + Vector3(len * 0.09, 0, 0); g.add_child(core)
+	var cm := StandardMaterial3D.new(); cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	var cc := COOL_GLOW.lightened(0.3); cc.a = HEAT_CORE_ALPHA_MIN; cm.albedo_color = cc
+	core.name = "AlienCore"; core.material_override = cm; core.position = drum.position + Vector3(len * 0.09, 0, 0); g.add_child(core)
 	for i in 3:   # ribbed bio-veins along the barrel
 		var r := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = len * 0.05; tm.outer_radius = len * 0.07; r.mesh = tm
 		r.material_override = m; r.rotation.x = PI / 2; r.position = Vector3(0, 0.0, -len * (0.25 + 0.12 * i)); g.add_child(r)
@@ -161,8 +184,9 @@ func set_weapon(w: WeaponDef) -> void:
 	add_child(gun)
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
-	alien_mat = null
-	if w.id == Weapons.ALIEN: alien_mat = alienize(gun)
+	alien_mat = null; alien_core = null
+	if w.id == Weapons.ALIEN:
+		alien_mat = alienize(gun); alien_core = gun.find_child("AlienCore", true, false) as MeshInstance3D
 	elif w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
 	else: _shade_metal(gun)
 	var fc: Color = AltAmmo.COLORS.get(w.alt_ammo, Color(1.0, 0.8, 0.45))   # alt ammo tints the muzzle flash

@@ -740,13 +740,13 @@ func _annex_stations() -> void:
 	var v := Node3D.new(); v.position = HiddenRoom.VAULT_POS; v.rotation.y = PI / 2; add_child(v)
 	box(Vector3(1.4, 2.0, 0.4), Vector3(0, 1.0, 0), mats.plate, true, 1, v)
 	box(Vector3(0.9, 1.0, 0.15), Vector3(0, 1.2, 0.25), _emit(Color(0.3, 0.6, 1.0), 1.2), false, 1, v)
-	var vl := Label3D.new(); vl.text = "VAULT PLATING"; vl.font_size = 34; vl.pixel_size = 0.004; vl.shaded = false
-	vl.position = Vector3(0, 2.25, 0.25); v.add_child(vl)
+	var vl := Label3D.new(); vl.text = "VAULT PLATING"; vl.font_size = 28; vl.pixel_size = 0.0035; vl.shaded = false; vl.outline_size = 8
+	vl.position = Vector3(0, 1.85, 0.26); v.add_child(vl)
 	game.add_interactable(v.to_global(Vector3(0, 1.0, 1.0)), 2.0, func(pl): return game.vault_prompt(pl), func(pl): game.use_vault(pl))
 	# gun: Rift Bench (cheap first overcharge, no power needed)
 	var r := Node3D.new(); r.position = HiddenRoom.RIFT_POS; r.rotation.y = -PI / 2; add_child(r)
 	box(Vector3(1.8, 0.9, 0.8), Vector3(0, 0.45, 0), mats.metal, true, 1, r)
-	box(Vector3(1.2, 0.06, 0.5), Vector3(0, 0.93, 0), _emit(Color(0.75, 0.35, 1.0), 2.0), false, 1, r)
+	box(Vector3(1.2, 0.06, 0.5), Vector3(0, 0.93, 0), _emit(Color(0.6, 0.3, 0.9), 0.7), false, 1, r)
 	var rlab := Label3D.new(); rlab.text = "RIFT BENCH"; rlab.font_size = 34; rlab.pixel_size = 0.004; rlab.shaded = false
 	rlab.position = Vector3(0, 1.6, 0); r.add_child(rlab)
 	game.add_interactable(r.to_global(Vector3(0, 0.9, 1.0)), 2.0, func(pl): return game.rift_prompt(pl), func(pl): game.use_rift(pl))
@@ -759,8 +759,8 @@ func _annex_stations() -> void:
 	reaper_display.scale = Vector3.ONE * 1.8; reaper_display.position = Vector3(0, 1.55, 0); pd.add_child(reaper_display)
 	var spin := create_tween().set_loops(); spin.tween_property(reaper_display, "rotation:y", TAU, 6.0).from(0.0)
 	var gl := OmniLight3D.new(); gl.light_color = Color(0.3, 1.0, 0.55); gl.light_energy = 1.2; gl.omni_range = 3.0; gl.position.y = 1.6; pd.add_child(gl)
-	var pl3 := Label3D.new(); pl3.text = "HIVE REAPER\n%d" % Weapons.ALIEN_PRICE; pl3.font_size = 36; pl3.pixel_size = 0.004
-	pl3.shaded = false; pl3.modulate = Color(0.5, 1.0, 0.7); pl3.position = Vector3(0, 2.4, 0); pd.add_child(pl3)
+	var pl3 := Label3D.new(); pl3.text = "HIVE REAPER\n%d" % Weapons.ALIEN_PRICE; pl3.font_size = 28; pl3.pixel_size = 0.0035; pl3.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	pl3.shaded = false; pl3.modulate = Color(0.5, 1.0, 0.7); pl3.position = Vector3(0, 2.15, 0); pd.add_child(pl3)
 	game.add_interactable(pd.to_global(Vector3(0, 1.0, 1.4)), 2.0, func(pl): return game.reaper_prompt(pl), func(pl): game.buy_reaper(pl))
 
 func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
