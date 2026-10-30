@@ -44,6 +44,7 @@ var deco: Control            ## neon frame strokes + painted tally
 var blood_rect: TextureRect  ## screen-space blood splatter when hurt
 var blood_a := 0.0
 var gas_t := 0.0
+var power_t := 0.0   ## v7.9 power-on white-out flash
 var shown_points := 0.0
 var tick_cd := 0.0
 var tut_panel: Control
@@ -156,6 +157,8 @@ func _draw_center() -> void:
 		hit.draw_polyline(pts, Color(1, 0.08, 0.04, a), 9.0)
 		var tip := c + dir * (r + 24); var side := dir.orthogonal() * 16
 		hit.draw_colored_polygon(PackedVector2Array([tip, c + dir * (r + 6) + side, c + dir * (r + 6) - side]), Color(1, 0.1, 0.05, a))
+	if power_t > 0.0:
+		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(1.0, 0.96, 0.85, power_flash_alpha(power_t)))
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
 
@@ -290,6 +293,12 @@ func set_tutorial(text: String) -> void:
 func gas_flash() -> void:
 	gas_t = 0.6
 
+func power_flash() -> void:
+	power_t = 1.0
+
+## Quick white-out that fades; capped well below opaque so the HUD stays readable.
+static func power_flash_alpha(t: float) -> float: return clampf(t, 0.0, 1.0) * clampf(t, 0.0, 1.0) * 0.55
+
 func round_flash() -> void:
 	round_t = 1.0
 	round_lbl.scale = Vector2.ONE * 1.6
@@ -385,6 +394,7 @@ func _process(dt: float) -> void:
 	if dmg_t > 0.45: blood_a = minf(1.0, blood_a + 0.35)
 	blood_rect.modulate.a = blood_a
 	gas_t = maxf(0.0, gas_t - dt)
+	power_t = maxf(0.0, power_t - dt * 1.4)
 	vignette.color = Color(0.6, 0, 0, vignette.color.a).lerp(Color(0.3, 0.6, 0.05, vignette.color.a), clampf(gas_t * 2.0, 0, 1))
 	vignette.color.a = clampf(gas_t * 0.6 + dmg_t * 0.6 + low * low * 0.55 + (0.3 if p.is_downed else 0.0), 0, 0.75)
 	hit.queue_redraw()

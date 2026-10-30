@@ -830,9 +830,11 @@ func buy_door(p: Player, id: String) -> void:
 func throw_power(lever: Node3D) -> void:
 	if not facility.throw_power(): return
 	lever.rotation.x = -0.6
-	map.set_power(true)
+	var wave: float = map.power_cascade(lever.global_position if lever.is_inside_tree() else player.global_position)
 	sfx.play("power_on")
 	hud.banner("Power restored", 3.0)
+	hud.power_flash()
+	var g := create_tween(); g.tween_interval(wave * 0.5); g.tween_callback(func(): player.add_trauma(0.35))
 	env.ambient_light_energy = 0.5
 	if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	player.add_trauma(0.3)
@@ -848,6 +850,7 @@ func buy_perk(p: Player, id: String) -> void:
 	var err := Perks.buy(id, p.perks, p.economy, facility.power_on)
 	if err != "": _deny(err); return
 	sfx.play("perk")
+	p.vm.drink(Perks.ALL[id].color)
 	if id == "ironhide": p.set_max_health_from_perks()
 	if id == "quickhand": p.apply_reload_perk()
 	hud.info("%s active" % Perks.ALL[id].name)

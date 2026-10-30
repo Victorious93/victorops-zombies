@@ -107,11 +107,11 @@ func _ready() -> void:
 	flashlight.light_color = Color(1.0, 0.93, 0.8)
 	flashlight.position = Vector3(0.0, 0.02, -0.25); vm.add_child(flashlight)
 	flashlight.shadow_enabled = game != null and game.flashlight_shadows()
-	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand)
+	cam.add_child(vm.knife); cam.add_child(vm.grenade_hand); cam.add_child(vm.bottle)
 	fps_arms = FpsArms.new(); cam.add_child(fps_arms); vm.fps_arms = fps_arms
 	vm.set_weapon(weapon())
 	if game and DisplayServer.get_name() != "headless":
-		ViewmodelOverlay.to_layer(fps_arms); ViewmodelOverlay.to_layer(vm.knife); ViewmodelOverlay.to_layer(vm.grenade_hand)
+		ViewmodelOverlay.to_layer(fps_arms); ViewmodelOverlay.to_layer(vm.knife); ViewmodelOverlay.to_layer(vm.grenade_hand); ViewmodelOverlay.to_layer(vm.bottle)
 		vm_overlay = ViewmodelOverlay.new(); add_child(vm_overlay); vm_overlay.setup(cam, game.env)
 		vm.overlay = true; ViewmodelOverlay.to_layer(vm)
 
@@ -316,7 +316,7 @@ func _physics_process(dt: float) -> void:
 			reload_beats.bolt = true; game.sfx.play("rack", -4, 1.15 - weapon().weight * 0.15); game.sfx.play("bolt_v6", -2, 1.1 - weapon().weight * 0.12); vm.kick += 0.35; add_trauma(0.04)
 	else:
 		reload_beats = {}
-	if fire and not sprinting and vm.knife_t <= 0.0 and vm.throw_t <= 0.0:
+	if fire and not sprinting and vm.knife_t <= 0.0 and vm.throw_t <= 0.0 and not vm.drinking():
 		if weapon().automatic or not prev_fire:
 			try_fire(mv.length() > 0.1)
 	prev_fire = fire
