@@ -380,6 +380,30 @@ func _clip(dir: String) -> void:
 	await _glide(Vector3(36, 0.1, -4), Vector3(40, 1.2, -10), 90)
 	await _snap(dir, "13_yard_decals.png")
 	await _wait(30)
+	# v7.7 (~12 s): a legless zombie_b crawler hauling itself under a lamp's light pool, then a window repair.
+	pl.global_position = Vector3(0, 0.1, 5.5)
+	var cz: Zombie = game.spawn_zombie("", "walker")
+	while cz.variant != "zombie_b": game.zombies.erase(cz); cz.free(); cz = game.spawn_zombie("", "walker")
+	cz.drop_in = false; cz.global_position = Vector3(0.4, 0.05, -2.5); cz.state = Zombie.State.CHASE
+	cz.model.position.y = 0.0; cz.model.rotation.x = 0.0; cz.make_crawler()
+	await _glide(Vector3(0, 0.1, 5.5), Vector3(0.4, 0.2, -1.5), 60)
+	await _snap(dir, "14_crawler_light_pool.png")
+	await _glide(Vector3(0, 0.1, 5.8), cz.global_position + Vector3.UP * 0.2, 90)
+	await _snap(dir, "15_crawler_closer.png")
+	await _glide(Vector3(0, 0.1, 6.0), cz.global_position + Vector3.UP * 0.2, 60)
+	if is_instance_valid(cz) and cz.state != Zombie.State.DEAD: cz.take_damage(cz.hp + 1, true, pl, "head", Vector3.BACK * 3.0)
+	var rw: WindowBarricade = game.map.windows["w_west"]
+	var rin := (rw.inside_point - rw.outside_point); rin.y = 0; rin = rin.normalized()
+	rw.bar.damage(rw.bar.plank_hp * rw.bar.planks()); rw.refresh()
+	pl.global_position = rw.inside_point + rin * 0.6; pl.global_position.y = 0.1
+	await _glide(pl.global_position, rw.center() + Vector3.UP * 0.1, 20)
+	for k in rw.bar.max_planks:
+		game.repair_window(pl, rw)
+		await _wait(4)
+		if k == 2: await _snap(dir, "16_repair_slam.png")
+		await _glide(pl.global_position, rw.center() + Vector3.UP * 0.1, 18)
+	await _snap(dir, "17_repaired.png")
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
