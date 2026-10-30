@@ -139,6 +139,7 @@ func _ready() -> void:
 		_eyes()
 	_dress()
 	_outfit()
+	if zpose and has_hat(): zpose.head_twitch = 0.3   # hatted heads twitch less so caps stay seated
 	if pre_maimed: _maim_silently()
 	t = 0.9; groan_cd = randf_range(1, 6)
 	if drop_in:
@@ -271,9 +272,9 @@ static func pick_outfit(type: String, roll: int) -> String:
 ## zombie_b: body y 0.5..1.1, x +-0.22, z -0.11..0.42; head top y 1.8 (x +-0.25, z -0.15..0.36). Hats sit ON the skull, not inside it.
 const FIT := {
 	"zombie_a": {"chest": ["Torso", Vector3(0, 0.77, -0.17), Vector3(0.68, 0.36, 0.52)], "hips": ["Hips", Vector3(0, 0.5, -0.17), Vector3(0.7, 0.2, 0.52)],
-		"head": ["Head", Vector3(0, 1.69, 0.19), Vector3(0.58, 0.22, 0.56)], "badge_z": 0.09},
+		"head": ["Head", Vector3(0, 1.65, 0.12), Vector3(0.64, 0.36, 0.68)], "badge_z": 0.09},
 	"zombie_b": {"chest": ["Body", Vector3(0, 0.84, 0.06), Vector3(0.5, 0.42, 0.58)], "hips": ["Body", Vector3(0, 0.58, 0.05), Vector3(0.5, 0.16, 0.36)],
-		"head": ["Head", Vector3(0, 1.78, 0.1), Vector3(0.54, 0.2, 0.56)], "badge_z": 0.37},
+		"head": ["Head", Vector3(0, 1.62, 0.12), Vector3(0.68, 0.26, 0.62)], "badge_z": 0.37},
 }
 static func outfit_parts(o: String, v := "zombie_a") -> Array:
 	if not FIT.has(v): return []
@@ -287,14 +288,14 @@ static func outfit_parts(o: String, v := "zombie_a") -> Array:
 			[ch[0], "shell", Vector3(cs.x * 1.03, 0.035, cs.z * 1.03), c - Vector3(0, cs.y * 0.22, 0), Color(0.85, 0.9, 0.8), true],
 			[ch[0], "shell", Vector3(cs.x * 1.03, 0.035, cs.z * 1.03), c + Vector3(0, cs.y * 0.18, 0), Color(0.85, 0.9, 0.8), true],
 			[hd[0], "dome", hs, h, Color(0.9, 0.75, 0.1), false],
-			[hd[0], "brim", Vector3(hs.x * 1.2, 0.03, hs.z * 1.25), h - Vector3(0, hs.y * 0.25, -0.02), Color(0.85, 0.7, 0.1), false]]
+			[hd[0], "brim", Vector3(hs.x * 1.18, 0.03, hs.z * 1.18), h + Vector3(0, hs.y * 0.08, 0.02), Color(0.85, 0.7, 0.1), false]]
 		"labcoat": return [[ch[0], "shell", cs * Vector3(1.02, 1.04, 1.02), c, Color(0.82, 0.84, 0.8), false],
 			[hp[0], "shell", hp[2] * Vector3(1.05, 1.6, 1.05), hp[1] - Vector3(0, hp[2].y * 0.4, 0), Color(0.78, 0.8, 0.76), false],
 			[ch[0], "patch", Vector3(0.1, 0.07, 0.02), Vector3(cs.x * 0.2, top, bz), Color(0.3, 0.5, 0.7), false]]
 		"guard": return [[ch[0], "shell", cs, c, Color(0.1, 0.13, 0.24), false],
 			[hp[0], "shell", Vector3(hp[2].x * 1.04, 0.06, hp[2].z * 1.04), hp[1] + Vector3(0, hp[2].y * 0.4, 0), Color(0.03, 0.03, 0.03), false],
-			[hd[0], "dome", hs * Vector3(1.0, 0.7, 1.0), h, Color(0.08, 0.1, 0.2), false],
-			[hd[0], "brim", Vector3(hs.x * 0.8, 0.025, hs.z * 0.6), h + Vector3(0, -hs.y * 0.15, hs.z * 0.45), Color(0.04, 0.05, 0.1), false],
+			[hd[0], "dome", hs * Vector3(1.0, 0.85, 1.0), h, Color(0.08, 0.1, 0.2), false],
+			[hd[0], "brim", Vector3(hs.x * 0.75, 0.03, hs.z * 0.5), h + Vector3(0, hs.y * 0.12, hs.z * 0.45), Color(0.04, 0.05, 0.1), false],
 			[ch[0], "patch", Vector3(0.07, 0.07, 0.02), Vector3(-cs.x * 0.2, top, bz), Color(0.85, 0.7, 0.2), true]]
 	return []
 static var _mesh_cache := {}
@@ -324,6 +325,9 @@ static func cloth_mat(c: Color, emissive: bool) -> StandardMaterial3D:
 var outfit_nodes: Array = []
 func set_outfit(o: String) -> void:
 	outfit = o; _outfit()
+	if zpose: zpose.head_twitch = 0.3 if has_hat() else 1.0
+func has_hat() -> bool:
+	return outfit_parts(outfit, variant).any(func(p): return p[1] == "dome")
 func _outfit() -> void:
 	for n in outfit_nodes: if is_instance_valid(n): n.queue_free()
 	outfit_nodes.clear()
@@ -371,7 +375,7 @@ static func stride_rate(clip: String, v: float) -> float:
 func _locomotion() -> void:
 	var hv := Vector2(velocity.x, velocity.z).length()
 	ground_speed = hv if ground_speed < 0.0 else lerpf(ground_speed, hv, 0.15)
-	var clip := "Crawl" if crawler and anims.has("Crawl") else ("Run" if runner and anims.has("Run") else "Walk")
+	var clip := "Crawl" if crawler and anims.has("Crawl") else "Walk" if proc_crawl else ("Run" if runner and anims.has("Run") else "Walk")
 	if ground_speed < (0.25 if cur_anim == "Idle" else 0.12) and anims.has("Idle") and not crawler and is_physics_processing() and state != State.DEAD:
 		_play("Idle", 0.35)
 		return
@@ -401,7 +405,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		_lose_arm()
 	if part == "legs" and not crawler:
 		leg_damage += dmg
-		if leg_damage > max_hp * 0.45 and anims.has("Crawl") and hp > 0:
+		if leg_damage > max_hp * 0.45 and can_crawl() and hp > 0:
 			_become_crawler()
 	if hp <= 0:
 		die(player, headshot, force, dmg)
@@ -427,12 +431,24 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		if state == State.CHASE: stagger_t = maxf(stagger_t, HitReact.stagger_time(kind) * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
 
 func make_crawler() -> void:
-	if not crawler and state != State.DEAD and anims.has("Crawl"): _become_crawler()
+	if not crawler and state != State.DEAD and can_crawl(): _become_crawler()
+## zombie_a has a keyframed Crawl clip; zombie_b (simple rig) crawls procedurally: prone body, arms dragging.
+func can_crawl() -> bool:
+	return anims.has("Crawl") or (skel != null and skel.find_bone("Body") >= 0)
+var proc_crawl := false
+const CRAWL_PITCH := 1.38   ## prone: model pitched forward (rad)
+const CRAWL_LIFT := 0.16    ## chest height off the floor (m)
+const CRAWL_BACK := 0.85    ## shift so the torso, not the feet, sits on the collider
 
 func _become_crawler() -> void:
 	crawler = true; runner = false; speed *= 0.5
 	(shape.shape as CapsuleShape3D).height = 0.9; shape.position.y = 0.45
-	_pop_bone("LowerLeg.L" if randf() < 0.5 else "LowerLeg.R")
+	if anims.has("Crawl"): _pop_bone("LowerLeg.L" if randf() < 0.5 else "LowerLeg.R")
+	else:
+		proc_crawl = true
+		for b in ["Leg.L", "Leg.R"]: _pop_bone(b)   # legless: both legs torn off at the hip
+		if zpose: zpose.crawl = true
+		_crawl_pose(1.0)
 	if game:
 		game.fx.gibs(global_position + Vector3.UP * 0.4, 4, self)
 		game.fx.blood_burst(global_position + Vector3.UP * 0.4, Vector3.UP, false)
@@ -451,6 +467,12 @@ func _lose_arm() -> void:
 		var at := global_position + Vector3.UP * 1.2
 		game.fx.gibs(at, 3, self); game.fx.blood_burst(at, Vector3.UP * 0.4 + global_basis.x * (1.0 if b.ends_with("L") else -1.0), false)
 		game.sfx.play_at("gore", at, -6, randf_range(0.9, 1.1))
+
+## Lay the procedural crawler prone (k = blend 0..1 toward the pose).
+func _crawl_pose(k: float) -> void:
+	model.rotation.x = lerpf(model.rotation.x, CRAWL_PITCH, k)
+	model.position.y = lerpf(model.position.y, CRAWL_LIFT, k)
+	model.position.z = lerpf(model.position.z, CRAWL_BACK * model_height() / HEIGHT, k)
 
 func _pop_bone(bone: String) -> void:
 	if skel == null: return
@@ -721,7 +743,8 @@ func _physics_process(dt: float) -> void:
 				_unstick(dt, pl.global_position)
 	stagger_t -= dt
 	_tells(dt)
-	model.rotation.x = lerpf(model.rotation.x, lean if state == State.CHASE else 0.0, dt * 8.0) if state != State.RISE else model.rotation.x
+	if proc_crawl and state != State.DEAD: _crawl_pose(clampf(dt * 8.0, 0.0, 1.0))
+	else: model.rotation.x = lerpf(model.rotation.x, lean if state == State.CHASE else 0.0, dt * 8.0) if state != State.RISE else model.rotation.x
 	react_yaw = lerpf(react_yaw, 0.0, dt * 7.0); react_roll = lerpf(react_roll, 0.0, dt * 7.0)
 	model.rotation.y = PI + react_yaw; model.rotation.z = react_roll
 	groan_cd -= dt

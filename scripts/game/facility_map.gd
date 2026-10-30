@@ -465,7 +465,38 @@ func light(pos: Vector3, color: Color, energy: float, rng: float, flicker := tru
 	l.light_color = color; l.light_energy = energy; l.omni_range = rng; l.position = pos
 	l.omni_attenuation = 1.2
 	add_child(l)
+	if pos.y > 2.5 and energy >= 1.0: light_pool(l)
 	return l
+
+## v7.6 fake-baked light pool: a soft additive radial glow on the floor under every ceiling lamp, so lit
+## areas read like a lightmapped level (bright pool, dark falloff) even on GL Compatibility / phones where
+## real GI is unavailable. Child of the light, so it switches on/off (power, emergency) with it.
+const POOL_FRACTION := 0.5     ## pool diameter as a fraction of the light's range
+const POOL_STRENGTH := 0.32
+static var _pool_tex: GradientTexture2D
+static func pool_texture() -> GradientTexture2D:
+	if _pool_tex == null:
+		var g := Gradient.new()
+		g.offsets = PackedFloat32Array([0.0, 0.35, 0.7, 1.0])
+		g.colors = PackedColorArray([Color(1, 1, 1, 1), Color(0.75, 0.75, 0.75, 1), Color(0.22, 0.22, 0.22, 1), Color(0, 0, 0, 1)])
+		_pool_tex = GradientTexture2D.new(); _pool_tex.gradient = g; _pool_tex.width = 128; _pool_tex.height = 128
+		_pool_tex.fill = GradientTexture2D.FILL_RADIAL; _pool_tex.fill_from = Vector2(0.5, 0.5); _pool_tex.fill_to = Vector2(1.0, 0.5)
+	return _pool_tex
+static func pool_material(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_texture = pool_texture(); m.albedo_color = Color(c.r, c.g, c.b) * POOL_STRENGTH
+	m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED; m.disable_receive_shadows = true; m.render_priority = -2
+	return m
+var light_pools: Array = []
+func light_pool(l: OmniLight3D) -> MeshInstance3D:
+	var mi := MeshInstance3D.new(); mi.name = "LightPool"
+	var q := PlaneMesh.new(); var d := l.omni_range * POOL_FRACTION; q.size = Vector2(d, d); mi.mesh = q
+	mi.material_override = pool_material(l.light_color)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = Vector3(0, -l.position.y + 0.01, 0)   # on the floor under the lamp
+	l.add_child(mi); light_pools.append(mi)
+	return mi
 
 func apply_quality(d: Dictionary) -> void:
 	for l in shadow_lights:

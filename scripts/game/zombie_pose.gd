@@ -16,6 +16,8 @@ var _tw_goal := Quaternion.IDENTITY
 var _tw_cd := 0.0
 var _limp_side := 1.0 if randf() < 0.5 else -1.0
 var bones := {}
+var head_twitch := 1.0     ## 0..1 scale on the head twitch (hatted zombies keep their heads steadier)
+var crawl := false         ## procedural crawl (rigs without a Crawl clip): arms haul the prone body forward
 
 func configure(type: String) -> void:
 	match type:
@@ -41,7 +43,7 @@ func _process_modification_with_delta(dt: float) -> void:
 	reach = move_toward(reach, reach_target, dt * 2.5)
 	# hunch: forward bend (bone-local +X pitches the Quaternius spine forward)
 	_add("Abdomen", Vector3.RIGHT, hunch * 0.35); _add("Torso", Vector3.RIGHT, hunch * 0.45); _add("Neck", Vector3.RIGHT, -hunch * 0.3)
-	_add("Body", Vector3.RIGHT, hunch * 0.6)   # simple rig (zombie_b)
+	if not crawl: _add("Body", Vector3.RIGHT, hunch * 0.6)   # simple rig (zombie_b)
 	# lurch: torso rolls toward the bad leg on every other step
 	var ph := sin(_t * gait_hz * TAU * 0.5)
 	_add("Torso", Vector3.FORWARD, lurch * (ph * 0.6 + 0.4 * _limp_side)); _add("Body", Vector3.FORWARD, lurch * ph)
@@ -50,9 +52,16 @@ func _process_modification_with_delta(dt: float) -> void:
 	if _tw_cd <= 0.0:
 		_tw_cd = -log(maxf(randf(), 0.01)) / twitch_rate
 		_tw_goal = Quaternion.from_euler(Vector3(randf_range(-0.35, 0.25), randf_range(-0.5, 0.5), randf_range(-0.6, 0.6)))
-	_tw = _tw.slerp(_tw_goal, clampf(dt * 22.0, 0, 1))
+	_tw = _tw.slerp(Quaternion.IDENTITY.slerp(_tw_goal, head_twitch), clampf(dt * 22.0, 0, 1))
 	var hb := _bone("Head")
 	if hb >= 0: sk.set_bone_pose_rotation(hb, sk.get_bone_pose_rotation(hb) * _tw)
+	if crawl:
+		# prone: head lifts to look ahead; arms reach overhead and claw back in alternation
+		_add("Head", Vector3.RIGHT, -0.9)
+		var cph := _t * gait_hz * TAU * 0.5
+		_add("Arm.L", Vector3.RIGHT, -(2.3 + 0.55 * sin(cph))); _add("Arm.R", Vector3.RIGHT, -(2.3 - 0.55 * sin(cph)))
+		_add("Body", Vector3.FORWARD, 0.12 * sin(cph))
+		return
 	# reach: both arms swing forward/up toward the player, a little asymmetric
 	if reach > 0.01:
 		var sway := sin(_t * 3.0) * 0.12

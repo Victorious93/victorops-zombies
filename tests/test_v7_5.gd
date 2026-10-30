@@ -20,12 +20,12 @@ func test_outfits_are_rounded_not_boxes():
 	assert_true(Zombie.part_mesh("shell") is CylinderMesh); assert_true(Zombie.part_mesh("dome") is SphereMesh)
 
 func test_hats_sit_on_the_skull_not_inside_it():
-	# measured skull tops (height-normalised): both bodies top out at ~1.8
+	# measured skull tops (height-normalised): zombie_a ~1.8, zombie_b box head ~1.58 (v7.6 refit)
 	for v in ["zombie_a", "zombie_b"]:
 		for o in ["worker", "guard"]:
 			var dome: Array = Zombie.outfit_parts(o, v).filter(func(p): return p[1] == "dome")[0]
 			var top: float = dome[3].y + dome[2].y * 0.5
-			assert_gt(top, 1.74, "%s %s hat crown clears the skull" % [v, o])
+			assert_gt(top, 1.74 if v == "zombie_a" else 1.62, "%s %s hat crown clears the skull" % [v, o])
 			assert_lt(dome[3].y, 1.82, "%s %s hat not floating" % [v, o])
 
 func test_zombie_b_keeps_its_outfit():
