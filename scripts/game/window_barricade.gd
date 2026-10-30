@@ -11,6 +11,10 @@ var inside_point: Vector3
 var outside_point: Vector3
 var spawn_point: Vector3
 
+var rest: Array = []   ## each plank's nailed-in transform (slam_plank animates back to it)
+const SLAM_TIME := 0.16      ## v7.7 repair feel: plank flies from the player's hands into place
+const SLAM_FROM := Vector3(0.0, -0.55, -0.9)   ## start offset (local; -Z is inside, toward the player)
+
 func build(p_width: float) -> void:
 	width = p_width
 	var wood := StandardMaterial3D.new()
@@ -21,7 +25,7 @@ func build(p_width: float) -> void:
 		mi.mesh = bm; mi.material_override = wood
 		mi.position = Vector3(0, 1.12 + i * 0.18, 0.16 + (i % 2) * 0.04)
 		mi.rotation.z = randf_range(-0.18, 0.18)
-		add_child(mi); planks.append(mi)
+		add_child(mi); planks.append(mi); rest.append(mi.transform)
 	inside_point = to_global(Vector3(0, 0, -1.0))
 	outside_point = to_global(Vector3(0, 0, 1.1))
 	spawn_point = to_global(Vector3(randf_range(-2, 2), 0, 7.0))
@@ -34,6 +38,18 @@ func refresh() -> void:
 
 func center() -> Vector3:
 	return global_position + Vector3(0, 1.0, 0)
+
+## Repair feel: plank i swings in from the player's side, slams onto the frame with a small overshoot.
+## Returns the world point of impact (for dust/splinters).
+func slam_plank(i: int) -> Vector3:
+	if i < 0 or i >= planks.size(): return center()
+	var mi: MeshInstance3D = planks[i]; var r: Transform3D = rest[i]
+	mi.visible = true
+	mi.position = r.origin + SLAM_FROM; mi.rotation = Vector3(0.9, randf_range(-0.5, 0.5), r.basis.get_euler().z + randf_range(-0.6, 0.6))
+	var tw := create_tween()
+	tw.tween_property(mi, "transform", r.translated_local(Vector3(0, 0, 0.05)), SLAM_TIME).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+	tw.tween_property(mi, "transform", r, 0.09).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
+	return to_global(r.origin)
 
 ## Zombie rips the top plank: a loose copy is yanked outward, spins, drops and fades.
 func rip_plank() -> void:

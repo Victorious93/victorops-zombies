@@ -803,12 +803,20 @@ func end_tutorial() -> void:
 		settings.tutorial_done = true; save_settings(settings)
 
 func repair_window(p: Player, w: WindowBarricade) -> void:
+	var before := w.bar.planks()
 	var n := w.bar.repair_planks(p.cdef.repair_planks_per_use)
 	if n > 0 and tutorial: tutorial.event("rebuild")
 	if n > 0:
 		if p.economy.on_repair(n, p.cdef.repair_points_mult) == 0 and p.economy.repair_earned >= Economy.REPAIR_CAP_PER_ROUND:
 			hud.info("Repair points maxed this round")
 		w.refresh(); sfx.play_at("plank_place", w.center(), -2)
+		# v7.7 repair feel: each new plank slams in, kicks dust + splinters, and jolts the camera a touch
+		for i in range(before, before + n):
+			var hit := w.slam_plank(i)
+			get_tree().create_timer(WindowBarricade.SLAM_TIME).timeout.connect(func():
+				if is_instance_valid(w):
+					fx.splinters(hit); fx.dirt_burst(hit); sfx.play_at("plank_place", hit, -8, randf_range(0.8, 0.95)))
+		if p and is_instance_valid(p): p.add_trauma(0.07)
 
 func buy_door(p: Player, id: String) -> void:
 	var err := facility.buy_door(id, p.economy)
