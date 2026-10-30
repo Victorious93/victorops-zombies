@@ -85,8 +85,8 @@ static func drink_pose(p: float) -> Array:
 	var lower := _smooth(0.0, 0.15, p) * (1.0 - _smooth(0.82, 1.0, p))
 	var rise := _smooth(0.1, 0.35, p) * (1.0 - _smooth(0.75, 0.92, p))
 	var tip := _smooth(0.35, 0.5, p) * (1.0 - _smooth(0.68, 0.8, p))
-	var pos := Vector3(-0.02, lerpf(-0.32, -0.07, rise), lerpf(-0.3, -0.2, rise))
-	pos.y += tip * 0.02
+	var pos := Vector3(0.01, lerpf(-0.42, -0.17, rise), lerpf(-0.46, -0.38, rise))   # stays well past the near plane
+	pos.y += tip * 0.03; pos.z += tip * 0.03
 	var rot := Vector3(lerpf(0.0, 1.15, tip) + 0.15 * rise, 0.0, lerpf(0.25, 0.05, rise))
 	return [pos, rot, lower]
 
