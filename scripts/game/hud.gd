@@ -31,6 +31,9 @@ var feed_lbl: Label
 var feed_t := 0.0
 var streak := 0
 var round_t := 0.0
+var slam_lbl: Label
+var slam_age := 99.0
+const SLAM_TIME := 2.2   ## v7.10 big centre round-number slam duration
 var pause_panel: Control
 var touch_layout := false
 var grenade_lbl: Label
@@ -78,6 +81,9 @@ func _ready() -> void:
 	# the painted tally is drawn by _draw_deco; the label only shows numbers past 10
 	round_lbl = _lbl(80, NEON_B.lerp(Color.WHITE, 0.15)); _place(round_lbl, Control.PRESET_TOP_LEFT, Vector2(40, 14), Vector2(300, 110))
 	round_lbl.add_theme_color_override("font_outline_color", Color(0.05, 0.0, 0.12, 0.95)); round_lbl.add_theme_constant_override("outline_size", 14)
+	slam_lbl = _lbl(220, Color(0.85, 0.05, 0.03), HORIZONTAL_ALIGNMENT_CENTER); slam_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	slam_lbl.add_theme_color_override("font_outline_color", Color(0.08, 0.0, 0.0, 1.0)); slam_lbl.add_theme_constant_override("outline_size", 22)
+	slam_lbl.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); slam_lbl.modulate.a = 0.0; add_child(slam_lbl)
 	points_lbl = _lbl(42, Color(0.92, 1.0, 1.0), HORIZONTAL_ALIGNMENT_RIGHT); _place(points_lbl, Control.PRESET_TOP_RIGHT, Vector2(-30, 18))
 	points_lbl.add_theme_color_override("font_outline_color", Color(0.0, 0.25, 0.35, 0.95)); points_lbl.add_theme_constant_override("outline_size", 10)
 	perks_lbl = _lbl(22, Color(0.9, 0.9, 0.9), HORIZONTAL_ALIGNMENT_RIGHT); _place(perks_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 70), Vector2(500, 90))
@@ -161,6 +167,11 @@ func _draw_center() -> void:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(1.0, 0.96, 0.85, power_flash_alpha(power_t)))
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
+	var sb := slam_bar(slam_age)
+	if sb > 0.0:
+		var bw := hit.size.x * sb; var bh := hit.size.y * 0.035
+		hit.draw_rect(Rect2(Vector2((hit.size.x - bw) / 2, c.y - hit.size.y * 0.2), Vector2(bw, bh)), Color(0.7, 0.02, 0.0, 0.8 * sb))
+		hit.draw_rect(Rect2(Vector2((hit.size.x - bw) / 2, c.y + hit.size.y * 0.2 - bh), Vector2(bw, bh)), Color(0.7, 0.02, 0.0, 0.8 * sb))
 
 func hitmarker(kill: bool, head := false, armored := false) -> void:
 	hit_mark = GunFeel.hitmarker(kill, head, armored)
@@ -299,6 +310,20 @@ func power_flash() -> void:
 ## Quick white-out that fades; capped well below opaque so the HUD stays readable.
 static func power_flash_alpha(t: float) -> float: return clampf(t, 0.0, 1.0) * clampf(t, 0.0, 1.0) * 0.55
 
+## v7.10 round slam: the new round number crashes into the centre of the screen (big, blood red),
+## shudders, holds, then rises and fades while red bars wipe across.
+func round_slam(r: int) -> void:
+	slam_lbl.text = str(r); slam_age = 0.0
+static func slam_scale(a: float) -> float:
+	if a < 0.18: return lerpf(3.2, 0.92, ease(a / 0.18, 2.4))
+	if a < 0.32: return lerpf(0.92, 1.0, (a - 0.18) / 0.14)
+	return 1.0 + maxf(0.0, a - 1.4) * 0.25
+static func slam_alpha(a: float) -> float:
+	if a < 0.0 or a >= SLAM_TIME: return 0.0
+	if a < 0.12: return a / 0.12
+	return clampf((SLAM_TIME - a) / 0.8, 0.0, 1.0)
+static func slam_bar(a: float) -> float:  ## 0..1 width of the red wipe bars
+	return clampf(a / 0.25, 0.0, 1.0) * clampf((SLAM_TIME - a) / 0.6, 0.0, 1.0)
 func round_flash() -> void:
 	round_t = 1.0
 	round_lbl.scale = Vector2.ONE * 1.6
@@ -376,6 +401,12 @@ func _process(dt: float) -> void:
 	feed_t -= dt; feed_lbl.visible = feed_t > 0.0
 	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
 	round_t = maxf(0.0, round_t - dt * 0.8)
+	slam_age += dt
+	var sa := slam_alpha(slam_age); slam_lbl.modulate.a = sa
+	if sa > 0.0:
+		slam_lbl.pivot_offset = slam_lbl.size / 2; slam_lbl.scale = Vector2.ONE * slam_scale(slam_age)
+		var shake := maxf(0.0, 0.45 - slam_age) * 30.0
+		slam_lbl.position = Vector2(randf_range(-shake, shake), randf_range(-shake, shake) - maxf(0.0, slam_age - 1.4) * 60.0)
 	round_lbl.scale = round_lbl.scale.lerp(Vector2.ONE, clampf(dt * 3, 0, 1))
 	grenade_lbl.text = "Grenades %d  ·  Knife [V]" % p.equipment.grenades if not touch_layout else "Grenades %d" % p.equipment.grenades
 	banner_t -= dt; banner_lbl.visible = banner_t > 0

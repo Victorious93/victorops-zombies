@@ -266,7 +266,7 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-			sfx.play("sting", -6)
+			sfx.play("round_sting_v10", -2)
 			sfx.play("round_start_v6", -1)
 			if not boss_pending: announce("ann_round_v7", 1.4)
 			duck_music(5.0)
@@ -274,7 +274,7 @@ func _update_rounds(dt: float) -> void:
 			brute_pending = ZombieTypes.is_brute_round(round)
 			if brute_pending: hud.banner("Round %d · BRUTE" % round, 3.5)
 			tint = 1.0
-			hud.round_flash(); hud.tally_flip(round)
+			hud.round_flash(); hud.tally_flip(round); hud.round_slam(round)
 			if round > 1:
 				player.equipment.on_round_start()
 	elif to_spawn > 0:

@@ -448,6 +448,36 @@ func _clip(dir: String) -> void:
 	await _glide(pl.global_position, Vector3(0, 2.4, -18), 60)
 	await _snap(dir, "26_power_on.png")
 	await _wait(20)
+	# v7.10: a zombie claws up out of the floor in front of the camera
+	for z0 in game.zombies.duplicate(): if is_instance_valid(z0): z0.queue_free()
+	game.zombies.clear()
+	pl.global_position = Vector3(0, 0.1, 6.0); await _glide(pl.global_position, Vector3(0, 0.6, 2.5), 12)
+	var rz: Zombie = game.spawn_zombie("", "walker")
+	rz.drop_in = false; rz.state = Zombie.State.RISE; rz.t = Zombie.RISE_TIME; rz.model.position.y = -1.8
+	rz.global_position = Vector3(0, 0.05, 2.5); rz.rotation.y = 0.0
+	game.fx.dirt_burst(rz.global_position)
+	await _wait(20)
+	await _snap(dir, "27_ground_rise.png")
+	await _wait(40)
+	rz.set_physics_process(false); rz.state = Zombie.State.CHASE; rz.model.position.y = 0.0; rz.model.rotation.x = 0.0
+	await _glide(pl.global_position, rz.global_position + Vector3(0, 1.6, 0), 10)
+	# headshot: the head bone whips back on top of the animation
+	rz.take_damage(1, true, pl, "head", Vector3(0, 0, -6))
+	await _wait(3)
+	await _snap(dir, "28_head_snap.png")
+	await _wait(30)
+	rz.take_damage(1, false, pl, "body", Vector3(4, 0, -4))
+	await _wait(4)
+	await _snap(dir, "29_body_flinch.png")
+	await _wait(25)
+	# round change: blood-red number slams into the centre with the new sting
+	game.hud.round_flash(); game.hud.tally_flip(game.round + 1); game.hud.round_slam(game.round + 1)
+	game.sfx.play("round_sting_v10", -2); pl.add_trauma(0.45)
+	await _wait(5)
+	await _snap(dir, "30_round_slam.png")
+	await _wait(25)
+	await _snap(dir, "31_round_hold.png")
+	await _wait(60)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.

@@ -45,6 +45,13 @@ var stagger_t := 0.0
 var lunge_cd := 1.5
 var lunge_t := 0.0
 var windup_t := -1.0     ## >0: an attack is winding up and lands when it reaches 0
+const RISE_TIME := 1.5   ## v7.10 seconds to claw out of the ground
+var rise_kick := 0.0
+## v7.10 ground-rise height for progress k (0 buried → 1 standing): three jolting heaves, eased out.
+static func rise_offset(k: float) -> float:
+	k = clampf(k, 0.0, 1.0)
+	var steps := (floorf(k * 3.0) + smoothstep(0.0, 1.0, fmod(k * 3.0, 1.0) * 1.6)) / 3.0
+	return -1.8 * (1.0 - minf(steps, 1.0))
 var drop_in := false     ## spawned on top of the perimeter wall and drops down
 var drop_v := 0.0
 var skel: Skeleton3D
@@ -147,7 +154,7 @@ func _ready() -> void:
 		model.position.y = 2.6; t = 0.9
 		if anims.has("Run"): _play("Run", 0.1, 0.5)
 	else:
-		model.position.y = -1.8
+		model.position.y = -1.8; t = RISE_TIME
 		_play("Idle")
 		if game and game.fx: game.fx.dirt_burst(global_position)
 		if game and game.sfx: game.sfx.play_at("dirt_rise", global_position, -6, randf_range(0.85, 1.1))
@@ -207,9 +214,11 @@ var zpose: ZombiePose
 var eyes: Array = []
 static var _eye_mat: StandardMaterial3D
 ## Glowing eyes on the head bone (unshaded + bright emission so they bloom in the dark; no light per zombie).
+var head_snap: HeadSnap
 func _eyes() -> void:
 	var hb := skel.find_bone("Head")
 	if hb < 0: return
+	head_snap = HeadSnap.new(); head_snap.bone = hb; skel.add_child(head_snap)
 	if _eye_mat == null:
 		_eye_mat = StandardMaterial3D.new(); _eye_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_eye_mat.albedo_color = Color(1.0, 0.75, 0.2) * 2.2
@@ -425,6 +434,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	var hpart := "head" if headshot else ("leg" if part == "legs" else "torso")
 	var kind := HitReact.classify(hpart, float(dmg) / max_hp, side)
 	var pose := HitReact.pose(kind) * (0.35 if ZombieTypes.is_heavy(ztype) else 1.0)
+	if kind == HitReact.Kind.HEAD_SNAP and head_snap: head_snap.snap(randf_range(-1.0, 1.0))
 	if not crawler:
 		model.rotation.x = lean + pose.x if kind != HitReact.Kind.NONE else lean + clampf(-heavy * 0.9, -0.35, 0.0)
 		react_yaw = pose.y; react_roll = pose.z
@@ -649,8 +659,13 @@ func _physics_process(dt: float) -> void:
 					game.sfx.play_at("land_thud", global_position, -6, randf_range(0.8, 1.0))
 					_play("Idle", 0.1)
 			else:
-				model.position.y = lerpf(model.position.y, 0.0, dt * 4)
-				model.rotation.x = sin(t * 9.0) * 0.12 * t  # claws and lurches up out of the dirt
+				# v7.10: staged claw-out — lurches up in jolts, kicking dirt each heave
+				var k := clampf(1.0 - t / RISE_TIME, 0.0, 1.0)
+				model.position.y = rise_offset(k)
+				model.rotation.x = sin(t * 9.0) * 0.18 * (1.0 - k) - 0.25 * (1.0 - k)
+				rise_kick -= dt
+				if rise_kick <= 0.0 and k < 0.9 and game and game.fx:
+					rise_kick = 0.32; game.fx.dirt_burst(global_position + Vector3(randf_range(-0.3, 0.3), 0, randf_range(-0.3, 0.3)))
 			if t <= 0.0:
 				model.rotation.x = 0
 				model.position.y = 0; state = State.TO_WINDOW; agent.target_position = window.outside_point
