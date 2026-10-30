@@ -79,6 +79,7 @@ func setup(p_game, p_window: WindowBarricade, round: int, p_type := "walker") ->
 	gait = Gait.Tier.SPRINT if Rounds.is_special(round) else Gait.pick(round, randf())
 	runner = gait != Gait.Tier.WALK
 	speed = Gait.speed(gait, round) * randf_range(0.9, 1.12)
+	spawn_round = round; lean = Gait.lean(gait)
 	variant = "zombie_b" if randf() < 0.35 else "zombie_a"
 	voice = randi() % 5 + 1
 	voice_pitch = randf_range(0.78, 1.22) * (0.88 if variant == "zombie_b" else 1.0)
@@ -452,6 +453,26 @@ func mark_last() -> void:
 	last_glow = OmniLight3D.new(); last_glow.light_color = Color(1.0, 0.1, 0.05); last_glow.light_energy = 1.6
 	last_glow.omni_range = 3.0; last_glow.position = Vector3(0, 1.2, 0); last_glow.shadow_enabled = false
 	add_child(last_glow)
+	# v7.12: unshaded pulsing red rim on every mesh so it reads even under bright lamps
+	if _rim_last == null:
+		_rim_last = ShaderMaterial.new(); _rim_last.shader = load("res://shaders/last_rim.gdshader")
+	for m in meshes:
+		if m is GeometryInstance3D: (m as GeometryInstance3D).material_overlay = _rim_last
+static var _rim_last: ShaderMaterial
+## v7.12 rim strength (0..1) for the pulse at time t: never fully dark so the outline always reads.
+static func last_pulse(t: float) -> float: return 0.55 + 0.45 * (0.5 + 0.5 * sin(t * TAU * 1.4))
+## v7.12 sprint ramp: in later rounds a chaser speeds up the longer it hunts (walk → jog → sprint).
+var spawn_round := 1
+var chase_time := 0.0
+func _ramp(dt: float) -> void:
+	if crawler or ZombieTypes.is_heavy(ztype) or ztype != "walker": return
+	chase_time += dt
+	var nt := Gait.ramp(gait, spawn_round, chase_time)
+	if nt == gait: return
+	gait = nt; runner = true
+	speed = Gait.speed(gait, spawn_round) * randf_range(0.95, 1.08)
+	lean = Gait.lean(gait)
+	if game and game.sfx: game.sfx.play_at("groan%d" % voice, global_position + Vector3.UP * 1.5, 0, voice_pitch * 1.25)
 func make_crawler() -> void:
 	if not crawler and state != State.DEAD and can_crawl(): _become_crawler()
 ## zombie_a has a keyframed Crawl clip; zombie_b (simple rig) crawls procedurally: prone body, arms dragging.
@@ -727,6 +748,7 @@ func _physics_process(dt: float) -> void:
 		State.CHASE:
 			var pl = game.player
 			if pl == null: return
+			_ramp(dt)
 			var d := _flat_dist(pl.global_position)
 			if zpose: zpose.reach_target = 1.0 if (d < 7.0 and attack_anim_t <= 0.0 and not crawler and not runner) else (0.4 if d < 7.0 and runner else 0.0)
 			var dy: float = absf(pl.global_position.y - global_position.y)

@@ -32,6 +32,18 @@ var feed_t := 0.0
 var streak := 0
 var round_t := 0.0
 var slam_lbl: Label
+var pops: Array = []   ## v7.12 [{n, age, x}] points pop-ups beside the crosshair
+const POP_LIFE := 0.9
+func points_pop(n: int) -> void:
+	pops.append({"n": n, "age": 0.0, "x": randf_range(-6.0, 6.0)})
+	if pops.size() > 6: pops.pop_front()
+static func pop_rise(age: float) -> float: return -60.0 * ease(clampf(age / POP_LIFE, 0.0, 1.0), 0.5)
+static func pop_alpha(age: float) -> float: return clampf((POP_LIFE - age) / 0.35, 0.0, 1.0)
+static func pop_color(n: int) -> Color:
+	if n >= 100: return Color(1.0, 0.78, 0.2)
+	if n >= 50: return Color(1.0, 0.95, 0.5)
+	return Color(1.0, 1.0, 0.9)
+static func pop_size(n: int) -> int: return 34 if n >= 100 else (28 if n >= 50 else 22)
 var pickup_t := 0.0
 var pickup_col := Color.WHITE
 ## v7.11 power-up grab flash: a full-screen wash in the drop's colour, fast in, eased out.
@@ -173,6 +185,12 @@ func _draw_center() -> void:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(1.0, 0.96, 0.85, power_flash_alpha(power_t)))
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
+	var pf := ThemeDB.fallback_font
+	for pp in pops:
+		var n: int = pp.n; var a: float = pp.age
+		var col := pop_color(n); col.a = pop_alpha(a)
+		hit.draw_string_outline(pf, c + Vector2(46 + pp.x, -10 + pop_rise(a)), "+%d" % n, HORIZONTAL_ALIGNMENT_LEFT, -1, pop_size(n), 6, Color(0, 0, 0, col.a * 0.8))
+		hit.draw_string(pf, c + Vector2(46 + pp.x, -10 + pop_rise(a)), "+%d" % n, HORIZONTAL_ALIGNMENT_LEFT, -1, pop_size(n), col)
 	if pickup_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(pickup_col.r, pickup_col.g, pickup_col.b, pickup_alpha(pickup_t)))
 	var sb := slam_bar(slam_age)
@@ -410,6 +428,8 @@ func _process(dt: float) -> void:
 	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
 	round_t = maxf(0.0, round_t - dt * 0.8)
 	slam_age += dt
+	for pp in pops: pp.age += dt
+	pops = pops.filter(func(pp): return pp.age < POP_LIFE)
 	pickup_t = maxf(0.0, pickup_t - dt * 1.6)
 	var sa := slam_alpha(slam_age); slam_lbl.modulate.a = sa
 	if sa > 0.0:

@@ -499,7 +499,25 @@ func _clip(dir: String) -> void:
 	game._last_zombie_cue(gz)
 	await _wait(30)
 	await _snap(dir, "35_last_zombie.png")
-	await _wait(60)
+	await _wait(30)
+	# v7.12: points pop beside the crosshair (hit, kill, headshot kill)
+	game.hud.points_pop(10); await _wait(4); game.hud.points_pop(50); await _wait(4); game.hud.points_pop(100)
+	await _wait(5)
+	await _snap(dir, "36_points_pops.png")
+	await _wait(30)
+	# v7.12: a late-round walker that has hunted long enough breaks into a leaning sprint
+	if is_instance_valid(gz): gz.queue_free()
+	game.zombies.clear()
+	pl.global_position = Vector3(0, 0.1, 7.0)
+	var sz: Zombie = game.spawn_zombie("", "walker")
+	sz.state = Zombie.State.CHASE; sz.model.position.y = 0.0; sz.global_position = Vector3(0, 0.05, -6.0)
+	sz.spawn_round = 12; sz.gait = Gait.Tier.WALK; sz.chase_time = 60.0; sz.max_hp = 100000; sz.hp = 100000
+	await _glide(pl.global_position, Vector3(0, 1.0, -6.0), 8)
+	await _wait(20)
+	await _snap(dir, "37_sprint_ramp.png")
+	await _wait(25)
+	await _snap(dir, "38_sprint_close.png")
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.

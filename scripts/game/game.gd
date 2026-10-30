@@ -266,9 +266,9 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-			sfx.play("round_sting_v10", ROUND_MIX.round_sting_v10)
+			cue("round_sting_v10", ROUND_MIX.round_sting_v10, CueQueue.Prio.ROUND)
 			sfx.play("round_start_v6", ROUND_MIX.round_start_v6)
-			if not boss_pending: announce("ann_round_v7", ROUND_MIX.ann_round_delay)
+			if not boss_pending: cue("ann_round_v7", 0, CueQueue.Prio.VOICE, true, ROUND_MIX.ann_round_delay)
 			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
 			brute_pending = ZombieTypes.is_brute_round(round)
@@ -336,7 +336,7 @@ func _part_of(z: Zombie, y: float) -> String:
 
 func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
-	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain
+	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain; hud.points_pop(gain)
 
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
@@ -636,8 +636,9 @@ func collect_power(id: String) -> void:
 	var d: Dictionary = PowerUps.ALL[id]
 	power.activate(id)
 	hud.banner(d.name, 2.5); hud.info(d.desc)
-	sfx.play("pu_" + id, 2); sfx.play("pu_grab_v11", -4)
-	announce(PICKUP_CALLOUTS[id], 0.35)   # v7.11 announcer call-out per drop
+	sfx.play("pu_" + id, 2)
+	cue("pu_grab_v11", -4, CueQueue.Prio.STINGER)
+	cue(PICKUP_CALLOUTS[id], 0, CueQueue.Prio.VOICE, true, 0.35)   # v7.11 call-out, v7.12 queued
 	hud.pickup_flash(d.color)
 	tint = maxf(tint, 0.3)
 	match id:
@@ -689,6 +690,20 @@ func on_player_bled_out(p: Player) -> void:
 	sfx.play("round_end", 0, 0.7)
 
 ## Voice-like announcer sting (synthesised) with the music ducked under it.
+## v7.12 prioritised 2D cue: see CueQueue (voices wait their turn, lesser cues duck under bigger ones).
+var cues := CueQueue.new()
+func cue(id: String, db: float, prio: int, voice := false, delay := 0.0) -> void:
+	var now := Time.get_ticks_msec() / 1000.0 + delay
+	var st := sfx.stream(id)
+	var dur := st.get_length() if st else 1.0
+	var r := cues.request(prio, now, dur, voice)
+	var total: float = delay + r.delay
+	var vol: float = db + r.db_offset
+	if total <= 0.0:
+		sfx.play(id, vol); if voice: duck_music(2.5)
+		return
+	get_tree().create_timer(total, true, false, true).timeout.connect(func():
+		sfx.play(id, vol); if voice: duck_music(2.5))
 func announce(id: String, delay := 0.0) -> void:
 	if delay <= 0.0:
 		sfx.play(id, 0); duck_music(2.5); return
