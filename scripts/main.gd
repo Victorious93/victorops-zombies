@@ -424,6 +424,29 @@ func _clip(dir: String) -> void:
 	await _snap(dir, "21_ads_support_grip.png")
 	pl.bot_input.ads = false
 	await _wait(20)
+	# v7.9 (~8 s): perk drink at Iron Hide Tonic, then the power-on wave from the lever in the dark
+	pl.global_position = Vector3(-6.2, 0.1, -14.0)
+	await _glide(pl.global_position, Vector3(-8.8, 1.3, -14.0), 15)
+	pl.perks.erase("ironhide"); game.buy_perk(pl, "ironhide")
+	await _glide(pl.global_position, Vector3(-8.8, 1.3, -14.0), 14)
+	await _snap(dir, "22_perk_drink_raise.png")
+	await _glide(pl.global_position, Vector3(-8.8, 1.3, -14.0), 12)
+	await _snap(dir, "23_perk_drink_tip.png")
+	await _glide(pl.global_position, Vector3(-8.8, 1.3, -14.0), 40)
+	if game.map.find_child("Lever", true, false): game.map.find_child("Lever", true, false).rotation.x = 0.6
+	game.facility.power_on = false; game.map.set_power(false); game.env.ambient_light_energy = 0.25
+	var lever: Node3D = game.map.find_child("Lever", true, false)
+	var lp := lever.global_position if lever else Vector3(-6, 1.5, -12.5)
+	pl.global_position = Vector3(lp.x + 3.0, 0.1, lp.z + 6.0)
+	await _glide(pl.global_position, lp + Vector3(0, -0.4, 0), 30)
+	game.throw_power(lever if lever else Node3D.new())
+	await _wait(3)
+	await _snap(dir, "24_power_flash.png")
+	await _glide(pl.global_position, Vector3(lp.x - 6, 2.0, lp.z - 16), 14)
+	await _snap(dir, "25_power_wave.png")
+	await _glide(pl.global_position, Vector3(lp.x - 6, 2.0, lp.z - 16), 60)
+	await _snap(dir, "26_power_on.png")
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.

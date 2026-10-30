@@ -23,6 +23,11 @@ var kick := 0.0
 var knife_t := 0.0
 var throw_t := 0.0
 var swap_t := 0.0
+## v7.9 perk drink: 1 -> 0 over DRINK_TIME; gun drops, a procedural bottle comes up and tips back.
+var drink_t := 0.0
+var bottle: Node3D
+var bottle_mat: StandardMaterial3D
+const DRINK_TIME := 1.5
 var ads_k := 0.0
 const FILL_HIP := Vector3(-0.25, 0.25, 0.15)
 const FILL_ADS := Vector3(-0.18, 0.08, 0.32)
@@ -52,7 +57,38 @@ func setup(sleeve: Color) -> void:
 	grenade_hand = Node3D.new(); grenade_hand.visible = false
 	var g := ModelLib.prop("grenade", 0.075, false, false); g.position = Vector3(0, -0.03, 0); grenade_hand.add_child(g)
 	grenade_hand.add_child(_hand(Vector3(0, -0.06, 0.03), Vector3(0.3, 0, 0)))
+	bottle = Node3D.new(); bottle.visible = false; bottle.name = "PerkBottle"
+	bottle_mat = StandardMaterial3D.new(); bottle_mat.albedo_color = Color(0.85, 0.15, 0.1, 0.85)
+	bottle_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; bottle_mat.emission_enabled = true; bottle_mat.emission_energy_multiplier = 0.8
+	bottle_mat.roughness = 0.15; bottle_mat.metallic_specular = 0.9
+	var body := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 0.028; cm.bottom_radius = 0.03; cm.height = 0.12
+	body.mesh = cm; body.material_override = bottle_mat; bottle.add_child(body)
+	var neck := MeshInstance3D.new(); var nm := CylinderMesh.new(); nm.top_radius = 0.011; nm.bottom_radius = 0.026; nm.height = 0.06
+	neck.mesh = nm; neck.position.y = 0.09; neck.material_override = bottle_mat; bottle.add_child(neck)
+	var cap := MeshInstance3D.new(); var capm := CylinderMesh.new(); capm.top_radius = 0.013; capm.bottom_radius = 0.013; capm.height = 0.015
+	var capmat := StandardMaterial3D.new(); capmat.albedo_color = Color(0.75, 0.7, 0.6); capmat.metallic = 0.8
+	cap.mesh = capm; cap.position.y = 0.128; cap.material_override = capmat; bottle.add_child(cap)
+	bottle.add_child(_hand(Vector3(0, -0.01, 0.035), Vector3(0.2, 0, 0)))
 	position = HIP_POS
+
+func drink(c: Color) -> void:
+	drink_t = 1.0
+	if bottle_mat: c.a = 0.85; bottle_mat.albedo_color = c; bottle_mat.emission = c
+	swap_t = 0.0
+
+func drinking() -> bool: return drink_t > 0.0
+
+## Drink choreography for progress p (0..1). Returns [bottle_pos, bottle_rot, gun_lower(0..1)].
+## Gun drops away first, bottle rises to the mouth, tips back to drink, then drops as the gun returns.
+static func drink_pose(p: float) -> Array:
+	p = clampf(p, 0.0, 1.0)
+	var lower := _smooth(0.0, 0.15, p) * (1.0 - _smooth(0.82, 1.0, p))
+	var rise := _smooth(0.1, 0.35, p) * (1.0 - _smooth(0.75, 0.92, p))
+	var tip := _smooth(0.35, 0.5, p) * (1.0 - _smooth(0.68, 0.8, p))
+	var pos := Vector3(-0.02, lerpf(-0.32, -0.07, rise), lerpf(-0.3, -0.2, rise))
+	pos.y += tip * 0.02
+	var rot := Vector3(lerpf(0.0, 1.15, tip) + 0.15 * rise, 0.0, lerpf(0.25, 0.05, rise))
+	return [pos, rot, lower]
 
 func _star_tex() -> Texture2D:
 	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
@@ -210,6 +246,13 @@ func tick(dt: float, ads: bool, move01: float, sprint: bool, reload01: float) ->
 	var sp := swap_pose(swap_t); off += sp[0]; rot += sp[1]
 	# knife / throw: lower the gun while the other hand acts
 	var lower := maxf(sin(clampf(knife_t, 0, 1) * PI), sin(clampf(throw_t, 0, 1) * PI))
+	if drink_t > 0.0:
+		drink_t = maxf(0.0, drink_t - dt / DRINK_TIME)
+		var dp := drink_pose(1.0 - drink_t)
+		lower = maxf(lower, float(dp[2]) * 1.6)
+		if bottle:
+			bottle.visible = drink_t > 0.0 and float(dp[1].x) >= 0.0 and (1.0 - drink_t) > 0.08 and (1.0 - drink_t) < 0.93
+			bottle.position = dp[0]; bottle.rotation = dp[1]
 	off.y -= lower * 0.18; rot.x -= lower * 0.5
 	position = position.lerp(target + off, clampf(dt * 18, 0, 1))
 	rotation = rotation.lerp(rot, clampf(dt * 16, 0, 1))

@@ -693,6 +693,34 @@ func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
 		func(pl): return "%s (+%d armor): %d" % [p.name, p.armor, p.cost],
 		func(pl): game.buy_armor(pl, pid))
 
+## v7.9 power-on drama: lights come on in a wave out from the lever, each one sputtering
+## (on-off-on) before it holds. Delay grows with distance and is capped so the wave stays short.
+const CASCADE_PER_M := 0.07
+const CASCADE_MAX := 2.4
+const SPUTTER := [0.0, 0.08, 0.16, 0.3]   ## on, off, on, (hold) offsets in seconds
+static func cascade_delay(dist: float) -> float: return minf(maxf(dist, 0.0) * CASCADE_PER_M, CASCADE_MAX)
+
+## Turns power on, then re-darkens room lights and machine glows and brings them back in a wave.
+## Returns the total duration of the wave.
+func power_cascade(origin: Vector3) -> float:
+	set_power(true)
+	var last := 0.0
+	for l in room_lights:
+		var d: float = cascade_delay(origin.distance_to(l.global_position if l.is_inside_tree() else l.position))
+		l.visible = false; last = maxf(last, d + SPUTTER[3])
+		var tw: Tween = l.create_tween()
+		tw.tween_interval(d); tw.tween_callback(func(): l.visible = true)
+		tw.tween_interval(SPUTTER[1]); tw.tween_callback(func(): l.visible = false)
+		tw.tween_interval(SPUTTER[2] - SPUTTER[1]); tw.tween_callback(func(): l.visible = true)
+	for pair in machine_lights:
+		var ml: Light3D = pair[0]
+		var d: float = cascade_delay(origin.distance_to(ml.global_position if ml.is_inside_tree() else ml.position)) + 0.15
+		ml.light_energy = 0.0; last = maxf(last, d + 0.5)
+		var tw: Tween = ml.create_tween()
+		tw.tween_interval(d); tw.tween_property(ml, "light_energy", MACHINE_LIGHT_ON * 1.6, 0.12)
+		tw.tween_property(ml, "light_energy", MACHINE_LIGHT_ON, 0.4)
+	return last
+
 func set_power(on: bool) -> void:
 	for l in room_lights: l.visible = on
 	for l in emergency_lights: l.base = 0.3 if on else 1.2
