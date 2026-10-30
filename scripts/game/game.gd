@@ -266,9 +266,9 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-			sfx.play("round_sting_v10", -2)
-			sfx.play("round_start_v6", -1)
-			if not boss_pending: announce("ann_round_v7", 1.4)
+			sfx.play("round_sting_v10", ROUND_MIX.round_sting_v10)
+			sfx.play("round_start_v6", ROUND_MIX.round_start_v6)
+			if not boss_pending: announce("ann_round_v7", ROUND_MIX.ann_round_delay)
 			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
 			brute_pending = ZombieTypes.is_brute_round(round)
@@ -289,6 +289,9 @@ func _update_rounds(dt: float) -> void:
 			spawn_cd = Rounds.spawn_interval(round)
 	elif zombies.size() == 1 and zombies[0].state != Zombie.State.DEAD and not zombies[0].crawler:
 		zombies[0].make_crawler()   ## the last one of the round drags itself along: time to train/rebuy
+	if wants_last_cue(to_spawn, zombies.size(), last_cue_round, round) and intermission <= 0.0 \
+			and is_instance_valid(zombies[0]) and zombies[0].state != Zombie.State.DEAD:
+		_last_zombie_cue(zombies[0])
 	if to_spawn == 0 and zombies.is_empty() and intermission <= 0.0:
 		round_times[round] = round_clock
 		intermission = Rounds.INTERMISSION
@@ -612,11 +615,30 @@ func _update_drops(dt: float) -> void:
 		if off.length() < 1.2 and not player.is_downed:
 			n.queue_free(); drops.erase(d); collect_power(d.id)
 
+## v7.11 announcer call-out for each drop (original formant-synth voice, tools/gen_audio_v11.py).
+const PICKUP_CALLOUTS := {"restock": "ann_pu_restock_v11", "onetouch": "ann_pu_onetouch_v11",
+	"doublepay": "ann_pu_doublepay_v11", "blackout": "ann_pu_blackout_v11", "handyman": "ann_pu_handyman_v11"}
+## v7.11 round-start mix (dB): the v7.10 sting leads, the old drone/bell bed sits well under it,
+## and the announcer waits until the sting's hit has passed.
+const ROUND_MIX := {"round_sting_v10": -1.0, "round_start_v6": -13.0, "ann_round_delay": 2.2}
+var last_cue_round := -1
+## v7.11 last zombie of the round: music drops out, a heartbeat cue plays and the straggler gets a red glow.
+func _last_zombie_cue(z: Zombie) -> void:
+	last_cue_round = round
+	sfx.play("last_zombie_v11", -2)
+	if music:
+		var tw := create_tween(); tw.tween_property(music, "volume_db", -60.0, 1.2)
+	z.mark_last()
+	hud.info("Last one...")
+static func wants_last_cue(to_spawn_left: int, alive: int, cue_round: int, cur_round: int) -> bool:
+	return to_spawn_left == 0 and alive == 1 and cue_round != cur_round and cur_round >= 1
 func collect_power(id: String) -> void:
 	var d: Dictionary = PowerUps.ALL[id]
 	power.activate(id)
 	hud.banner(d.name, 2.5); hud.info(d.desc)
-	sfx.play("pu_" + id, 2)
+	sfx.play("pu_" + id, 2); sfx.play("pu_grab_v11", -4)
+	announce(PICKUP_CALLOUTS[id], 0.35)   # v7.11 announcer call-out per drop
+	hud.pickup_flash(d.color)
 	tint = maxf(tint, 0.3)
 	match id:
 		"restock":
