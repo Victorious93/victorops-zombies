@@ -6,6 +6,10 @@ extends NavigationRegion3D
 ## textures and props are CC0 Quaternius / Kenney models (see ASSETS.md).
 
 const H := 4.0
+## v7.10 extra ceiling lamp spots (x, z): 3 per room around each room's centre lamp, plus the pump house.
+const EXTRA_LAMPS := [Vector2(-6, 6), Vector2(6, 6), Vector2(-6, -6), Vector2(-6, -14), Vector2(6, -22), Vector2(-6, -22),
+	Vector2(13, 6), Vector2(23, 6), Vector2(22, -6), Vector2(14, -14), Vector2(22, -22), Vector2(14, -22),
+	Vector2(31, 14), Vector2(41, 26)]
 const T := 0.4
 
 var game
@@ -338,6 +342,13 @@ func build(p_game) -> void:
 		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
 		bounce_lights.append(bf)
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
+	# v7.10 secondary strip lamps: a grid across every room (and the pump house) so the power-on cascade
+	# rolls lamp-by-lamp across the ceiling. Cheap: no shadows, shafts or dust; they join room_lights.
+	for q in EXTRA_LAMPS:
+		var lp := Vector3(q.x, H - 0.3, q.y)
+		box(Vector3(1.2, 0.07, 0.3), lp + Vector3(0, 0.1, 0), mats.lamp, false)
+		var xl := light(lp + Vector3(0, -0.4, 0), Color(1.0, 0.9, 0.75), 1.5, 8.0)
+		xl.shadow_enabled = false; xl.visible = false; room_lights.append(xl)
 	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
 	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
 		var am := _emit(Color(1.0, 0.1, 0.05), 0.2); alarm_mats.append(am)
