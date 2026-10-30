@@ -318,7 +318,9 @@ func build(p_game) -> void:
 		{at = 7.0, w = 1.8, kind = "window", id = "w_south", out = Vector2(0, 1)},
 		{at = 28.0, w = 1.8, kind = "window", id = "w_lab", out = Vector2(0, 1)}])
 	wall(Vector2(-10, -26), Vector2(26, -26), [
+		{at = HiddenRoom.CRACK_POS.x + 10.0, w = HiddenRoom.CRACK_W, kind = "hidden"},
 		{at = 28.0, w = 1.8, kind = "window", id = "w_cold", out = Vector2(0, -1)}])
+	_build_annex()
 	wall(Vector2(26, 10), Vector2(26, -26), [{at = 10.0, w = 2.6, kind = "door", id = "yard"}])
 	# interior walls with buyable doors
 	wall(Vector2(-10, -10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "north"}])
@@ -601,6 +603,7 @@ func _place_machines() -> void:
 	_armor_rack("light", Vector3(-4, 0, -9.6), 0.0)
 	_armor_rack("medium", Vector3(25.6, 0, -4), -PI / 2)
 	_armor_rack("heavy", Vector3(14, 0, -25.6), 0.0)
+	_annex_stations()
 
 func move_crate(pos: Vector3, rot_y: float) -> void:
 	var c: CrateNode = game.crate_node
@@ -691,6 +694,74 @@ func _wall_buy(id: String, pos: Vector3, rot_y: float) -> void:
 	label("%s\n%d" % [w.name, Weapons.WALL_PRICES[id]], pos + Vector3(0, 0.55, 0) + fwd * 0.05, rot_y, 36, Color(0.95, 0.95, 0.9))
 	game.add_interactable(pos + fwd * 1.0 - Vector3(0, 0.6, 0), 2.0,
 		func(pl): return game.wall_prompt(pl, id), func(pl): game.buy_wall(pl, id))
+
+## ---- v7.12 Sealed Annex: a vault room behind a cracked panel in the generator room's north wall ----
+var crack_body: StaticBody3D
+var hint_light: OmniLight3D
+var reaper_display: Node3D
+
+func _build_annex() -> void:
+	var a := HiddenRoom.ROOM_MIN; var b := HiddenRoom.ROOM_MAX
+	wall(Vector2(a.x, b.y), Vector2(a.x, a.y)); wall(Vector2(a.x, a.y), Vector2(b.x, a.y)); wall(Vector2(b.x, a.y), Vector2(b.x, b.y))
+	var c := Vector3((a.x + b.x) / 2.0, 0, (a.y + b.y) / 2.0); var sz := Vector3(b.x - a.x, 0, b.y - a.y)
+	box(Vector3(sz.x + T, 0.3, sz.z + T), Vector3(c.x, H + 0.15, c.z), mats.wall_brick)          # roof
+	box(Vector3(sz.x, 0.04, sz.z), Vector3(c.x, 0.02, c.z), _mat(Color(0.12, 0.14, 0.13), 0.6, 0.3), false)
+	# the cracked panel: plaster on the room side we see, shootable/knifeable (meta "crack")
+	var cp := HiddenRoom.CRACK_POS
+	crack_body = box(Vector3(HiddenRoom.CRACK_W, H, T), Vector3(cp.x, H / 2.0, cp.z), mats.wall) as StaticBody3D
+	crack_body.set_meta("crack", true)
+	var dark := _mat(Color(0.05, 0.05, 0.05))
+	for k in [[Vector3(0.0, 0.2, 0), 0.5, 1.4], [Vector3(-0.35, -0.5, 0), -0.7, 1.0], [Vector3(0.4, -0.3, 0), 1.1, 0.8], [Vector3(0.1, 0.9, 0), -0.3, 0.9]]:
+		var crk := box(Vector3(0.04, k[2], 0.02), Vector3(0, 0, T / 2.0 + 0.01) + k[0], dark, false, 1, crack_body)
+		crk.rotation.z = k[1]
+	# hint: a scratched symbol and a light that keeps sputtering green
+	var sym := Label3D.new(); sym.text = "\\ | //\n-- o --\n// | \\\\"; sym.font_size = 40; sym.pixel_size = 0.004
+	sym.modulate = Color(0.55, 0.75, 0.6, 0.55); sym.shaded = false; sym.double_sided = false
+	sym.position = Vector3(0, -0.8, T / 2.0 + 0.03); crack_body.add_child(sym)
+	hint_light = OmniLight3D.new(); hint_light.light_color = Color(0.4, 1.0, 0.6); hint_light.light_energy = 1.4
+	hint_light.omni_range = 3.5; hint_light.position = Vector3(cp.x, 3.2, cp.z + 0.8); add_child(hint_light)
+	var tw := create_tween().set_loops()
+	for e in [1.4, 0.1, 1.2, 0.0, 0.0, 1.5, 0.2, 1.3]:
+		tw.tween_property(hint_light, "light_energy", e, 0.06); tw.tween_interval(randf_range(0.05, 0.5))
+	# room light (off until revealed so nothing leaks)
+	var rl := OmniLight3D.new(); rl.name = "AnnexLight"; rl.light_color = Color(0.45, 1.0, 0.65); rl.light_energy = 0.0
+	rl.omni_range = 9.0; rl.position = Vector3(c.x, H - 0.5, c.z); add_child(rl)
+
+## Breaks the panel open. Returns the dust points for the fx.
+func reveal_annex() -> void:
+	if crack_body: crack_body.queue_free(); crack_body = null
+	if hint_light: hint_light.queue_free(); hint_light = null
+	var rl := get_node_or_null("AnnexLight") as OmniLight3D
+	if rl: create_tween().tween_property(rl, "light_energy", 1.6, 1.2)
+	call_deferred("rebake")
+
+func _annex_stations() -> void:
+	# armor: Vault Plating (3 tiers)
+	var v := Node3D.new(); v.position = HiddenRoom.VAULT_POS; v.rotation.y = PI / 2; add_child(v)
+	box(Vector3(1.4, 2.0, 0.4), Vector3(0, 1.0, 0), mats.plate, true, 1, v)
+	box(Vector3(0.9, 1.0, 0.15), Vector3(0, 1.2, 0.25), _emit(Color(0.3, 0.6, 1.0), 1.2), false, 1, v)
+	var vl := Label3D.new(); vl.text = "VAULT PLATING"; vl.font_size = 34; vl.pixel_size = 0.004; vl.shaded = false
+	vl.position = Vector3(0, 2.25, 0.25); v.add_child(vl)
+	game.add_interactable(v.to_global(Vector3(0, 1.0, 1.0)), 2.0, func(pl): return game.vault_prompt(pl), func(pl): game.use_vault(pl))
+	# gun: Rift Bench (cheap first overcharge, no power needed)
+	var r := Node3D.new(); r.position = HiddenRoom.RIFT_POS; r.rotation.y = -PI / 2; add_child(r)
+	box(Vector3(1.8, 0.9, 0.8), Vector3(0, 0.45, 0), mats.metal, true, 1, r)
+	box(Vector3(1.2, 0.06, 0.5), Vector3(0, 0.93, 0), _emit(Color(0.75, 0.35, 1.0), 2.0), false, 1, r)
+	var rlab := Label3D.new(); rlab.text = "RIFT BENCH"; rlab.font_size = 34; rlab.pixel_size = 0.004; rlab.shaded = false
+	rlab.position = Vector3(0, 1.6, 0); r.add_child(rlab)
+	game.add_interactable(r.to_global(Vector3(0, 0.9, 1.0)), 2.0, func(pl): return game.rift_prompt(pl), func(pl): game.use_rift(pl))
+	# alien LMG pedestal
+	var pd := Node3D.new(); pd.position = HiddenRoom.PEDESTAL_POS; add_child(pd)
+	var cyl := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 0.6; cm.bottom_radius = 0.75; cm.height = 1.0
+	cyl.mesh = cm; cyl.material_override = Viewmodel.alien_material(); cyl.position.y = 0.5; pd.add_child(cyl)
+	var col := box(Vector3(1.2, 1.0, 1.2), Vector3(0, 0.5, 0), mats.metal, true, 1, pd); (col.get_child(1) as MeshInstance3D).visible = false
+	reaper_display = ModelLib.gun("lmg"); Viewmodel.alienize(reaper_display)
+	reaper_display.scale = Vector3.ONE * 1.8; reaper_display.position = Vector3(0, 1.55, 0); pd.add_child(reaper_display)
+	var spin := create_tween().set_loops(); spin.tween_property(reaper_display, "rotation:y", TAU, 6.0).from(0.0)
+	var gl := OmniLight3D.new(); gl.light_color = Color(0.3, 1.0, 0.55); gl.light_energy = 1.2; gl.omni_range = 3.0; gl.position.y = 1.6; pd.add_child(gl)
+	var pl3 := Label3D.new(); pl3.text = "HIVE REAPER\n%d" % Weapons.ALIEN_PRICE; pl3.font_size = 36; pl3.pixel_size = 0.004
+	pl3.shaded = false; pl3.modulate = Color(0.5, 1.0, 0.7); pl3.position = Vector3(0, 2.4, 0); pd.add_child(pl3)
+	game.add_interactable(pd.to_global(Vector3(0, 1.0, 1.4)), 2.0, func(pl): return game.reaper_prompt(pl), func(pl): game.buy_reaper(pl))
 
 func _armor_rack(pack_id: String, pos: Vector3, rot_y: float) -> void:
 	var p: Dictionary = ArmorState.PACKS[pack_id]

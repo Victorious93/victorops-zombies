@@ -31,6 +31,9 @@ var recoil := 1.5
 var color := Color(0.6, 0.6, 0.65)
 ## Overcharge Forge alternate ammo ("" / fire / shock / freeze), see AltAmmo.
 var alt_ammo := ""
+## v7.12: seconds of trigger time to reach full fire rate (0 = none). Starts at SPIN_START x the interval.
+var spin_up := 0.0
+const SPIN_START := 2.5
 
 func _init(p_id := "", p_name := "", p_damage := 0, p_interval := 0.3) -> void:
 	id = p_id; name = p_name; damage = p_damage; fire_interval = p_interval
@@ -40,11 +43,15 @@ func setup(opts: Dictionary) -> WeaponDef:
 		set(k, opts[k])
 	return self
 
-func move_mult() -> float: return clampf(1.08 - 0.1 * weight, 0.85, 1.05)
+func move_mult() -> float: return clampf(1.08 - 0.1 * weight, 0.8, 1.05)
 func kick_mult() -> float: return 0.55 + 0.65 * weight
 ## Extra punch on the first shot after a pause (seconds since last shot) - makes single taps feel heavy.
 func first_shot_mult(since_last: float) -> float:
 	return 1.0 + 0.8 * clampf((since_last - fire_interval * 1.5) / 0.35, 0.0, 1.0)
+
+## Interval multiplier for a spin-up gun at spin 0..1.
+func spin_mult(spin: float) -> float:
+	return 1.0 if spin_up <= 0.0 else lerpf(SPIN_START, 1.0, clampf(spin, 0.0, 1.0))
 
 func is_upgraded() -> bool: return tier > 0
 func is_maxed() -> bool: return tier >= MAX_TIER
@@ -57,7 +64,7 @@ func display_name() -> String:
 
 func duplicate_def() -> WeaponDef:
 	var w := WeaponDef.new(id, name, damage, fire_interval)
-	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight", "alt_ammo"]:
+	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight", "alt_ammo", "spin_up"]:
 		w.set(k, get(k))
 	return w
 

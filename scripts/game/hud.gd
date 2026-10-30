@@ -416,7 +416,7 @@ func _process(dt: float) -> void:
 	fps_lbl.visible = game.settings.show_fps or game.force_fps_label
 	if fps_lbl.visible: fps_lbl.text = perf_text(Engine.get_frames_per_second(), RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME))
 	health_bar.max_value = p.max_health; health_bar.value = p.health
-	armor_bar.value = p.armor.value; armor_bar.visible = p.armor.value > 0
+	armor_bar.max_value = p.armor.max_value; armor_bar.value = p.armor.value; armor_bar.visible = p.armor.value > 0
 	var cd: float = p.ability_cd
 	ability_lbl.text = "%s %s" % [p.cdef.ability_name, "READY [Q]" if cd <= 0 else "%ds" % ceili(cd)]
 	var pr: String = game.current_prompt

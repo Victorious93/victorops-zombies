@@ -117,6 +117,36 @@ func _sleeve(from: Vector3, to: Vector3, r: float) -> MeshInstance3D:
 	mi.basis = Basis(Quaternion(Vector3.UP, dir))
 	return mi
 
+## v7.12 Hive Reaper look: glowing organic shell over the LMG body, a huge drum, bio-veins.
+## `heat` (0..1, the spin-up) drives the glow.
+var alien_mat: StandardMaterial3D
+var heat := 0.0:
+	set(v):
+		heat = v
+		if alien_mat: alien_mat.emission_energy_multiplier = 0.6 + 3.0 * v
+
+static func alien_material() -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(0.12, 0.2, 0.14); m.roughness = 0.35; m.metallic = 0.2
+	m.emission_enabled = true; m.emission = Color(0.25, 1.0, 0.5); m.emission_energy_multiplier = 0.6
+	m.rim_enabled = true; m.rim = 0.6
+	return m
+
+static func alienize(g: Node3D) -> StandardMaterial3D:
+	var m := alien_material()
+	for c in g.find_children("*", "MeshInstance3D", true, false): (c as MeshInstance3D).material_override = m
+	var len: float = ModelLib.GUN_LEN.get("lmg", 0.6)
+	var drum := MeshInstance3D.new(); var cy := CylinderMesh.new()
+	cy.top_radius = len * 0.2; cy.bottom_radius = len * 0.2; cy.height = len * 0.16; drum.mesh = cy
+	drum.material_override = m; drum.rotation.z = PI / 2; drum.position = Vector3(0, -len * 0.16, -len * 0.05); g.add_child(drum)
+	var core := MeshInstance3D.new(); var sp := SphereMesh.new(); sp.radius = len * 0.07; sp.height = len * 0.14; core.mesh = sp
+	var cm := StandardMaterial3D.new(); cm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; cm.albedo_color = Color(0.5, 1.0, 0.7)
+	core.material_override = cm; core.position = drum.position + Vector3(len * 0.09, 0, 0); g.add_child(core)
+	for i in 3:   # ribbed bio-veins along the barrel
+		var r := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = len * 0.05; tm.outer_radius = len * 0.07; r.mesh = tm
+		r.material_override = m; r.rotation.x = PI / 2; r.position = Vector3(0, 0.0, -len * (0.25 + 0.12 * i)); g.add_child(r)
+	return m
+
 func set_weapon(w: WeaponDef) -> void:
 	var key := "%s:%d" % [w.id, w.tier]
 	if key == shown: return
@@ -131,7 +161,9 @@ func set_weapon(w: WeaponDef) -> void:
 	add_child(gun)
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
-	if w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
+	alien_mat = null
+	if w.id == Weapons.ALIEN: alien_mat = alienize(gun)
+	elif w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
 	else: _shade_metal(gun)
 	var fc: Color = AltAmmo.COLORS.get(w.alt_ammo, Color(1.0, 0.8, 0.45))   # alt ammo tints the muzzle flash
 	(flash.material_override as StandardMaterial3D).albedo_color = Color(fc.r, fc.g, fc.b, (flash.material_override as StandardMaterial3D).albedo_color.a)

@@ -9,6 +9,7 @@ const MOUSE_SENS := 0.0022
 const TOUCH_SENS := 0.006
 const SHOT_SOUND := {pistol = "shot_pistol", smg = "shot_smg", shotgun = "shot_shotgun", rifle = "shot_rifle", lmg = "shot_lmg", launcher = "shot_launcher", raygun = "shot_nova"}
 
+var spin := 0.0   ## v7.12 spin-up state (0..1) for the Hive Reaper
 var game
 var touch  # TouchControls or null
 var char_id := Characters.DEFAULT
@@ -156,6 +157,7 @@ func reload() -> void:
 func _start_reload_sfx() -> void:
 	reload_beats = {out = false, ins = false, bolt = false}
 	game.sfx.play("mag_release", -8)
+	if weapon().id == Weapons.ALIEN: game.sfx.play("reload_reaper_v12", -3)
 	game.sfx.play("mag_out", -6)
 	game.sfx.play("mag_out_v6", -3, randf_range(0.95, 1.05))
 	reload_beats.out = true
@@ -297,6 +299,8 @@ func _physics_process(dt: float) -> void:
 	land_bob = move_toward(land_bob, 0.0, dt * 0.9)
 	head.position.y = lerpf(head.position.y, head_y - land_bob, clampf(dt * 10.0, 0, 1))
 	since_shot += dt
+	if since_shot > 0.25: spin = maxf(0.0, spin - dt * 1.2)
+	if vm: vm.heat = spin
 	_heartbeat(dt)
 	pattern_reset -= dt
 	if pattern_reset <= 0.0: pattern_i = 0
@@ -342,6 +346,9 @@ func try_fire(moving: bool) -> void:
 		return
 	var w := weapon()
 	fire_cd = w.fire_interval * cdef.fire_interval_mult
+	if w.spin_up > 0.0:   # v7.12 Hive Reaper: barrels spin up while the trigger is held
+		fire_cd *= w.spin_mult(spin)
+		spin = minf(1.0, spin + fire_cd / w.spin_up)
 	var spread := deg_to_rad(w.spread_deg) * lerpf(1.0, 0.3 * (Perks.MARKSMAN_ADS_SPREAD if perks.get("marksman", false) else 1.0), ads01) * (1.4 if moving else 1.0) * (1.6 if slide_t > 0.0 else 1.0)
 	var origin := cam.global_position
 	var fwd := -cam.global_basis.z
@@ -363,9 +370,10 @@ func try_fire(moving: bool) -> void:
 	vm.fire((0.5 + w.recoil * 0.15) * w.kick_mult() * first)
 	add_trauma((0.06 + w.recoil * 0.025 * (0.5 if ads else 1.0)) * w.kick_mult() * first)
 	fov_kick = minf(fov_kick + (0.8 + w.weight * 1.2) * first, 5.0)
-	if first > 1.2 or w.weight >= 1.2: game.sfx.play("shot_punch", -8.0 + w.weight * 3.0, randf_range(0.9, 1.05) / sqrt(w.weight))
+	if (first > 1.2 or w.weight >= 1.2) and w.id != Weapons.ALIEN: game.sfx.play("shot_punch", -8.0 + w.weight * 3.0, randf_range(0.9, 1.05) / sqrt(w.weight))
 	var model: String = vm.model_name
-	game.sfx.play(SHOT_SOUND.get(model, "shot_pistol"), -7.0 if w.automatic else -4.0, randf_range(0.95, 1.05) * (0.88 if w.tier > 0 else 1.0))
+	if w.id == Weapons.ALIEN: game.sfx.play("shot_reaper_v12", -6.0, randf_range(0.92, 1.08) * lerpf(0.85, 1.05, spin))
+	else: game.sfx.play(SHOT_SOUND.get(model, "shot_pistol"), -7.0 if w.automatic else -4.0, randf_range(0.95, 1.05) * (0.88 if w.tier > 0 else 1.0))
 	if w.tier > 0: game.sfx.play("shot_energy", -16, 1.6)
 	if w.id == Weapons.QUEST_WONDER: game.sfx.play("gloam_fire_v7", -2, randf_range(0.95, 1.05))
 	if model != "raygun" and model != "launcher":
@@ -418,7 +426,11 @@ func _heartbeat(dt: float) -> void:
 func take_damage(d: float, from := Vector3.INF) -> void:
 	if is_downed or game.over: return
 	if game.god_mode: d = 0.0
+	var had := armor.value
 	health -= armor.absorb(d)
+	if had > 0.0:   # v7.12 armor hit / break sounds
+		if armor.value <= 0.0: game.sfx.play("armor_break_v12", -2); game.hud.info("Armor broken")
+		else: game.sfx.play("armor_hit_v12", -6, randf_range(0.9, 1.1))
 	since_hit = 0.0
 	add_trauma(0.35)
 	game.hud.damage_flash(_dir_angle(from), from)

@@ -21,8 +21,14 @@ static func make(id: String) -> WeaponDef:
 			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Supernova Disruptor", color = Color(0.2, 0.85, 0.7)})
 		"gloam": return WeaponDef.new("gloam", "Gloam Harp", 900, 0.45).setup({weight = 1.1, pierce = 6, mag_size = 10, reserve_mags = 6, reload_time = 2.2, spread_deg = 0.2, recoil = 2.5, ads_time = 0.22,
 			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Gloam Requiem", color = Color(0.35, 0.95, 0.85)})
+		"reaper": return WeaponDef.new("reaper", "Hive Reaper", 130, 0.055).setup({weight = 2.6, mag_size = 500, reserve_mags = 1, reload_time = 6.5, automatic = true, spread_deg = 2.4, recoil = 0.7, ads_time = 0.55,
+			spin_up = 0.9, recoil_pattern = [Vector2(1, 0.3), Vector2(0.8, -0.4), Vector2(1.1, 0.2)], upgrade_name = "Hive Sovereign", color = Color(0.3, 1.0, 0.55)})
 	return null
 
+## v7.12 alien LMG, sold only on the Sealed Annex pedestal (not in the crate).
+const ALIEN := "reaper"
+const ALIEN_PRICE := 8000
+const ALIEN_AMMO := 4000
 ## Built from the three hidden parts (WonderQuest); never offered by the Mystery Crate.
 const QUEST_WONDER := "gloam"
 
@@ -30,7 +36,7 @@ const ALL_IDS := ["sidearm", "scatter", "rifle", "cannon", "smg", "lmg", "nova"]
 ## The crate-only wonder weapon (original design: a resonance-field projector).
 const WONDER := "nova"
 ## CC0 Quaternius models (see ASSETS.md) used for each weapon's viewmodel and wall-buy.
-const MODELS := {"sidearm": "pistol", "scatter": "shotgun", "rifle": "rifle", "cannon": "launcher", "smg": "smg", "lmg": "lmg", "nova": "raygun", "gloam": "raygun"}
+const MODELS := {"sidearm": "pistol", "scatter": "shotgun", "rifle": "rifle", "cannon": "launcher", "smg": "smg", "lmg": "lmg", "nova": "raygun", "gloam": "raygun", "reaper": "lmg"}
 const STARTER := "sidearm"
 
 ## Wall-buy chalk outlines: weapon id -> price (500-1500). Buying it again while owned refills ammo at half price.

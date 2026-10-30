@@ -518,6 +518,57 @@ func _clip(dir: String) -> void:
 	await _wait(25)
 	await _snap(dir, "38_sprint_close.png")
 	await _wait(20)
+	# v7.12: the Sealed Annex - hint, shoot the cracked panel, reveal, Vault Plating, Rift Bench, Hive Reaper
+	if is_instance_valid(sz): sz.queue_free()
+	game.zombies.clear()
+	var cp := HiddenRoom.CRACK_POS
+	pl.global_position = Vector3(cp.x + 0.5, 0.1, -21.5)
+	for i in 30: _aim_at(cp, 0.3); await get_tree().process_frame
+	await _snap(dir, "39_crack_hint.png")
+	for i in 50:
+		_aim_at(cp + Vector3(sin(i * 0.4) * 0.3, cos(i * 0.3) * 0.3, 0), 0.3)
+		pl.bot_input.fire = i % 2 == 0
+		if pl.ammo().rounds == 0 and not pl.ammo().reloading(): pl.reload()
+		await get_tree().process_frame
+	pl.bot_input.fire = false
+	if not game.annex.revealed: game.crack_hit(pl, 99999.0, cp)
+	await _wait(10)
+	await _snap(dir, "40_reveal_dust.png")
+	await _wait(50)
+	await _glide(Vector3(-6.0, 0.1, -27.0), Vector3(-6.0, 1.3, -32.2), 50)
+	await _wait(15)
+	await _snap(dir, "41_hidden_room.png")
+	pl.economy.points += 40000
+	await _glide(HiddenRoom.VAULT_POS + Vector3(1.6, 0.1, 0.4), HiddenRoom.VAULT_POS + Vector3(0, 1.2, 0), 30)
+	game.use_vault(pl); await _wait(20); game.use_vault(pl); await _wait(30)
+	pl.armor.value -= 140.0; game.sfx.play("armor_hit_v12", -4)
+	await _wait(10)
+	await _snap(dir, "42_armor_hud.png")
+	await _glide(HiddenRoom.RIFT_POS + Vector3(-1.6, 0.1, 0.3), HiddenRoom.RIFT_POS + Vector3(0, 1.0, 0), 30)
+	await _wait(10)
+	await _snap(dir, "43_rift_bench.png")
+	await _glide(HiddenRoom.PEDESTAL_POS + Vector3(0, 0.1, 1.8), HiddenRoom.PEDESTAL_POS + Vector3(0, 1.4, 0), 30)
+	await _wait(10)
+	await _snap(dir, "44_reaper_pedestal.png")
+	game.buy_reaper(pl)
+	await _wait(50)
+	await _snap(dir, "45_reaper_in_hand.png")
+	# out into the generator room and let it spin up on a pack
+	await _glide(Vector3(-6.0, 0.1, -24.0), Vector3(-6.0, 1.3, -14.0), 30)
+	for i in 5:
+		var reaper_z: Zombie = game.spawn_zombie("", "walker")
+		reaper_z.state = Zombie.State.CHASE; reaper_z.model.position.y = 0.0; reaper_z.global_position = Vector3(-8.0 + i * 1.2, 0.05, -12.0 - (i % 2) * 1.5)
+	await _glide(Vector3(-6.0, 0.1, -23.5), Vector3(-6.0, 1.3, -14.0), 40, true)
+	await _snap(dir, "46_reaper_firing.png")
+	await _glide(Vector3(-6.0, 0.1, -23.0), Vector3(-6.0, 1.3, -14.0), 60, true)
+	await _snap(dir, "47_reaper_heat.png")
+	pl.bot_input.fire = false
+	pl.armor.value = 5.0; game.god_mode = false
+	if pl.has_method("take_damage"): pl.take_damage(30.0, pl.global_position + Vector3(0, 0, 2))
+	game.god_mode = true
+	await _wait(20)
+	await _snap(dir, "48_armor_break.png")
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
