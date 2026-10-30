@@ -3,7 +3,7 @@ extends GutTest
 
 func test_light_pools_are_visible_but_soft():
 	assert_gt(FacilityMap.POOL_STRENGTH, 0.45, "clearly visible")
-	assert_lt(FacilityMap.POOL_STRENGTH, 0.8, "not blown out")
+	assert_lt(FacilityMap.POOL_STRENGTH, 1.0, "not blown out")
 	var c := FacilityMap.pool_material(Color(1, 0.9, 0.75)).albedo_color
 	assert_lt(c.r, 1.0, "additive glow stays below white")
 

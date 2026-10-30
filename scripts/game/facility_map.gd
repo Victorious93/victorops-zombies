@@ -471,14 +471,14 @@ func light(pos: Vector3, color: Color, energy: float, rng: float, flicker := tru
 ## v7.6 fake-baked light pool: a soft additive radial glow on the floor under every ceiling lamp, so lit
 ## areas read like a lightmapped level (bright pool, dark falloff) even on GL Compatibility / phones where
 ## real GI is unavailable. Child of the light, so it switches on/off (power, emergency) with it.
-const POOL_FRACTION := 0.62     ## pool diameter as a fraction of the light's range
-const POOL_STRENGTH := 0.6
+const POOL_FRACTION := 0.7     ## pool diameter as a fraction of the light's range
+const POOL_STRENGTH := 0.9
 static var _pool_tex: GradientTexture2D
 static func pool_texture() -> GradientTexture2D:
 	if _pool_tex == null:
 		var g := Gradient.new()
 		g.offsets = PackedFloat32Array([0.0, 0.35, 0.7, 1.0])
-		g.colors = PackedColorArray([Color(1, 1, 1, 1), Color(0.62, 0.62, 0.62, 1), Color(0.16, 0.16, 0.16, 1), Color(0, 0, 0, 1)])
+		g.colors = PackedColorArray([Color(1, 1, 1, 1), Color(0.7, 0.7, 0.7, 1), Color(0.22, 0.22, 0.22, 1), Color(0, 0, 0, 1)])
 		_pool_tex = GradientTexture2D.new(); _pool_tex.gradient = g; _pool_tex.width = 128; _pool_tex.height = 128
 		_pool_tex.fill = GradientTexture2D.FILL_RADIAL; _pool_tex.fill_from = Vector2(0.5, 0.5); _pool_tex.fill_to = Vector2(1.0, 0.5)
 	return _pool_tex

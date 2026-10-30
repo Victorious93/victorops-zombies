@@ -22,6 +22,16 @@ var target_l := Node3D.new()
 var pole_r := Node3D.new()
 var pole_l := Node3D.new()
 var mat: StandardMaterial3D
+## v7.8 ADS support hand: when aiming, the left hand rolls out to the left of the handguard (thumb over,
+## C-clamp style) and the elbow drops, so the glove peeks out beside the gun instead of hiding behind it
+## and the forearm angles up from the bottom-left instead of jutting out flat like a pole.
+const POLE_L_HIP := Vector3(-0.45, -0.45, 0.1)
+const POLE_L_ADS := Vector3(-0.2, -0.95, 0.05)
+const ADS_SUPPORT_SHIFT := Vector3(-0.045, -0.012, 0.02)   ## gun space: left, a touch lower, slightly back
+const ADS_SUPPORT_ROLL := 0.55                              ## rad about the barrel: palm turns in on the left side
+var two_handed := false
+var support_rest := Transform3D.IDENTITY
+var ads_k := 0.0
 
 func _init() -> void:
 	name = "FpsArms"
@@ -68,6 +78,7 @@ func attach(gun: Node3D, grip: Vector3, fore: Vector3, two_handed: bool) -> void
 		var b := support_basis()
 		target_l.basis = b
 		target_l.position = support_wrist(fore, b)
+		support_rest = target_l.transform
 		hands.wrist_offset[1] = Basis.IDENTITY
 	else:   # pistol: support hand cups the firing hand
 		target_l.position = grip + Vector3(-0.04, 0.035, 0.045)
@@ -76,6 +87,21 @@ func attach(gun: Node3D, grip: Vector3, fore: Vector3, two_handed: bool) -> void
 	if is_inside_tree():
 		ik.set_target_node(0, ik.get_path_to(target_r)); ik.set_target_node(1, ik.get_path_to(target_l))
 	hands.curl = [0.9, 0.75 if two_handed else 0.85]
+	self.two_handed = two_handed
+	set_ads(ads_k)
+
+## Blend the support hand between the hip grip and the ADS C-clamp (k = 0..1).
+func set_ads(k: float) -> void:
+	ads_k = clampf(k, 0.0, 1.0)
+	pole_l.position = POLE_L_HIP.lerp(POLE_L_ADS, ads_k)
+	if not two_handed: return
+	target_l.transform = ads_support(support_rest, ads_k)
+
+static func ads_support(rest: Transform3D, k: float) -> Transform3D:
+	var t := rest
+	t.basis = Basis(Vector3.BACK, ADS_SUPPORT_ROLL * k) * rest.basis
+	t.origin = rest.origin + ADS_SUPPORT_SHIFT * k
+	return t
 
 ## Wrist basis for the support hand: X = palm normal, Y = fingers, Z = index side.
 static func support_basis() -> Basis:
