@@ -32,6 +32,12 @@ var feed_t := 0.0
 var streak := 0
 var round_t := 0.0
 var slam_lbl: Label
+var pickup_t := 0.0
+var pickup_col := Color.WHITE
+## v7.11 power-up grab flash: a full-screen wash in the drop's colour, fast in, eased out.
+func pickup_flash(c: Color) -> void:
+	pickup_t = 1.0; pickup_col = c
+static func pickup_alpha(t: float) -> float: return clampf(t, 0.0, 1.0) * clampf(t, 0.0, 1.0) * 0.45
 var slam_age := 99.0
 const SLAM_TIME := 2.2   ## v7.10 big centre round-number slam duration
 var pause_panel: Control
@@ -167,6 +173,8 @@ func _draw_center() -> void:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(1.0, 0.96, 0.85, power_flash_alpha(power_t)))
 	if round_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
+	if pickup_t > 0.0:
+		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(pickup_col.r, pickup_col.g, pickup_col.b, pickup_alpha(pickup_t)))
 	var sb := slam_bar(slam_age)
 	if sb > 0.0:
 		var bw := hit.size.x * sb; var bh := hit.size.y * 0.035
@@ -402,6 +410,7 @@ func _process(dt: float) -> void:
 	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
 	round_t = maxf(0.0, round_t - dt * 0.8)
 	slam_age += dt
+	pickup_t = maxf(0.0, pickup_t - dt * 1.6)
 	var sa := slam_alpha(slam_age); slam_lbl.modulate.a = sa
 	if sa > 0.0:
 		slam_lbl.pivot_offset = slam_lbl.size / 2; slam_lbl.scale = Vector2.ONE * slam_scale(slam_age)

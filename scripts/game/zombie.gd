@@ -410,8 +410,13 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		game.sfx.play_at("plank_rip", global_position + Vector3.UP * 1.3, -12, 2.2)
 	hp -= dmg
 	flash_t = 0.07
-	if part == "body" and not headshot and hp - dmg > 0 and dmg > max_hp * 0.3 and not arm_lost and randf() < 0.35:
-		_lose_arm()
+	# v7.11 gibbing: heavy hits and explosives tear limbs off (legs → crawler) on non-lethal hits
+	if hp > 0 and not headshot:
+		var g := Gib.decide(part, float(dmg) / max_hp, explosive_hit, randf(), arm_lost, crawler)
+		if g in ["arm", "both"]: _lose_arm()
+		if g in ["legs", "both"] and can_crawl() and not crawler:
+			_become_crawler()
+			if game and game.fx: game.fx.gibs(global_position + Vector3.UP * 0.5, 5, self, force * 0.3)
 	if part == "legs" and not crawler:
 		leg_damage += dmg
 		if leg_damage > max_hp * 0.45 and can_crawl() and hp > 0:
@@ -440,6 +445,13 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		react_yaw = pose.y; react_roll = pose.z
 		if state == State.CHASE: stagger_t = maxf(stagger_t, HitReact.stagger_time(kind) * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
 
+## v7.11: the round's last zombie glows red (cheap omni, no shadow) so it can be found.
+var last_glow: OmniLight3D
+func mark_last() -> void:
+	if last_glow: return
+	last_glow = OmniLight3D.new(); last_glow.light_color = Color(1.0, 0.1, 0.05); last_glow.light_energy = 1.6
+	last_glow.omni_range = 3.0; last_glow.position = Vector3(0, 1.2, 0); last_glow.shadow_enabled = false
+	add_child(last_glow)
 func make_crawler() -> void:
 	if not crawler and state != State.DEAD and can_crawl(): _become_crawler()
 ## zombie_a has a keyframed Crawl clip; zombie_b (simple rig) crawls procedurally: prone body, arms dragging.

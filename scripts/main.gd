@@ -478,6 +478,28 @@ func _clip(dir: String) -> void:
 	await _wait(25)
 	await _snap(dir, "31_round_hold.png")
 	await _wait(60)
+	# v7.11: a blast tears the legs off (crawler), then a drop grab flash, then the last-zombie cue
+	if is_instance_valid(rz): rz.queue_free()
+	game.zombies.clear()
+	var gz: Zombie = game.spawn_zombie("", "walker")
+	gz.state = Zombie.State.CHASE; gz.model.position.y = 0.0; gz.model.rotation.x = 0.0
+	gz.global_position = Vector3(0, 0.05, 3.0); gz.set_physics_process(false); gz.max_hp = 100000; gz.hp = 100000
+	await _glide(pl.global_position, gz.global_position + Vector3(0, 1.0, 0), 10)
+	gz.explosive_hit = true; gz.take_damage(500, false, pl, "body", Vector3(0, 2, -3)); gz.explosive_hit = false
+	game.fx.explosion(gz.global_position + Vector3(0, 0.3, 0.4), 1.5)
+	await _wait(6)
+	await _snap(dir, "32_blast_gib.png")
+	await _wait(40)
+	await _snap(dir, "33_gib_crawler.png")
+	game.collect_power("doublepay")
+	await _wait(4)
+	await _snap(dir, "34_pickup_flash.png")
+	await _wait(60)
+	game.to_spawn = 0; game.last_cue_round = -1
+	game._last_zombie_cue(gz)
+	await _wait(30)
+	await _snap(dir, "35_last_zombie.png")
+	await _wait(60)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
