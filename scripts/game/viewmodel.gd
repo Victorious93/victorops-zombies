@@ -122,11 +122,12 @@ func _sleeve(from: Vector3, to: Vector3, r: float) -> MeshInstance3D:
 var alien_mat: StandardMaterial3D
 var alien_core: MeshInstance3D
 ## v7.12 fix: glow is clamped so long bursts read as hot green-orange, never white blow-out.
-const HEAT_EMIT_MIN := 0.25
-const HEAT_EMIT_MAX := 0.9
+const HEAT_EMIT_MIN := 0.2
+const HEAT_EMIT_MAX := 0.6
 const HEAT_CORE_ALPHA_MIN := 0.35
 const HEAT_CORE_ALPHA_MAX := 0.7
 const HEAT_CORE_SCALE_MAX := 1.2
+const ALIEN_FLASH_MAX := 1.2
 const COOL_GLOW := Color(0.15, 0.6, 0.25)
 const HOT_GLOW := Color(0.75, 0.38, 0.06)
 static func heat_energy(h: float) -> float:
@@ -149,9 +150,9 @@ var heat := 0.0:
 
 static func alien_material() -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.08, 0.14, 0.09); m.roughness = 0.6; m.metallic = 0.1
+	m.albedo_color = Color(0.04, 0.07, 0.05); m.roughness = 0.9; m.metallic = 0.0; m.metallic_specular = 0.1
 	m.emission_enabled = true; m.emission = COOL_GLOW; m.emission_energy_multiplier = HEAT_EMIT_MIN
-	m.rim_enabled = true; m.rim = 0.15
+	m.rim_enabled = false
 	return m
 
 static func alienize(g: Node3D) -> StandardMaterial3D:
@@ -274,6 +275,7 @@ func fire(strength: float) -> void:
 	flash.visible = true; flash.rotation.z = randf() * TAU
 	flash.scale = Vector3.ONE * randf_range(0.8, 1.3) * clampf(0.8 + strength * 0.35, 0.9, 1.8)
 	flash_light.light_energy = clampf(2.5 + strength * 2.0, 3.0, 7.0); flash_t = 0.06
+	if alien_mat: flash_light.light_energy = minf(flash_light.light_energy, ALIEN_FLASH_MAX)   # 18 shots/s keeps the light on; cap it
 
 func add_sway(look_delta: Vector2) -> void:
 	sway += look_delta * 0.6

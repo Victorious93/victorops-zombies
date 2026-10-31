@@ -131,3 +131,7 @@ func test_reaper_heat_glow_is_capped() -> void:
 	assert_true(maxf(hot.r, maxf(hot.g, hot.b)) * Viewmodel.HEAT_EMIT_MAX < 1.0, "never blows out to white")
 	var m := Viewmodel.alien_material()
 	assert_true(m.emission_energy_multiplier <= Viewmodel.HEAT_EMIT_MAX)
+
+func test_reaper_flash_light_capped() -> void:
+	assert_true(Viewmodel.ALIEN_FLASH_MAX <= 1.5, "muzzle light capped for the 500-round LMG")
+	assert_false(Viewmodel.alien_material().rim_enabled, "no rim wash-out")
