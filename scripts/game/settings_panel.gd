@@ -64,6 +64,9 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	var ch := _row(box, "Touch controls")
 	var cbt := Button.new(); cbt.text = "Controls…"; cbt.custom_minimum_size = Vector2(220, 52); cbt.add_theme_font_size_override("font_size", 22)
 	cbt.pressed.connect(func(): ControlsEditor.open(root, st, on_change)); ch.add_child(cbt)
+	var bth := _row(box, "Rap beats (music)")
+	var bt := CheckButton.new(); bt.button_pressed = st.beats; bt.custom_minimum_size = Vector2(80, 48)
+	bt.toggled.connect(func(on): st.beats = on; on_change.call()); bth.add_child(bt)
 	_slider(_row(box, "Music"), 0.0, 1.0, st.music, 0.05, func(x): st.music = x; on_change.call())
 	_slider(_row(box, "Effects"), 0.0, 1.0, st.sfx, 0.05, func(x): st.sfx = x; on_change.call())
 	for pair in buttons:

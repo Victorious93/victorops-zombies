@@ -14,6 +14,7 @@ var preset := "medium"
 var aim_assist := true
 var music := 0.7          ## 0 - 1
 var sfx := 1.0
+var beats := true         ## v7.12: original rap beats as in-round music (off = the old ambient loop)
 var auto_fire := false     ## touch: fire automatically while the crosshair is on a zombie
 var gyro := "off"          ## "off" | "ads" | "always": phone gyroscope adds to touch look
 var look_curve := 1.3      ## 1.0 linear - 1.8 accelerated
@@ -40,7 +41,7 @@ static func linear_to_db_safe(v: float) -> float:
 	return -80.0 if v <= 0.001 else linear_to_db(v)
 
 func to_dict() -> Dictionary:
-	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size, starter_gun = starter_gun, tutorial_done = tutorial_done, button_scale = button_scale, button_opacity = button_opacity, left_fire = left_fire, show_fps = show_fps, layout = _layout_out()}
+	return {sensitivity = sensitivity, preset = preset, aim_assist = aim_assist, music = music, beats = beats, sfx = sfx, auto_fire = auto_fire, gyro = gyro, look_curve = look_curve, joystick = joystick, fire_size = fire_size, starter_gun = starter_gun, tutorial_done = tutorial_done, button_scale = button_scale, button_opacity = button_opacity, left_fire = left_fire, show_fps = show_fps, layout = _layout_out()}
 
 func from_dict(d: Dictionary) -> void:
 	set_sensitivity(float(d.get("sensitivity", 1.0)))
@@ -48,6 +49,7 @@ func from_dict(d: Dictionary) -> void:
 	aim_assist = bool(d.get("aim_assist", true))
 	music = clampf(float(d.get("music", 0.7)), 0.0, 1.0)
 	sfx = clampf(float(d.get("sfx", 1.0)), 0.0, 1.0)
+	beats = bool(d.get("beats", true))
 	auto_fire = bool(d.get("auto_fire", false))
 	gyro = str(d.get("gyro", "off"))
 	if not GYRO_MODES.has(gyro): gyro = "off"

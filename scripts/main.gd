@@ -317,6 +317,10 @@ func _clip(dir: String) -> void:
 	game.round = 3
 	game.hud.tally_flip(3)
 	game.throw_power(Node3D.new())
+	if OS.get_environment("VOZ_CLIP_REAPER") != "":
+		pl.economy.points += 40000; pl.loadout.give(Weapons.make(Weapons.ALIEN)); pl.apply_reload_perk()
+		pl.global_position = Vector3(-6.0, 0.1, -24.0); await _wait(20)
+		await _clip_reaper(dir, pl); return
 	# A: window tear-down + climb-in (0-10 s): walkers rip planks one by one, then haul over the sill
 	var win: WindowBarricade = game.map.windows["w_west"]
 	var inward := (win.inside_point - win.outside_point); inward.y = 0; inward = inward.normalized()
@@ -499,7 +503,83 @@ func _clip(dir: String) -> void:
 	game._last_zombie_cue(gz)
 	await _wait(30)
 	await _snap(dir, "35_last_zombie.png")
-	await _wait(60)
+	await _wait(30)
+	# v7.12: points pop beside the crosshair (hit, kill, headshot kill)
+	game.hud.points_pop(10); await _wait(4); game.hud.points_pop(50); await _wait(4); game.hud.points_pop(100)
+	await _wait(5)
+	await _snap(dir, "36_points_pops.png")
+	await _wait(30)
+	# v7.12: a late-round walker that has hunted long enough breaks into a leaning sprint
+	if is_instance_valid(gz): gz.queue_free()
+	game.zombies.clear()
+	pl.global_position = Vector3(0, 0.1, 7.0)
+	var sz: Zombie = game.spawn_zombie("", "walker")
+	sz.state = Zombie.State.CHASE; sz.model.position.y = 0.0; sz.global_position = Vector3(0, 0.05, -6.0)
+	sz.spawn_round = 12; sz.gait = Gait.Tier.WALK; sz.chase_time = 60.0; sz.max_hp = 100000; sz.hp = 100000
+	await _glide(pl.global_position, Vector3(0, 1.0, -6.0), 8)
+	await _wait(20)
+	await _snap(dir, "37_sprint_ramp.png")
+	await _wait(25)
+	await _snap(dir, "38_sprint_close.png")
+	await _wait(20)
+	# v7.12: the Sealed Annex - hint, shoot the cracked panel, reveal, Vault Plating, Rift Bench, Hive Reaper
+	if is_instance_valid(sz): sz.queue_free()
+	game.zombies.clear()
+	var cp := HiddenRoom.CRACK_POS
+	pl.global_position = Vector3(cp.x + 0.5, 0.1, -21.5)
+	for i in 30: _aim_at(cp, 0.3); await get_tree().process_frame
+	await _snap(dir, "39_crack_hint.png")
+	for i in 50:
+		_aim_at(cp + Vector3(sin(i * 0.4) * 0.3, cos(i * 0.3) * 0.3, 0), 0.3)
+		pl.bot_input.fire = i % 2 == 0
+		if pl.ammo().rounds == 0 and not pl.ammo().reloading(): pl.reload()
+		await get_tree().process_frame
+	pl.bot_input.fire = false
+	if not game.annex.revealed: game.crack_hit(pl, 99999.0, cp)
+	await _wait(10)
+	await _snap(dir, "40_reveal_dust.png")
+	await _wait(50)
+	await _glide(Vector3(-6.0, 0.1, -27.0), Vector3(-6.0, 1.3, -32.2), 50)
+	await _wait(15)
+	await _snap(dir, "41_hidden_room.png")
+	pl.economy.points += 40000
+	await _glide(HiddenRoom.VAULT_POS + Vector3(1.6, 0.1, 0.4), HiddenRoom.VAULT_POS + Vector3(0, 1.2, 0), 30)
+	game.use_vault(pl); await _wait(20); game.use_vault(pl); await _wait(30)
+	pl.armor.value -= 140.0; game.sfx.play("armor_hit_v12", -4)
+	await _wait(10)
+	await _snap(dir, "42_armor_hud.png")
+	await _glide(HiddenRoom.RIFT_POS + Vector3(-1.6, 0.1, 0.3), HiddenRoom.RIFT_POS + Vector3(0, 1.0, 0), 30)
+	await _wait(10)
+	await _snap(dir, "43_rift_bench.png")
+	await _glide(HiddenRoom.PEDESTAL_POS + Vector3(0, 0.1, 1.8), HiddenRoom.PEDESTAL_POS + Vector3(0, 1.4, 0), 30)
+	await _wait(10)
+	await _snap(dir, "44_reaper_pedestal.png")
+	game.buy_reaper(pl)
+	await _wait(50)
+	await _snap(dir, "45_reaper_in_hand.png")
+	await _clip_reaper(dir, pl)
+
+func _clip_reaper(dir: String, pl: Player) -> void:
+	# out into the generator room and let it spin up on a pack
+	await _glide(Vector3(-6.0, 0.1, -24.0), Vector3(-6.0, 1.3, -14.0), 30)
+	for i in 5:
+		var reaper_z: Zombie = game.spawn_zombie("", "walker")
+		reaper_z.state = Zombie.State.CHASE; reaper_z.model.position.y = 0.0; reaper_z.global_position = Vector3(-8.0 + i * 1.2, 0.05, -12.0 - (i % 2) * 1.5)
+	await _glide(Vector3(-6.0, 0.1, -23.5), Vector3(-6.0, 1.3, -14.0), 40, true)
+	await _snap(dir, "46_reaper_firing.png")
+	for k in 6:
+		await _glide(Vector3(-6.0, 0.1, -23.5 + k * 0.08), Vector3(-6.0, 1.3, -14.0), 10, true)
+		_probe_blobs("47-%d" % k)
+	_probe_blobs("47")
+	await _snap(dir, "47_reaper_heat.png")
+	pl.bot_input.fire = false
+	pl.armor.value = 5.0; game.god_mode = false
+	if pl.has_method("take_damage"): pl.take_damage(30.0, pl.global_position + Vector3(0, 0, 2))
+	game.god_mode = true
+	await _wait(20)
+	_probe_blobs("48")
+	await _snap(dir, "48_armor_break.png")
+	await _wait(20)
 	get_tree().quit()
 
 ## Fixed before/after viewpoints: <dir>/scenery/NN_*.png and <dir>/viewmodel/<weapon>_{hip,ads}.png.
@@ -561,11 +641,21 @@ func _views(dir: String) -> void:
 			if is_instance_valid(z): z.queue_free()
 		game.zombies.clear(); await _wait(2)
 	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.pitch = 0.0
-	for id in (Weapons.ALL_IDS if want.call("viewmodel") else []):
+	for id in ((Weapons.ALL_IDS + [Weapons.ALIEN]) if want.call("viewmodel") else []):
 		if vonly.begins_with("vm:") and not id in vonly.substr(3).split(","): continue   # VOZ_VIEW_ONLY=vm:rifle,smg
 		pl.loadout.give(Weapons.make(id)); pl.apply_reload_perk()
 		await _wait(50)
 		await _snap(vd, id + "_hip.png")
+		if OS.get_environment("VOZ_VM_LOG") != "": pl.vm.log_materials(id)
+		if id == Weapons.ALIEN:   # sustained fire: the worst case for the heat glow
+			var tz := []
+			for k in 3:
+				var z: Zombie = game.spawn_zombie("", "walker"); z.state = Zombie.State.CHASE; z.model.position.y = 0.0
+				z.max_hp = 100000; z.hp = 100000; z.global_position = Vector3(-1.2 + k * 1.2, 0.05, -4.0); z.set_physics_process(false); tz.append(z)
+			pl.bot_input.fire = true; await _wait(60); await _snap(vd, id + "_firing.png")
+			await _wait(4); await _snap(vd, id + "_firing_b.png"); pl.bot_input.fire = false
+			if OS.get_environment("VOZ_VM_LOG") != "": print("FXLOG children=%d" % game.fx.get_child_count())
+			for z in tz: if is_instance_valid(z): z.queue_free()
 		pl.bot_input.ads = true
 		await _wait(40)
 		await _snap(vd, id + "_ads.png")
@@ -636,3 +726,30 @@ func _debug_toggles(t: String) -> void:
 			if l is OmniLight3D and l.is_visible_in_tree() and l.global_position.distance_to(c) < l.omni_range + 4: n += 1; print("LIGHT ", l.get_path(), " ", l.global_position, " r=", l.omni_range, " sh=", l.shadow_enabled)
 		print("LIGHTCOUNT ", n)
 	print("VOZ_DBG ", t)
+
+
+## Blob probe: every visible 3D thing whose screen position is near the crosshair and within 8 m.
+func _probe_blobs(tag: String) -> void:
+	if OS.get_environment("VOZ_BLOB_LOG") == "": return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null: return
+	var vs := get_viewport().get_visible_rect().size
+	var n := 0
+	for o in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		var g := o as GeometryInstance3D
+		if not g.is_visible_in_tree() or cam.is_position_behind(g.global_position): continue
+		var d := cam.global_position.distance_to(g.global_position)
+		if d > 8.0: continue
+		var sp := cam.unproject_position(g.global_position)
+		if sp.distance_to(vs / 2) > vs.y * 0.35: continue
+		if (g.layers & 1) == 0: continue   # viewmodel layer
+		var mat = g.material_override
+		if mat == null and g is MeshInstance3D and (g as MeshInstance3D).mesh: mat = (g as MeshInstance3D).get_active_material(0)
+		var md := str(mat)
+		if mat is StandardMaterial3D:
+			md = "alb=%s tr=%d sh=%d bb=%d tex=%s" % [mat.albedo_color, mat.transparency, mat.shading_mode, mat.billboard_mode, mat.albedo_texture != null]
+		elif mat is ShaderMaterial: md = "shader=%s" % mat.shader.resource_path
+		var aabb := g.get_aabb().size * g.global_transform.basis.get_scale()
+		print("BLOB %s %s %s d=%.2f size=%s %s" % [tag, g.get_class(), g.get_path(), d, aabb, md])
+		n += 1
+	print("BLOB %s total=%d" % [tag, n])

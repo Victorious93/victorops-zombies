@@ -35,3 +35,21 @@ static func anim_speed(tier: int) -> float:
 		Tier.JOG: return 1.5
 		Tier.SPRINT: return 1.0
 	return 1.0
+
+## v7.12 sprint ramp: from round RAMP_ROUND a walker breaks into a jog after jog_after(r) seconds of
+## chasing, and from SPRINT_ROUND a jogger breaks into a sprint after sprint_after(r) seconds.
+const RAMP_ROUND := 4
+const SPRINT_ROUND := 7
+static func jog_after(r: int) -> float: return maxf(6.0, 22.0 - r)
+static func sprint_after(r: int) -> float: return maxf(8.0, 30.0 - r)
+static func ramp(tier: int, round_no: int, chase_t: float) -> int:
+	if round_no < RAMP_ROUND: return tier
+	if tier == Tier.WALK and chase_t >= jog_after(round_no): return Tier.JOG
+	if tier == Tier.JOG and round_no >= SPRINT_ROUND and chase_t >= jog_after(round_no) + sprint_after(round_no): return Tier.SPRINT
+	return tier
+## Forward lean so a sprinter reads differently from a jogger at a glance (the run cycle is shared).
+static func lean(tier: int) -> float:
+	match tier:
+		Tier.JOG: return 0.12
+		Tier.SPRINT: return 0.32
+	return 0.0

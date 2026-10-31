@@ -6,6 +6,10 @@ extends Node3D
 
 const MAX_DECALS := 48
 const MAX_GIBS := 30
+const MAX_SPLATS := 40
+const MAX_SPARK_EMITTERS := 48
+var splats_alive: Array = []
+var sparks_alive: Array = []
 var game
 var decals: Array = []
 var gibs_alive: Array = []
@@ -69,8 +73,16 @@ func bullet_hole(at: Vector3, normal: Vector3, heavy := false) -> void:
 	surface_quad(at, normal, randf_range(0.07, 0.11) * (1.6 if heavy else 1.0), _quad_mat("hole", _hole_tex))
 	# hot spark streaks + a chunky dust/debris puff
 	sparks(at, normal, Color(1.0, 0.8, 0.45), 9 if heavy else 6, 0.22, 6.0)
+	# v7.12 fix3: dust puffs within arm's reach of the camera fill the screen as dark blobs
+	# (fast guns hitting a nearby barricade/wall), so only spawn them a safe distance away.
+	if near_camera(at): return
 	sparks(at, normal, Color(0.42, 0.4, 0.37), 10 if heavy else 6, 0.55, 2.2, 0.06)
 	if heavy: sparks(at, normal, Color(0.25, 0.23, 0.2), 6, 0.8, 3.0, 0.035)
+
+const PUFF_MIN_DIST := 2.5
+func near_camera(at: Vector3) -> bool:
+	var cam := get_viewport().get_camera_3d() if is_inside_tree() else null
+	return cam != null and cam.global_position.distance_to(at) < PUFF_MIN_DIST
 
 ## Big arterial burst for head/limb pops.
 func blood_burst(at: Vector3, dir: Vector3, big := true) -> void:
@@ -88,15 +100,24 @@ func blood_hit(at: Vector3, dir: Vector3) -> void:
 	# spatter on the floor / wall behind
 	var space := get_world_3d().direct_space_state
 	var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * 2.5 + Vector3.DOWN * 1.2, 1))
-	if not r.is_empty():
-		surface_quad(r.position, r.normal, randf_range(0.3, 0.6), _quad_mat("blood", _blood_tex))
+	# v7.12 fix2: only splat on static world geometry (never on zombie bodies, which read as dark
+	# blobs floating over them), and recycle a fixed pool so rapid fire can't stack splats.
+	if not r.is_empty() and r.collider is StaticBody3D:
+		var q := surface_quad(r.position, r.normal, randf_range(0.3, 0.6), _quad_mat("blood", _blood_tex))
+		splats_alive.append(q)
+		while splats_alive.size() > MAX_SPLATS:
+			var old = splats_alive.pop_front()
+			if is_instance_valid(old): old.queue_free()
 
 func blood_pool(at: Vector3) -> void:
 	var m := surface_quad(at + Vector3.UP * 0.01, Vector3.UP, 0.2, _quad_mat("blood", _blood_tex))
 	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(3.5, 5.5), 2.4).set_ease(Tween.EASE_OUT)
 
 func sparks(at: Vector3, normal: Vector3, color: Color, amount: int, life := 0.18, spd := 4.0, size := 0.03) -> void:
-	var p := CPUParticles3D.new()
+	sparks_alive = sparks_alive.filter(func(e): return is_instance_valid(e))
+	if sparks_alive.size() >= MAX_SPARK_EMITTERS: return
+	if color.r <= 0.8 and near_camera(at): return   # dark (alpha-blended) puffs never right in the player's face
+	var p := CPUParticles3D.new(); sparks_alive.append(p)
 	p.one_shot = true; p.emitting = false; p.amount = maxi(1, int(amount * particle_scale)); p.lifetime = life
 	p.explosiveness = 1.0; p.direction = normal; p.spread = 50.0
 	p.initial_velocity_min = spd * 0.5; p.initial_velocity_max = spd; p.gravity = Vector3(0, -9, 0)

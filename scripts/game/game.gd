@@ -15,6 +15,7 @@ var sfx: Sfx
 var facility := Facility.new()
 var crate := MysteryCrate.new()
 var forge := OverchargeForge.new()
+var annex := HiddenRoom.new()   ## v7.12 Sealed Annex
 var crate_node: CrateNode
 var rng := RandomNumberGenerator.new()
 var round := 0
@@ -154,7 +155,9 @@ func apply_settings() -> void:
 	env.fog_enabled = d.fog
 	fx.particle_scale = d.particles
 	if map: map.apply_quality(d)
-	if music: music.volume_db = GameSettings.linear_to_db_safe(settings.music) - 10.0
+	if music:
+		if (music_id != "music") != settings.beats: _set_music(_music_for(maxi(round, 1)))
+		music.volume_db = music_base()
 	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
 	if player:
 		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
@@ -168,18 +171,47 @@ func apply_settings() -> void:
 ## Pull the background loop down while a round sting plays, then bring it back.
 func duck_music(sec: float) -> void:
 	if music == null: return
-	var base := GameSettings.linear_to_db_safe(settings.music) - 10.0
+	var base := music_base()
 	var tw := create_tween()
 	tw.tween_property(music, "volume_db", base - 14.0, 0.4)
 	tw.tween_interval(sec)
 	tw.tween_property(music, "volume_db", base, 1.5)
 
-func _start_music() -> void:
+## v7.12: the in-round music is one of three original rap beats (Beats.for_round), or the old ambient
+## loop when Settings > Rap beats is off. Changing track crossfades.
+var music_id := ""
+func music_base() -> float:
+	return GameSettings.linear_to_db_safe(settings.music) - 10.0 + (Beats.VOLUME_DB if music_id != "music" else 0.0)
+
+func _music_for(r: int) -> String:
+	return Beats.for_round(r) if settings.beats else "music"
+
+func _music_stream(id: String) -> AudioStream:
+	if id != "music": return Beats.load_loop(id)
 	var s := sfx.stream("music") as AudioStreamWAV
-	if s == null: return
+	if s == null: return null
 	s = s.duplicate(); s.loop_mode = AudioStreamWAV.LOOP_FORWARD; s.loop_begin = 0
 	s.loop_end = int(s.get_length() * s.mix_rate)
-	music = AudioStreamPlayer.new(); music.stream = s; add_child(music); music.play()
+	return s
+
+func _set_music(id: String) -> void:
+	if id == music_id and music: return
+	var st := _music_stream(id)
+	if st == null: return
+	music_id = id
+	var old := music
+	music = AudioStreamPlayer.new(); music.stream = st; add_child(music)
+	if old:
+		music.volume_db = -40.0; music.play()
+		var tw := create_tween().set_parallel(true)
+		tw.tween_property(old, "volume_db", -60.0, Beats.FADE)
+		tw.tween_property(music, "volume_db", music_base(), Beats.FADE)
+		tw.chain().tween_callback(old.queue_free)
+	else:
+		music.volume_db = music_base(); music.play()
+
+func _start_music() -> void:
+	_set_music(_music_for(1))
 
 func toggle_pause() -> void:
 	if over: return
@@ -266,9 +298,10 @@ func _update_rounds(dt: float) -> void:
 				hud.banner("Round %d · FRENZY" % round, 3.5)
 			else:
 				hud.banner("Round %d" % round, 3.0)
-			sfx.play("round_sting_v10", ROUND_MIX.round_sting_v10)
+			_set_music(_music_for(round))
+			cue("round_sting_v10", ROUND_MIX.round_sting_v10, CueQueue.Prio.ROUND)
 			sfx.play("round_start_v6", ROUND_MIX.round_start_v6)
-			if not boss_pending: announce("ann_round_v7", ROUND_MIX.ann_round_delay)
+			if not boss_pending: cue("ann_round_v7", 0, CueQueue.Prio.VOICE, true, ROUND_MIX.ann_round_delay)
 			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
 			brute_pending = ZombieTypes.is_brute_round(round)
@@ -336,16 +369,23 @@ func _part_of(z: Zombie, y: float) -> String:
 
 func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
-	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain
+	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain; hud.points_pop(gain)
+
+var _prop_box_rids: Array[RID] = []
+func prop_box_rids() -> Array[RID]:
+	if _prop_box_rids.is_empty():
+		for b in get_tree().get_nodes_in_group(FacilityMap.PROP_BOX_GROUP): _prop_box_rids.append((b as CollisionObject3D).get_rid())
+	return _prop_box_rids
 
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
 	var exclude: Array[RID] = [p.get_rid()]
+	exclude.append_array(prop_box_rids())   # movement-only boxes; bullets use the mesh-accurate twins
 	var pierce := w.pierce
 	var from := origin
 	var end_point := origin + dir * 80.0
 	for i in 8:
-		var q := PhysicsRayQueryParameters3D.create(from, origin + dir * 80.0, 1 | 2, exclude)
+		var q := PhysicsRayQueryParameters3D.create(from, origin + dir * 80.0, 1 | 2 | FacilityMap.SHOT_LAYER, exclude)
 		var r := space.intersect_ray(q)
 		if r.is_empty(): break
 		end_point = r.position
@@ -369,7 +409,10 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			if head: sfx.play("headshot_pop", -4 if killed else -9, randf_range(0.95, 1.08))
 			if killed: sfx.play("kill_confirm", -10)
 			if killed: sfx.play("gore", -8, randf_range(0.9, 1.1))
-			fx.blood_hit(r.position, dir)
+			# v7.12 fix: throttle mist for very fast guns so it can't stack into dark blobs
+			var now_ms := Time.get_ticks_msec()
+			if w.fire_interval >= 0.09 or now_ms - _blood_ms >= 120:
+				_blood_ms = now_ms; fx.blood_hit(r.position, dir)
 			if w.splash > 0.0: _splash(p, r.position, w, z)
 			_alt_ammo(p, z, w, dmg, killed)
 			if pierce > 0:
@@ -379,7 +422,11 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			var col: Object = r.collider
 			if col and col.has_meta("fuse"):
 				_shoot_fuse(p, col)
+			if col and col.has_meta("crack"):
+				crack_hit(p, float(w.damage), r.position)
 			var n: Vector3 = r.normal
+			if OS.get_environment("VOZ_BLOB_LOG") != "" and r.position.distance_to(from) < 1.5:
+				print("BLOBHIT ", (col as Node).get_path() if col is Node else col, " d=", r.position.distance_to(from), " from=", from)
 			fx.bullet_hole(r.position, n, w.weight >= 1.2)
 			if randf() < 0.6: sfx.play_at(GunFeel.impact_sound(false, false, col is StaticBody3D and n.y < 0.5), r.position, -8, randf_range(0.85, 1.15))
 			if w.splash > 0.0: _splash(p, r.position, w, null)
@@ -418,6 +465,10 @@ func knife_target(p: Player, reach: float) -> Zombie:
 
 func melee(p: Player) -> void:
 	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
+	if not annex.revealed:   # v7.12: knifing the cracked panel
+		var off := HiddenRoom.CRACK_POS - p.global_position; off.y = 0
+		if off.length() < Equipment.KNIFE_RANGE_M + 1.0 and fwd.dot(off.normalized()) > 0.4:
+			crack_hit(p, HiddenRoom.MELEE_DAMAGE, HiddenRoom.CRACK_POS + Vector3(0, 0, 0.3)); sfx.play("knife_hit", -4, 0.7)
 	var best := knife_target(p, Equipment.KNIFE_RANGE_M + 0.4)
 	if best == null: return
 	var before := p.economy.points
@@ -455,6 +506,7 @@ func _update_grenades(dt: float) -> void:
 
 func explode(p: Player, at: Vector3, radius: float, dmg: int) -> void:
 	fx.explosion(at, radius)
+	if not annex.revealed and at.distance_to(HiddenRoom.CRACK_POS) < radius + 1.0: crack_hit(p, float(dmg) * 2.0, at)
 	sfx.play_at("explosion", at, 2)
 	for z in zombies.duplicate():
 		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
@@ -487,13 +539,15 @@ func _fx_sphere(at: Vector3, radius: float, c: Color) -> MeshInstance3D:
 	tw.tween_callback(mi.queue_free)
 	return mi
 
+var _blood_ms := 0
+
 func _impact(at: Vector3, c: Color) -> void:
 	_fx_sphere(at, 0.06, c)
 
 func _tracer(a: Vector3, b: Vector3, w: WeaponDef) -> void:
 	var mi := MeshInstance3D.new(); var im := ImmediateMesh.new(); mi.mesh = im
 	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.albedo_color = Color(1, 0.85, 0.5, 0.6) if w.tier == 0 else Color(0.8, 0.5, 1, 0.8)
+	m.albedo_color = Color(0.35, 1.0, 0.6, 0.95) if w.id == Weapons.ALIEN else (Color(1, 0.85, 0.5, 0.6) if w.tier == 0 else Color(0.8, 0.5, 1, 0.8))
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	im.surface_begin(Mesh.PRIMITIVE_LINES, m); im.surface_add_vertex(a); im.surface_add_vertex(b); im.surface_end()
 	add_child(mi)
@@ -636,8 +690,9 @@ func collect_power(id: String) -> void:
 	var d: Dictionary = PowerUps.ALL[id]
 	power.activate(id)
 	hud.banner(d.name, 2.5); hud.info(d.desc)
-	sfx.play("pu_" + id, 2); sfx.play("pu_grab_v11", -4)
-	announce(PICKUP_CALLOUTS[id], 0.35)   # v7.11 announcer call-out per drop
+	sfx.play("pu_" + id, 2)
+	cue("pu_grab_v11", -4, CueQueue.Prio.STINGER)
+	cue(PICKUP_CALLOUTS[id], 0, CueQueue.Prio.VOICE, true, 0.35)   # v7.11 call-out, v7.12 queued
 	hud.pickup_flash(d.color)
 	tint = maxf(tint, 0.3)
 	match id:
@@ -689,6 +744,20 @@ func on_player_bled_out(p: Player) -> void:
 	sfx.play("round_end", 0, 0.7)
 
 ## Voice-like announcer sting (synthesised) with the music ducked under it.
+## v7.12 prioritised 2D cue: see CueQueue (voices wait their turn, lesser cues duck under bigger ones).
+var cues := CueQueue.new()
+func cue(id: String, db: float, prio: int, voice := false, delay := 0.0) -> void:
+	var now := Time.get_ticks_msec() / 1000.0 + delay
+	var st := sfx.stream(id)
+	var dur := st.get_length() if st else 1.0
+	var r := cues.request(prio, now, dur, voice)
+	var total: float = delay + r.delay
+	var vol: float = db + r.db_offset
+	if total <= 0.0:
+		sfx.play(id, vol); if voice: duck_music(2.5)
+		return
+	get_tree().create_timer(total, true, false, true).timeout.connect(func():
+		sfx.play(id, vol); if voice: duck_music(2.5))
 func announce(id: String, delay := 0.0) -> void:
 	if delay <= 0.0:
 		sfx.play(id, 0); duck_music(2.5); return
@@ -942,6 +1011,71 @@ func buy_wall(p: Player, id: String) -> void:
 	p.loadout.give(Weapons.make(id)); p.apply_reload_perk()
 	if tutorial: tutorial.event("buy")
 	sfx.play("buy", -4); hud.info("Bought %s" % Weapons.make(id).name)
+
+## ---- v7.12 Sealed Annex ----
+var crack_hinted := false
+func crack_hit(p: Player, dmg: float, at: Vector3) -> void:
+	if annex.hit(dmg):
+		reveal_annex(); return
+	if annex.revealed: return
+	fx.dirt_burst(at)
+	if not crack_hinted and annex.damage01() > 0.15:
+		crack_hinted = true; hud.info("The wall is giving way...")
+
+func reveal_annex() -> void:
+	annex.revealed = true
+	map.reveal_annex()
+	var cp := HiddenRoom.CRACK_POS
+	for i in 7: fx.dirt_burst(cp + Vector3(randf_range(-1.0, 1.0), randf_range(-1.2, 1.4), randf_range(-0.2, 0.6)))
+	fx.splinters(cp)
+	sfx.play_at("rumble", cp, 2)
+	cue("hidden_reveal_v12", 0.0, CueQueue.Prio.STINGER)
+	duck_music(3.0)
+	if player: player.add_trauma(0.7)
+	hud.banner(HiddenRoom.NAME.to_upper(), 3.0)
+	hud.info("A hidden vault! Armor, a Rift Bench and something alive...")
+
+func vault_prompt(p: Player) -> String:
+	if not annex.revealed: return ""
+	var c := p.armor.next_tier_cost()
+	if c < 0: return "Vault Plating: maxed"
+	return "%s (cap %d, -%d%% dmg): %d" % [ArmorState.TIERS[p.armor.tier].name, ArmorState.TIERS[p.armor.tier].cap, int(ArmorState.TIERS[p.armor.tier].resist * 100), c]
+
+func use_vault(p: Player) -> void:
+	if not annex.revealed: return
+	if p.armor.next_tier_cost() < 0: _deny("Plating maxed"); return
+	if not p.armor.buy_tier(p.economy): _deny("Not enough points"); return
+	sfx.play("buy", -4); sfx.play("armor_hit_v12", -2, 0.7); hud.banner(ArmorState.TIERS[p.armor.tier - 1].name, 2.0)
+
+func rift_prompt(p: Player) -> String:
+	if not annex.revealed: return ""
+	var c := RiftBench.cost_for(p.weapon())
+	return "%s: %s" % [RiftBench.NAME, "only first overcharge - use the Forge" if c < 0 else "-> Mk.2  %d" % c]
+
+func use_rift(p: Player) -> void:
+	if not annex.revealed: return
+	var up := RiftBench.upgrade(p.weapon(), p.economy)
+	if up == null: _deny("Already overcharged" if p.weapon().tier >= 1 else "Not enough points"); return
+	var held: Ammo = p.loadout.slots[p.loadout.current]
+	held.swap(up); p.apply_reload_perk()
+	sfx.play("forge_done", 0); hud.banner(up.display_name(), 2.5)
+
+func reaper_prompt(p: Player) -> String:
+	if not annex.revealed: return ""
+	if p.loadout.has(Weapons.ALIEN) >= 0: return "Hive Reaper ammo: %d" % Weapons.ALIEN_AMMO
+	return "Hive Reaper (500 drum): %d" % Weapons.ALIEN_PRICE
+
+func buy_reaper(p: Player) -> void:
+	if not annex.revealed: return
+	var i := p.loadout.has(Weapons.ALIEN)
+	if i >= 0:
+		var a: Ammo = p.loadout.slots[i]
+		if a.is_full(): return
+		if not p.economy.spend(Weapons.ALIEN_AMMO): _deny("Not enough points"); return
+		a.refill(); sfx.play("buy", -4); hud.info("Drum regrown"); return
+	if not p.economy.spend(Weapons.ALIEN_PRICE): _deny("Not enough points"); return
+	p.loadout.give(Weapons.make(Weapons.ALIEN)); p.apply_reload_perk()
+	sfx.play("buy", -4); sfx.play("reload_reaper_v12", -2); hud.banner("HIVE REAPER", 2.5)
 
 func buy_armor(p: Player, pack_id: String) -> void:
 	if p.armor.is_full(): _deny("Armor full"); return
