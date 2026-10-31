@@ -135,3 +135,28 @@ func test_reaper_heat_glow_is_capped() -> void:
 func test_reaper_flash_light_capped() -> void:
 	assert_true(Viewmodel.ALIEN_FLASH_MAX <= 1.5, "muzzle light capped for the 500-round LMG")
 	assert_false(Viewmodel.alien_material().rim_enabled, "no rim wash-out")
+
+func test_reaper_body_material_survives_rebake() -> void:
+	var vm := Viewmodel.new(); add_child_autofree(vm); vm.setup(Color(0.2, 0.25, 0.2))
+	await wait_frames(2)
+	vm.set_weapon(Weapons.make("rifle"))
+	vm.set_weapon(Weapons.make(Weapons.ALIEN))
+	await wait_frames(5)
+	var m := vm.gun_body_material() as StandardMaterial3D
+	assert_not_null(m, "gun body has a material")
+	assert_eq(m, vm.alien_mat, "body draws with the alien material")
+	assert_almost_eq(m.albedo_color.r, 0.04, 0.01); assert_almost_eq(m.albedo_color.g, 0.07, 0.01)
+	assert_almost_eq(m.albedo_color.b, 0.05, 0.01)
+	if vm.flash: assert_ne(vm.flash.material_override, vm.alien_mat, "muzzle flash never shares the gun material")
+	assert_true(vm.gun.scale.x <= Viewmodel.ALIEN_SCALE + 0.001, "reaper is shrunk")
+	# switching away and back (a rebake of the viewmodel) still ends on the alien material
+	vm.set_weapon(Weapons.make("rifle")); vm.set_weapon(Weapons.make(Weapons.ALIEN))
+	await wait_frames(3)
+	assert_eq(vm.gun_body_material(), vm.alien_mat)
+	assert_almost_eq((vm.gun_body_material() as StandardMaterial3D).albedo_color.r, 0.04, 0.01)
+
+func test_fx_splats_and_sparks_are_pooled() -> void:
+	var fx := Fx.new(); add_child_autofree(fx)
+	for i in 200: fx.sparks(Vector3.ZERO, Vector3.UP, Color(0.5, 0, 0), 4)
+	assert_true(fx.sparks_alive.size() <= Fx.MAX_SPARK_EMITTERS)
+	assert_true(Fx.MAX_SPLATS <= 64)

@@ -133,7 +133,7 @@ const HOT_GLOW := Color(0.75, 0.38, 0.06)
 static func heat_energy(h: float) -> float:
 	return clampf(lerpf(HEAT_EMIT_MIN, HEAT_EMIT_MAX, clampf(h, 0.0, 1.0)), HEAT_EMIT_MIN, HEAT_EMIT_MAX)
 static func heat_color(h: float) -> Color:
-	return COOL_GLOW.lerp(HOT_GLOW, clampf(h, 0.0, 1.0))
+	return COOL_GLOW.lerp(HOT_GLOW, clampf(h, 0.0, 1.0) * 0.6)
 static func heat_core_alpha(h: float) -> float:
 	return clampf(lerpf(HEAT_CORE_ALPHA_MIN, HEAT_CORE_ALPHA_MAX, clampf(h, 0.0, 1.0)), HEAT_CORE_ALPHA_MIN, HEAT_CORE_ALPHA_MAX)
 static func heat_core_scale(h: float) -> float:
@@ -157,7 +157,12 @@ static func alien_material() -> StandardMaterial3D:
 
 static func alienize(g: Node3D) -> StandardMaterial3D:
 	var m := alien_material()
-	for c in g.find_children("*", "MeshInstance3D", true, false): (c as MeshInstance3D).material_override = m
+	var muzzle_node := g.get_node_or_null("Muzzle")
+	for c in g.find_children("*", "MeshInstance3D", true, false):
+		# v7.12 fix: never touch the muzzle flash (it carries its own material that fire()/set_weapon recolour).
+		# Overriding it made the flash tint write cream (1,0.8,0.45) into the shared alien material.
+		if muzzle_node and muzzle_node.is_ancestor_of(c): continue
+		(c as MeshInstance3D).material_override = m
 	var len: float = ModelLib.GUN_LEN.get("lmg", 0.6)
 	var drum := MeshInstance3D.new(); var cy := CylinderMesh.new()
 	cy.top_radius = len * 0.2; cy.bottom_radius = len * 0.2; cy.height = len * 0.16; drum.mesh = cy
@@ -170,6 +175,29 @@ static func alienize(g: Node3D) -> StandardMaterial3D:
 		var r := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = len * 0.05; tm.outer_radius = len * 0.07; r.mesh = tm
 		r.material_override = m; r.rotation.x = PI / 2; r.position = Vector3(0, 0.0, -len * (0.25 + 0.12 * i)); g.add_child(r)
 	return m
+
+## v7.12: the Hive Reaper sits smaller and further right/down so it fills at most ~1/3 of the screen.
+const ALIEN_SCALE := 0.6
+const ALIEN_OFFSET := Vector3(0.1, -0.08, 0.05)
+func _place_gun(w: WeaponDef) -> void:
+	if w.id == Weapons.ALIEN:
+		gun.scale = Vector3.ONE * ALIEN_SCALE; gun.position = ALIEN_OFFSET
+	else:
+		gun.scale = Vector3.ONE; gun.position = Vector3.ZERO
+
+func _apply_alien() -> void:
+	alien_mat = alienize(gun); alien_core = gun.find_child("AlienCore", true, false) as MeshInstance3D
+	if overlay: ViewmodelOverlay.to_layer(gun)
+	heat = heat
+
+## The material the gun body actually renders with (first surface of the first non-flash mesh).
+func gun_body_material() -> Material:
+	var muzzle_node := gun.get_node_or_null("Muzzle")
+	for c in gun.find_children("*", "MeshInstance3D", true, false):
+		var mi := c as MeshInstance3D
+		if mi.mesh == null or (muzzle_node and muzzle_node.is_ancestor_of(mi)): continue
+		return mi.get_active_material(0)
+	return null
 
 func set_weapon(w: WeaponDef) -> void:
 	var key := "%s:%d" % [w.id, w.tier]
@@ -186,8 +214,7 @@ func set_weapon(w: WeaponDef) -> void:
 	muzzle = gun.get_node("Muzzle")
 	muzzle.add_child(flash); muzzle.add_child(flash_light)
 	alien_mat = null; alien_core = null
-	if w.id == Weapons.ALIEN:
-		alien_mat = alienize(gun); alien_core = gun.find_child("AlienCore", true, false) as MeshInstance3D
+	if w.id == Weapons.ALIEN: pass   # alien material goes on last (see _apply_alien), after every other tint
 	elif w.tier > 0: _tint_upgraded(gun, w.color, camo_texture(w.tier))
 	else: _shade_metal(gun)
 	var fc: Color = AltAmmo.COLORS.get(w.alt_ammo, Color(1.0, 0.8, 0.45))   # alt ammo tints the muzzle flash
@@ -221,6 +248,8 @@ func set_weapon(w: WeaponDef) -> void:
 	sight.position = Vector3(0, SIGHT_H, -0.02)
 	ModelLib.set_shadows(self, false)
 	if overlay: ViewmodelOverlay.to_layer(self)
+	if w.id == Weapons.ALIEN: _apply_alien()
+	_place_gun(w)
 	if not first: swap_t = 1.0
 
 var fill: OmniLight3D
@@ -372,3 +401,20 @@ const FORE_GRIP := {
 	shotgun = Vector3(0.0, -0.012, -0.12), launcher = Vector3(0.0, -0.1, -0.15), raygun = Vector3(0.0, 0.0, -0.1)}
 static func fore_point(model: String, len: float) -> Vector3:
 	return FORE_GRIP.get(model, Vector3(0.0, -0.015, -len * FORE_AT))
+
+## v7.12 debug: dump every visible mesh under the viewmodel (and the rigged arms) with the material it
+## actually renders with. Enabled with VOZ_VM_LOG=1; used to chase the Hive Reaper cream wash-out.
+func log_materials(tag := "") -> void:
+	var roots: Array = [self]
+	if fps_arms: roots.append(fps_arms)
+	for r in roots:
+		for c in (r as Node).find_children("*", "MeshInstance3D", true, false):
+			var mi := c as MeshInstance3D
+			if not mi.is_visible_in_tree() or mi.mesh == null: continue
+			for i in mi.mesh.get_surface_count():
+				var m := mi.get_active_material(i)
+				var d := "%s" % m
+				if m is StandardMaterial3D:
+					var sm := m as StandardMaterial3D
+					d = "alb=%s em=%s x%.2f unshaded=%s" % [sm.albedo_color, sm.emission if sm.emission_enabled else Color.BLACK, sm.emission_energy_multiplier, sm.shading_mode == BaseMaterial3D.SHADING_MODE_UNSHADED]
+				print("VMLOG %s %s s%d aabb=%s %s" % [tag, mi.name, i, mi.get_aabb().size, d])

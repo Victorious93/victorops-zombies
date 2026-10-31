@@ -6,6 +6,10 @@ extends Node3D
 
 const MAX_DECALS := 48
 const MAX_GIBS := 30
+const MAX_SPLATS := 40
+const MAX_SPARK_EMITTERS := 48
+var splats_alive: Array = []
+var sparks_alive: Array = []
 var game
 var decals: Array = []
 var gibs_alive: Array = []
@@ -88,15 +92,23 @@ func blood_hit(at: Vector3, dir: Vector3) -> void:
 	# spatter on the floor / wall behind
 	var space := get_world_3d().direct_space_state
 	var r := space.intersect_ray(PhysicsRayQueryParameters3D.create(at, at + dir * 2.5 + Vector3.DOWN * 1.2, 1))
-	if not r.is_empty():
-		surface_quad(r.position, r.normal, randf_range(0.3, 0.6), _quad_mat("blood", _blood_tex))
+	# v7.12 fix2: only splat on static world geometry (never on zombie bodies, which read as dark
+	# blobs floating over them), and recycle a fixed pool so rapid fire can't stack splats.
+	if not r.is_empty() and r.collider is StaticBody3D:
+		var q := surface_quad(r.position, r.normal, randf_range(0.3, 0.6), _quad_mat("blood", _blood_tex))
+		splats_alive.append(q)
+		while splats_alive.size() > MAX_SPLATS:
+			var old = splats_alive.pop_front()
+			if is_instance_valid(old): old.queue_free()
 
 func blood_pool(at: Vector3) -> void:
 	var m := surface_quad(at + Vector3.UP * 0.01, Vector3.UP, 0.2, _quad_mat("blood", _blood_tex))
 	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(3.5, 5.5), 2.4).set_ease(Tween.EASE_OUT)
 
 func sparks(at: Vector3, normal: Vector3, color: Color, amount: int, life := 0.18, spd := 4.0, size := 0.03) -> void:
-	var p := CPUParticles3D.new()
+	sparks_alive = sparks_alive.filter(func(e): return is_instance_valid(e))
+	if sparks_alive.size() >= MAX_SPARK_EMITTERS: return
+	var p := CPUParticles3D.new(); sparks_alive.append(p)
 	p.one_shot = true; p.emitting = false; p.amount = maxi(1, int(amount * particle_scale)); p.lifetime = life
 	p.explosiveness = 1.0; p.direction = normal; p.spread = 50.0
 	p.initial_velocity_min = spd * 0.5; p.initial_velocity_max = spd; p.gravity = Vector3(0, -9, 0)

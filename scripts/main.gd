@@ -630,11 +630,21 @@ func _views(dir: String) -> void:
 			if is_instance_valid(z): z.queue_free()
 		game.zombies.clear(); await _wait(2)
 	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.pitch = 0.0
-	for id in (Weapons.ALL_IDS if want.call("viewmodel") else []):
+	for id in ((Weapons.ALL_IDS + [Weapons.ALIEN]) if want.call("viewmodel") else []):
 		if vonly.begins_with("vm:") and not id in vonly.substr(3).split(","): continue   # VOZ_VIEW_ONLY=vm:rifle,smg
 		pl.loadout.give(Weapons.make(id)); pl.apply_reload_perk()
 		await _wait(50)
 		await _snap(vd, id + "_hip.png")
+		if OS.get_environment("VOZ_VM_LOG") != "": pl.vm.log_materials(id)
+		if id == Weapons.ALIEN:   # sustained fire: the worst case for the heat glow
+			var tz := []
+			for k in 3:
+				var z: Zombie = game.spawn_zombie("", "walker"); z.state = Zombie.State.CHASE; z.model.position.y = 0.0
+				z.max_hp = 100000; z.hp = 100000; z.global_position = Vector3(-1.2 + k * 1.2, 0.05, -4.0); z.set_physics_process(false); tz.append(z)
+			pl.bot_input.fire = true; await _wait(60); await _snap(vd, id + "_firing.png")
+			await _wait(4); await _snap(vd, id + "_firing_b.png"); pl.bot_input.fire = false
+			if OS.get_environment("VOZ_VM_LOG") != "": print("FXLOG children=%d" % game.fx.get_child_count())
+			for z in tz: if is_instance_valid(z): z.queue_free()
 		pl.bot_input.ads = true
 		await _wait(40)
 		await _snap(vd, id + "_ads.png")
