@@ -264,7 +264,27 @@ func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := fa
 		var sb := StaticBody3D.new(); sb.collision_layer = 1; sb.collision_mask = 0
 		var cs := CollisionShape3D.new(); var sh := BoxShape3D.new(); sh.size = a.size; cs.shape = sh
 		cs.position = a.get_center(); sb.add_child(cs); n.add_child(sb)
+		# v7.12 fix3: the box is for movement only. Bullets test a mesh-accurate twin on SHOT_LAYER,
+		# otherwise hollow props (the gas-tank cage) catch shots in thin air and hang bullet-hole
+		# decals + dust in front of the camera (the "dark green blobs").
+		sb.add_to_group(PROP_BOX_GROUP)
+		var shot := StaticBody3D.new(); shot.collision_layer = SHOT_LAYER; shot.collision_mask = 0
+		for mi in n.find_children("*", "MeshInstance3D", true, false):
+			var m := mi as MeshInstance3D
+			if m.mesh == null: continue
+			var tcs := CollisionShape3D.new(); tcs.shape = m.mesh.create_trimesh_shape()
+			shot.add_child(tcs); tcs.transform = n.global_transform.affine_inverse() * m.global_transform if n.is_inside_tree() else _rel_xf(n, m)
+		n.add_child(shot)
 	return n
+
+const PROP_BOX_GROUP := "prop_move_box"
+const SHOT_LAYER := 64
+
+static func _rel_xf(root: Node3D, m: Node3D) -> Transform3D:
+	var xf := Transform3D.IDENTITY; var c: Node = m
+	while c != root and c is Node3D:
+		xf = (c as Node3D).transform * xf; c = c.get_parent()
+	return xf
 
 ## Distance culling ("LOD") for props: small clutter disappears past a few rooms, with a fade margin.
 func _lod(n: Node, dist: float) -> void:

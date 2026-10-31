@@ -371,14 +371,21 @@ func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
 	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain; hud.points_pop(gain)
 
+var _prop_box_rids: Array[RID] = []
+func prop_box_rids() -> Array[RID]:
+	if _prop_box_rids.is_empty():
+		for b in get_tree().get_nodes_in_group(FacilityMap.PROP_BOX_GROUP): _prop_box_rids.append((b as CollisionObject3D).get_rid())
+	return _prop_box_rids
+
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
 	var exclude: Array[RID] = [p.get_rid()]
+	exclude.append_array(prop_box_rids())   # movement-only boxes; bullets use the mesh-accurate twins
 	var pierce := w.pierce
 	var from := origin
 	var end_point := origin + dir * 80.0
 	for i in 8:
-		var q := PhysicsRayQueryParameters3D.create(from, origin + dir * 80.0, 1 | 2, exclude)
+		var q := PhysicsRayQueryParameters3D.create(from, origin + dir * 80.0, 1 | 2 | FacilityMap.SHOT_LAYER, exclude)
 		var r := space.intersect_ray(q)
 		if r.is_empty(): break
 		end_point = r.position
@@ -418,6 +425,8 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			if col and col.has_meta("crack"):
 				crack_hit(p, float(w.damage), r.position)
 			var n: Vector3 = r.normal
+			if OS.get_environment("VOZ_BLOB_LOG") != "" and r.position.distance_to(from) < 1.5:
+				print("BLOBHIT ", (col as Node).get_path() if col is Node else col, " d=", r.position.distance_to(from), " from=", from)
 			fx.bullet_hole(r.position, n, w.weight >= 1.2)
 			if randf() < 0.6: sfx.play_at(GunFeel.impact_sound(false, false, col is StaticBody3D and n.y < 0.5), r.position, -8, randf_range(0.85, 1.15))
 			if w.splash > 0.0: _splash(p, r.position, w, null)

@@ -317,6 +317,10 @@ func _clip(dir: String) -> void:
 	game.round = 3
 	game.hud.tally_flip(3)
 	game.throw_power(Node3D.new())
+	if OS.get_environment("VOZ_CLIP_REAPER") != "":
+		pl.economy.points += 40000; pl.loadout.give(Weapons.make(Weapons.ALIEN)); pl.apply_reload_perk()
+		pl.global_position = Vector3(-6.0, 0.1, -24.0); await _wait(20)
+		await _clip_reaper(dir, pl); return
 	# A: window tear-down + climb-in (0-10 s): walkers rip planks one by one, then haul over the sill
 	var win: WindowBarricade = game.map.windows["w_west"]
 	var inward := (win.inside_point - win.outside_point); inward.y = 0; inward = inward.normalized()
@@ -553,6 +557,9 @@ func _clip(dir: String) -> void:
 	game.buy_reaper(pl)
 	await _wait(50)
 	await _snap(dir, "45_reaper_in_hand.png")
+	await _clip_reaper(dir, pl)
+
+func _clip_reaper(dir: String, pl: Player) -> void:
 	# out into the generator room and let it spin up on a pack
 	await _glide(Vector3(-6.0, 0.1, -24.0), Vector3(-6.0, 1.3, -14.0), 30)
 	for i in 5:
@@ -560,13 +567,17 @@ func _clip(dir: String) -> void:
 		reaper_z.state = Zombie.State.CHASE; reaper_z.model.position.y = 0.0; reaper_z.global_position = Vector3(-8.0 + i * 1.2, 0.05, -12.0 - (i % 2) * 1.5)
 	await _glide(Vector3(-6.0, 0.1, -23.5), Vector3(-6.0, 1.3, -14.0), 40, true)
 	await _snap(dir, "46_reaper_firing.png")
-	await _glide(Vector3(-6.0, 0.1, -23.0), Vector3(-6.0, 1.3, -14.0), 60, true)
+	for k in 6:
+		await _glide(Vector3(-6.0, 0.1, -23.5 + k * 0.08), Vector3(-6.0, 1.3, -14.0), 10, true)
+		_probe_blobs("47-%d" % k)
+	_probe_blobs("47")
 	await _snap(dir, "47_reaper_heat.png")
 	pl.bot_input.fire = false
 	pl.armor.value = 5.0; game.god_mode = false
 	if pl.has_method("take_damage"): pl.take_damage(30.0, pl.global_position + Vector3(0, 0, 2))
 	game.god_mode = true
 	await _wait(20)
+	_probe_blobs("48")
 	await _snap(dir, "48_armor_break.png")
 	await _wait(20)
 	get_tree().quit()
@@ -715,3 +726,30 @@ func _debug_toggles(t: String) -> void:
 			if l is OmniLight3D and l.is_visible_in_tree() and l.global_position.distance_to(c) < l.omni_range + 4: n += 1; print("LIGHT ", l.get_path(), " ", l.global_position, " r=", l.omni_range, " sh=", l.shadow_enabled)
 		print("LIGHTCOUNT ", n)
 	print("VOZ_DBG ", t)
+
+
+## Blob probe: every visible 3D thing whose screen position is near the crosshair and within 8 m.
+func _probe_blobs(tag: String) -> void:
+	if OS.get_environment("VOZ_BLOB_LOG") == "": return
+	var cam := get_viewport().get_camera_3d()
+	if cam == null: return
+	var vs := get_viewport().get_visible_rect().size
+	var n := 0
+	for o in get_tree().root.find_children("*", "GeometryInstance3D", true, false):
+		var g := o as GeometryInstance3D
+		if not g.is_visible_in_tree() or cam.is_position_behind(g.global_position): continue
+		var d := cam.global_position.distance_to(g.global_position)
+		if d > 8.0: continue
+		var sp := cam.unproject_position(g.global_position)
+		if sp.distance_to(vs / 2) > vs.y * 0.35: continue
+		if (g.layers & 1) == 0: continue   # viewmodel layer
+		var mat = g.material_override
+		if mat == null and g is MeshInstance3D and (g as MeshInstance3D).mesh: mat = (g as MeshInstance3D).get_active_material(0)
+		var md := str(mat)
+		if mat is StandardMaterial3D:
+			md = "alb=%s tr=%d sh=%d bb=%d tex=%s" % [mat.albedo_color, mat.transparency, mat.shading_mode, mat.billboard_mode, mat.albedo_texture != null]
+		elif mat is ShaderMaterial: md = "shader=%s" % mat.shader.resource_path
+		var aabb := g.get_aabb().size * g.global_transform.basis.get_scale()
+		print("BLOB %s %s %s d=%.2f size=%s %s" % [tag, g.get_class(), g.get_path(), d, aabb, md])
+		n += 1
+	print("BLOB %s total=%d" % [tag, n])

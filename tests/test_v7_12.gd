@@ -170,3 +170,25 @@ func test_dark_puffs_skip_near_camera() -> void:
 	assert_eq(fx.sparks_alive.size(), 0, "no dark puff in the player's face")
 	fx.sparks(cam.global_position + Vector3(0, 0, -6), Vector3.UP, Color(0.42, 0.4, 0.37), 6)
 	assert_eq(fx.sparks_alive.size(), 1)
+
+func test_hollow_prop_does_not_catch_bullets_in_thin_air() -> void:
+	# root cause of the dark blobs: the gas-tank cage's AABB box caught shots in mid-air, hanging
+	# bullet-hole decals + dust right in front of the camera.
+	var m := FacilityMap.new()
+	var n := m.prop("gas_tank", 1.6, Vector3.ZERO, 0.0, true)
+	m.remove_child(n); add_child_autofree(n); m.free()
+	await wait_physics_frames(3)
+	var box: StaticBody3D = null; var shot: StaticBody3D = null
+	for c in n.get_children():
+		if c is StaticBody3D:
+			if c.is_in_group(FacilityMap.PROP_BOX_GROUP): box = c
+			elif c.collision_layer == FacilityMap.SHOT_LAYER: shot = c
+	assert_not_null(box); assert_not_null(shot, "mesh-accurate bullet body exists")
+	assert_true(shot.get_child_count() > 0 and shot.get_child(0).shape is ConcavePolygonShape3D)
+	var sz: Vector3 = (box.get_child(0).shape as BoxShape3D).size; var ctr: Vector3 = (box.get_child(0) as Node3D).position
+	var corner := ctr + Vector3(sz.x * 0.48, 0, sz.z * 0.48)
+	var space := n.get_world_3d().direct_space_state
+	var q := PhysicsRayQueryParameters3D.create(corner + Vector3.UP * 5, corner + Vector3.DOWN * 5, 1 | 2 | FacilityMap.SHOT_LAYER, [box.get_rid()])
+	assert_true(space.intersect_ray(q).is_empty(), "empty AABB corner lets bullets through")
+	q = PhysicsRayQueryParameters3D.create(corner + Vector3.UP * 5, corner + Vector3.DOWN * 5, 1)
+	assert_false(space.intersect_ray(q).is_empty(), "movement box still blocks walking")
