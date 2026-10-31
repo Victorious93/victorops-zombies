@@ -123,6 +123,7 @@ func _build_env() -> void:
 	env.glow_bloom = 0.08
 	env.glow_hdr_threshold = 0.9
 	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08   # v7.13 grade: a touch more contrast for the dark mood
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 
 static func load_settings(s: GameSettings) -> void:
