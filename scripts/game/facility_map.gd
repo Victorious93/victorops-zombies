@@ -595,6 +595,27 @@ func light_pool(l: OmniLight3D) -> MeshInstance3D:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	mi.position = Vector3(0, -l.position.y + 0.01, 0)   # on the floor under the lamp
 	l.add_child(mi); light_pools.append(mi)
+	lamp_cone(l)
+	return mi
+
+## v7.14 atmosphere: a faint dusty light cone hanging under every ceiling lamp (one additive Y-billboard
+## card, shared material per lamp colour, child of the light so power/emergency toggles it). Hidden with
+## the "dust" quality toggle, so low-end phones skip the extra fill-rate.
+const CONE_ALPHA := 0.07
+static var _cone_mats := {}
+func lamp_cone(l: OmniLight3D) -> MeshInstance3D:
+	var k := l.light_color.to_html()
+	if not _cone_mats.has(k):
+		shaft(Vector3.ZERO, 0.01, 0.01, Color.WHITE).queue_free()   # make sure the base material exists
+		var m := _shaft_mat.duplicate() as StandardMaterial3D
+		m.albedo_color = Color(l.light_color.r, l.light_color.g, l.light_color.b, CONE_ALPHA)
+		_cone_mats[k] = m
+	var mi := MeshInstance3D.new(); mi.name = "LampCone"
+	var h := l.position.y - 0.15
+	var qm := QuadMesh.new(); qm.size = Vector2(minf(2.4, l.omni_range * 0.32), h); mi.mesh = qm
+	mi.material_override = _cone_mats[k]; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = Vector3(0, -h * 0.5 - 0.1, 0)
+	l.add_child(mi); dust.append(mi)
 	return mi
 
 func apply_quality(d: Dictionary) -> void:

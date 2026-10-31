@@ -104,6 +104,7 @@ func _ready() -> void:
 	if not touch.visible and not OS.has_feature("headless"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
+const SATURATION := 0.9
 func _build_env() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
@@ -124,6 +125,9 @@ func _build_env() -> void:
 	env.glow_hdr_threshold = 0.9
 	env.adjustment_enabled = true
 	env.adjustment_contrast = 1.08   # v7.13 grade: a touch more contrast for the dark mood
+	env.adjustment_saturation = SATURATION   # v7.14: gritty, slightly drained palette (lamps + neon still pop via glow)
+	env.fog_sun_scatter = 0.0
+	env.set_glow_level(1, 0.6)   # v7.14: a wider, softer halo around lamps and emissives
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 
 static func load_settings(s: GameSettings) -> void:
@@ -259,7 +263,7 @@ func _process(dt: float) -> void:
 		var a := rng.randf() * TAU
 		sfx.play_at("groan%d" % (rng.randi() % 3 + 1), player.global_position + Vector3(cos(a), 0.5, sin(a)) * 22.0, -10, rng.randf_range(0.7, 0.85))
 	tint = move_toward(tint, 0.0, dt * 0.35)
-	env.adjustment_saturation = 1.0 - tint * 0.3
+	env.adjustment_saturation = SATURATION - tint * 0.3
 	env.fog_light_color = BASE_FOG.lerp(Color(0.35, 0.03, 0.02), tint) if not Rounds.is_special(round) else Color(0.2, 0.03, 0.02)
 
 func _update_prompt() -> void:
@@ -1132,12 +1136,12 @@ func spawn_gear_drop(kind: String, id: String, at: Vector3) -> void:
 	var icon := Label3D.new(); icon.text = d.icon; icon.font_size = 80; icon.pixel_size = 0.004; icon.position.y = 0.45
 	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED; icon.modulate = d.color; icon.outline_size = 14; root.add_child(icon)
 	var gl := OmniLight3D.new(); gl.light_color = d.color; gl.light_energy = 1.2; gl.omni_range = 2.5; root.add_child(gl)
-	gear_drops.append({node = root, kind = kind, id = id, life = PowerUps.PICKUP_LIFE})
+	gear_drops.append({node = root, kind = kind, id = id, life = PowerUps.PICKUP_LIFE}); _stat("drop:" + kind)
 	sfx.play_at("pu_spawn", root.global_position, -6, 1.3)
 
 func activate_pak(id: String) -> void:
 	var d: Dictionary = UpgradePaks.ALL[id]
-	paks.activate(id); _pak_warn_s = -1
+	paks.activate(id); _pak_warn_s = -1; _stat("pak:" + id)
 	hud.banner(d.name, 2.0); hud.info("%s · kills add time" % d.desc); hud.pickup_flash(d.color)
 	sfx.play("pak_on_v13", 0)
 
@@ -1148,11 +1152,15 @@ func give_gadget(p: Player, id: String) -> bool:
 	hud.info("+ %s" % Backpack.GADGETS[id].name); sfx.play("gadget_pickup_v13", -2)
 	return true
 
-func use_gadget(p: Player) -> void:
+var gear_stats := {}   ## v7.14: {"sentry": n, "aegis": n, "pulse": n, "pak:<id>": n, "locker": n} for sim reports
+func _stat(k: String) -> void: gear_stats[k] = int(gear_stats.get(k, 0)) + 1
+
+func use_gadget(p: Player, slot := -1) -> void:
 	if p.is_downed: return
-	var i := p.backpack.selected if not p.backpack.slots[p.backpack.selected].is_empty() else p.backpack.first_filled()
+	var i := slot if slot >= 0 else (p.backpack.selected if not p.backpack.slots[p.backpack.selected].is_empty() else p.backpack.first_filled())
 	var id := p.backpack.use(i)
 	if id == "": hud.info("Backpack empty"); sfx.play("deny", -12); return
+	_stat(id)
 	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
 	match id:
 		"sentry": deploy_sentry(p.global_position + fwd * 2.6)
@@ -1160,19 +1168,11 @@ func use_gadget(p: Player) -> void:
 		"pulse": emp_blast(p.global_position + fwd * 3.0)
 
 func deploy_sentry(at: Vector3) -> Dictionary:
-	var root := Node3D.new(); add_child(root); root.global_position = Vector3(at.x, 0.0, at.z)
-	var mm := StandardMaterial3D.new(); mm.albedo_color = Color(0.25, 0.27, 0.3); mm.metallic = 0.7; mm.roughness = 0.4
-	var base := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 0.12; cm.bottom_radius = 0.35; cm.height = 0.7
-	base.mesh = cm; base.position.y = 0.35; base.material_override = mm; root.add_child(base)
-	var head := Node3D.new(); head.position.y = 0.85; root.add_child(head)
-	var hb := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(0.36, 0.26, 0.5); hb.mesh = bm; hb.material_override = mm; head.add_child(hb)
-	var br := MeshInstance3D.new(); var bc := CylinderMesh.new(); bc.top_radius = 0.04; bc.bottom_radius = 0.04; bc.height = 0.5
-	br.mesh = bc; br.rotation.x = PI / 2; br.position = Vector3(0, 0, -0.45); br.material_override = mm; head.add_child(br)
-	var eye := MeshInstance3D.new(); var em := SphereMesh.new(); em.radius = 0.05; em.height = 0.1; eye.mesh = em
-	var gm := StandardMaterial3D.new(); gm.emission_enabled = true; gm.emission = Color(1, 0.55, 0.15); gm.emission_energy_multiplier = 4.0; gm.albedo_color = Color(1, 0.55, 0.15)
-	eye.material_override = gm; eye.position = Vector3(0, 0.08, -0.26); head.add_child(eye)
-	var l := OmniLight3D.new(); l.light_color = Color(1, 0.6, 0.2); l.light_energy = 0.8; l.omni_range = 2.5; l.position.y = 1.0; root.add_child(l)
-	var e := {node = root, s = Backpack.Sentry.new(), head = head}
+	# v7.14: bigger, readable pod (SentryModel): tripod, armoured twin-barrel head, status bar, beacon, ring
+	var parts := SentryModel.build()
+	var root: Node3D = parts.root
+	add_child(root); root.global_position = Vector3(at.x, 0.0, at.z)
+	var e := {node = root, s = Backpack.Sentry.new(), head = parts.head, parts = parts, t = 0.0}
 	sentries.append(e)
 	sfx.play_at("turret_deploy_v13", root.global_position, 0)
 	return e
@@ -1246,6 +1246,7 @@ func _update_gear(dt: float) -> void:
 		if off.length() < 1.2 and not player.is_downed:
 			if d.kind == "pak": activate_pak(d.id)
 			elif not give_gadget(player, d.id): continue   # bag full: leave it on the floor
+			else: _stat("pickup:gadget")
 			n.queue_free(); gear_drops.erase(d)
 
 func _tick_sentry(e: Dictionary, dt: float) -> void:
@@ -1255,8 +1256,10 @@ func _tick_sentry(e: Dictionary, dt: float) -> void:
 	if not st.alive():
 		sfx.play_at("turret_off_v13", root.global_position, -2)
 		root.queue_free(); sentries.erase(e); return
+	e.t = float(e.get("t", 0.0)) + dt
+	if e.has("parts"): SentryModel.update_visuals(e.parts, st, e.t)
 	var best: Zombie = null; var bd := Backpack.SENTRY_RANGE
-	var muzzle := root.global_position + Vector3.UP * 0.95
+	var muzzle := root.global_position + Vector3.UP * SentryModel.HEAD_Y
 	for z in zombies:
 		if not is_instance_valid(z) or z.state != Zombie.State.CHASE: continue
 		var d: float = z.global_position.distance_to(root.global_position)
@@ -1282,4 +1285,5 @@ func use_tech_locker(p: Player) -> void:
 	var id: String = Backpack.GADGETS.keys()[rng.randi_range(0, Backpack.GADGETS.size() - 1)]
 	if p.backpack.is_full_for(id): hud.info("Bag full"); sfx.play("bag_full_v13", -4); return
 	if not p.economy.spend(Backpack.LOCKER_PRICE): _deny("Not enough points"); return
+	_stat("locker")
 	give_gadget(p, id)

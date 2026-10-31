@@ -64,6 +64,12 @@ func first_filled() -> int:
 		if not slots[i].is_empty(): return i
 	return -1
 
+## v7.14: slot holding gadget gid (-1 if none) — lets the sim bot pick a specific gadget.
+func slot_of(gid: String) -> int:
+	for i in slots.size():
+		if not slots[i].is_empty() and slots[i].id == gid: return i
+	return -1
+
 func count(gid: String) -> int:
 	var n := 0
 	for s in slots:
