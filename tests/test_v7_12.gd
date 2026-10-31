@@ -160,3 +160,13 @@ func test_fx_splats_and_sparks_are_pooled() -> void:
 	for i in 200: fx.sparks(Vector3.ZERO, Vector3.UP, Color(0.5, 0, 0), 4)
 	assert_true(fx.sparks_alive.size() <= Fx.MAX_SPARK_EMITTERS)
 	assert_true(Fx.MAX_SPLATS <= 64)
+
+func test_dark_puffs_skip_near_camera() -> void:
+	var fx := Fx.new(); add_child_autofree(fx)
+	var cam := Camera3D.new(); add_child_autofree(cam); cam.current = true
+	await wait_frames(1)
+	assert_true(fx.near_camera(cam.global_position + Vector3(0, 0, -1)))
+	fx.sparks(cam.global_position + Vector3(0, 0, -1), Vector3.UP, Color(0.42, 0.4, 0.37), 6)
+	assert_eq(fx.sparks_alive.size(), 0, "no dark puff in the player's face")
+	fx.sparks(cam.global_position + Vector3(0, 0, -6), Vector3.UP, Color(0.42, 0.4, 0.37), 6)
+	assert_eq(fx.sparks_alive.size(), 1)
