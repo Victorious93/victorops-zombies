@@ -76,6 +76,10 @@ func _shop() -> void:
 		if not game.facility.open_doors.has("east"):
 			game.buy_door(p, "east")
 		game.throw_power(Node3D.new()); print("[sim] r%d power on" % game.round)
+	# v7.13 balance probe: VOZ_SIM_REAPER=<round> hands the bot the Hive Reaper from that round on
+	var rr := int(OS.get_environment("VOZ_SIM_REAPER")) if OS.has_environment("VOZ_SIM_REAPER") else 0
+	if rr > 0 and game.round >= rr and p.loadout.has(Weapons.ALIEN) < 0:
+		p.loadout.give(Weapons.make(Weapons.ALIEN)); print("[sim] r%d given reaper" % game.round)
 	for id in ["rifle"]:
 		var i := p.loadout.has(id)
 		if i < 0 and p.economy.points >= Weapons.WALL_PRICES[id] + 200 and (game.round >= 2):
