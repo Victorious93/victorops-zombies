@@ -27,7 +27,17 @@ static func speed(tier: int, round_no: int) -> float:
 	return SPEED[tier] * (1.0 + clampf((round_no - 10) * 0.015, 0.0, 0.15))
 
 static func anim(tier: int) -> String:
-	return "Walk" if tier == Tier.WALK else "Run"
+	match tier:
+		Tier.JOG: return "Run"
+		Tier.SPRINT: return "Run_Arms"
+	return "Walk"
+## v7.13 distinct run cycles: walkers shamble, joggers use the loping Run clip, sprinters the
+## arms-out Run_Arms charge. Falls back down the chain when a rig lacks a clip (zombie_b has no Run_Arms).
+static func clip_for(tier: int, available: Dictionary) -> String:
+	var want := anim(tier)
+	if available.has(want): return want
+	if want == "Run_Arms" and available.has("Run"): return "Run"
+	return "Walk"
 
 ## Animation playback speed so feet roughly match ground speed.
 static func anim_speed(tier: int) -> float:

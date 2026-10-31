@@ -21,7 +21,7 @@ static func make(id: String) -> WeaponDef:
 			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Supernova Disruptor", color = Color(0.2, 0.85, 0.7)})
 		"gloam": return WeaponDef.new("gloam", "Gloam Harp", 900, 0.45).setup({weight = 1.1, pierce = 6, mag_size = 10, reserve_mags = 6, reload_time = 2.2, spread_deg = 0.2, recoil = 2.5, ads_time = 0.22,
 			recoil_pattern = [Vector2(1, 0)], upgrade_name = "Gloam Requiem", color = Color(0.35, 0.95, 0.85)})
-		"reaper": return WeaponDef.new("reaper", "Hive Reaper", 130, 0.055).setup({weight = 2.6, mag_size = 500, reserve_mags = 1, reload_time = 6.5, automatic = true, spread_deg = 2.4, recoil = 0.7, ads_time = 0.55,
+		"reaper": return WeaponDef.new("reaper", "Hive Reaper", 105, 0.055).setup({weight = 2.6, mag_size = 500, reserve_mags = 1, reload_time = 6.5, automatic = true, spread_deg = 2.4, recoil = 0.7, ads_time = 0.55,
 			spin_up = 0.9, recoil_pattern = [Vector2(1, 0.3), Vector2(0.8, -0.4), Vector2(1.1, 0.2)], upgrade_name = "Hive Sovereign", color = Color(0.3, 1.0, 0.55)})
 	return null
 

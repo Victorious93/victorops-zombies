@@ -44,12 +44,17 @@ var fps_arms: FpsArms   ## set by Player before set_weapon(); null in tests -> l
 
 func setup(sleeve: Color) -> void:
 	sleeve_mat = StandardMaterial3D.new(); sleeve_mat.albedo_color = sleeve.darkened(0.55); sleeve_mat.roughness = 0.8; sleeve_mat.rim_enabled = true; sleeve_mat.rim = 0.4
-	flash = MeshInstance3D.new(); var q := QuadMesh.new(); q.size = Vector2(0.16, 0.16); flash.mesh = q
+	flash = MeshInstance3D.new(); var q := QuadMesh.new(); q.size = Vector2(0.21, 0.21); flash.mesh = q
 	var fm := StandardMaterial3D.new(); fm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	fm.albedo_color = Color(1.0, 0.8, 0.45); fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	fm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	fm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED; fm.albedo_texture = _star_tex()
 	flash.material_override = fm; flash.visible = false; flash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	# v7.13: white-hot core inside the star so the flash reads as a burst, not a flat decal
+	var core := MeshInstance3D.new(); var cq := QuadMesh.new(); cq.size = Vector2(0.08, 0.08); core.mesh = cq
+	var hcm := StandardMaterial3D.new(); hcm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; hcm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	hcm.blend_mode = BaseMaterial3D.BLEND_MODE_ADD; hcm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED; hcm.albedo_texture = _star_tex()
+	hcm.albedo_color = Color(1, 1, 0.92, 0.9); core.material_override = hcm; core.rotation.z = 0.4; flash.add_child(core)
 	flash_light = OmniLight3D.new(); flash_light.light_color = Color(1, 0.75, 0.4); flash_light.omni_range = 7
 	flash_light.light_energy = 0.0; flash_light.shadow_enabled = false
 	knife = ModelLib.prop("knife", 0.26, true, false)

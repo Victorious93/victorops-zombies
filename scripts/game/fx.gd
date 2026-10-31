@@ -72,7 +72,8 @@ func surface_quad(at: Vector3, normal: Vector3, size: float, mat: Material, life
 func bullet_hole(at: Vector3, normal: Vector3, heavy := false) -> void:
 	surface_quad(at, normal, randf_range(0.07, 0.11) * (1.6 if heavy else 1.0), _quad_mat("hole", _hole_tex))
 	# hot spark streaks + a chunky dust/debris puff
-	sparks(at, normal, Color(1.0, 0.8, 0.45), 9 if heavy else 6, 0.22, 6.0)
+	sparks(at, normal, Color(1.0, 0.8, 0.45), 12 if heavy else 8, 0.24, 6.5)
+	sparks(at, normal, Color(1.0, 0.95, 0.8), 3, 0.08, 2.0, 0.07)   # v7.13 brief hot flash at the hit point
 	# v7.12 fix3: dust puffs within arm's reach of the camera fill the screen as dark blobs
 	# (fast guns hitting a nearby barricade/wall), so only spawn them a safe distance away.
 	if near_camera(at): return

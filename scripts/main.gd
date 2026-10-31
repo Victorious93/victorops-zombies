@@ -317,6 +317,10 @@ func _clip(dir: String) -> void:
 	game.round = 3
 	game.hud.tally_flip(3)
 	game.throw_power(Node3D.new())
+	if OS.get_environment("VOZ_CLIP_GEAR") != "":
+		pl.global_position = Vector3(0.0, 0.1, 7.0); await _wait(10)
+		get_tree().create_timer(120.0).timeout.connect(get_tree().quit)
+		await _clip_gear(dir, pl); return
 	if OS.get_environment("VOZ_CLIP_REAPER") != "":
 		pl.economy.points += 40000; pl.loadout.give(Weapons.make(Weapons.ALIEN)); pl.apply_reload_perk()
 		pl.global_position = Vector3(-6.0, 0.1, -24.0); await _wait(20)
@@ -558,6 +562,69 @@ func _clip(dir: String) -> void:
 	await _wait(50)
 	await _snap(dir, "45_reaper_in_hand.png")
 	await _clip_reaper(dir, pl)
+
+## v7.13 focused clip: Upgrade Pak HUD, backpack HUD, Sentry Pod, Aegis Bubble, Pulse Charge EMP, Tech Locker, runners.
+func _clip_gear(dir: String, pl: Player) -> void:
+	var look := Vector3(0.0, 1.2, 0.0)
+	var pack := func(n: int, ty := "walker", zc := 0.0) -> Array:
+		var out := []
+		for i in n:
+			var z: Zombie = game.spawn_zombie("", ty)
+			z.state = Zombie.State.CHASE; z.model.position.y = 0.0
+			z.global_position = Vector3(-2.4 + i * 1.2, 0.05, zc - (i % 2) * 1.5); out.append(z)
+		return out
+	# 1) pak: activate, kill a pack so the ring swells and +time pops float up
+	await _glide(Vector3(0.0, 0.1, 7.0), look, 20)
+	game.activate_pak("overdrive")
+	pack.call(5)
+	await _glide(Vector3(0.0, 0.1, 7.1), look, 70, true)
+	await _snap(dir, "50_pak_hud.png")
+	await _glide(Vector3(0.0, 0.1, 7.2), look, 40, true)
+	pl.bot_input.fire = false
+	game.paks.time_left = 2.9
+	await _wait(12); await _snap(dir, "51_pak_warning.png")
+	await _wait(100)
+	# 2) backpack: fill it, then show 'Bag full'
+	for g in ["sentry", "sentry", "aegis", "pulse"]: game.give_gadget(pl, g)
+	await _wait(30); await _snap(dir, "52_backpack_hud.png")
+	game.give_gadget(pl, "aegis"); await _wait(6); await _snap(dir, "53_bag_full.png")
+	# 3) Sentry Pod: placed where you face, shreds a pack on its own
+	pl.backpack.selected = 0; game.use_gadget(pl)
+	await _wait(20)
+	pack.call(5, "walker", -1.0)
+	await _wait(55); await _snap(dir, "54_sentry.png")
+	await _wait(120)
+	# 4) Aegis Bubble: hits bounce off
+	pl.backpack.selected = 1; game.use_gadget(pl)
+	game.god_mode = false
+	for k in 3:
+		pl.take_damage(30.0, pl.global_position + Vector3(0, 0, 2)); await _wait(14)
+	game.god_mode = true
+	await _snap(dir, "55_aegis.png")
+	await _wait(40)
+	# 5) Pulse Charge: blue EMP ring stuns a pack in front of you
+	for e in game.sentries: e.s.life = 0.0
+	await _wait(5)
+	var zs: Array = pack.call(6, "sprinter", 2.5)
+	await _wait(25)
+	pl.backpack.selected = 2; game.use_gadget(pl)
+	await _wait(9); await _snap(dir, "56_emp.png")
+	await _wait(60); await _snap(dir, "57_emp_stunned.png")
+	await _wait(90)
+	for z in game.zombies.duplicate():
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(99999, false, pl)
+	# 6) runners: sprinters charge from the far end of the room
+	await _wait(30)
+	pack.call(4, "sprinter", -4.0)
+	await _wait(45); await _snap(dir, "58_runners.png")
+	await _wait(40)
+	for z in game.zombies.duplicate():
+		if is_instance_valid(z) and z.state != Zombie.State.DEAD: z.take_damage(99999, false, pl)
+	# 7) Tech Locker in the Intake
+	await _glide(Vector3(-3.5, 0.1, 6.6), Vector3(-3.5, 1.3, 9.1), 50)
+	await _wait(20); await _snap(dir, "59_tech_locker.png")
+	await _wait(20)
+	get_tree().quit()
 
 func _clip_reaper(dir: String, pl: Player) -> void:
 	# out into the generator room and let it spin up on a pack

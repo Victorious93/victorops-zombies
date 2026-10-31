@@ -124,7 +124,7 @@ func _ready() -> void:
 		cap.radius = 0.48
 	model.rotation.y = PI  # model faces +Z; gameplay forward is -Z
 	add_child(model)
-	for key in ["Walk", "Run", "Punch", "Attack", "Death", "Crawl", "HitReact", "HitRecieve", "Idle", "Idle_Attack", "Run_Attack"]:
+	for key in ["Walk", "Run", "Run_Arms", "Punch", "Attack", "Death", "Crawl", "HitReact", "HitRecieve", "Idle", "Idle_Attack", "Run_Attack"]:
 		var n := ModelLib.anim_name(ap, [key])
 		if n != "": anims[key] = n
 	if anims.has("HitRecieve") and not anims.has("HitReact"): anims.HitReact = anims.HitRecieve
@@ -137,7 +137,7 @@ func _ready() -> void:
 			if m is StandardMaterial3D: (mi as MeshInstance3D).set_surface_override_material(si, _skin_mat(m, ztype, skin))
 	ModelLib.set_shadows(model, game == null or game.settings_shadows())
 	if ap:
-		for k in ["Walk", "Run", "Crawl", "Idle"]:
+		for k in ["Walk", "Run", "Run_Arms", "Crawl", "Idle"]:
 			if anims.has(k): ap.get_animation(anims[k]).loop_mode = Animation.LOOP_LINEAR
 		base_scale = randf_range(0.9, 1.1); ap.speed_scale = base_scale
 	var sks := model.find_children("*", "Skeleton3D", true, false)
@@ -377,15 +377,21 @@ func _play(key: String, blend := 0.2, spd := 1.0) -> void:
 ## skate when it is shoved, slowed in a crowd or speeding up; nearly stopped in a jam -> idle sway.
 var ground_speed := -1.0
 var base_scale := 1.0   ## per-zombie playback variance
-const STRIDE := {"Crawl": 0.6, "Run": 3.2, "Walk": 1.1}
+const STRIDE := {"Crawl": 0.6, "Run": 3.2, "Run_Arms": 3.6, "Walk": 1.1}
 static func stride_rate(clip: String, v: float) -> float:
-	var lo := 0.55 if clip == "Run" else 0.6
+	var lo := 0.55 if clip.begins_with("Run") else 0.6
 	return clampf(v / STRIDE.get(clip, 1.1), lo, 1.6)
+
+## v7.13: the run cycle follows the gait tier (jog → Run, sprint → Run_Arms).
+func locomotion_clip() -> String:
+	var tier: int = gait if gait != Gait.Tier.WALK else Gait.Tier.JOG
+	if ztype == "sprinter": tier = Gait.Tier.SPRINT
+	return Gait.clip_for(tier, anims)
 
 func _locomotion() -> void:
 	var hv := Vector2(velocity.x, velocity.z).length()
 	ground_speed = hv if ground_speed < 0.0 else lerpf(ground_speed, hv, 0.15)
-	var clip := "Crawl" if crawler and anims.has("Crawl") else "Walk" if proc_crawl else ("Run" if runner and anims.has("Run") else "Walk")
+	var clip := "Crawl" if crawler and anims.has("Crawl") else "Walk" if proc_crawl else (locomotion_clip() if runner else "Walk")
 	if ground_speed < (0.25 if cur_anim == "Idle" else 0.12) and anims.has("Idle") and not crawler and is_physics_processing() and state != State.DEAD:
 		_play("Idle", 0.35)
 		return
@@ -638,6 +644,12 @@ func apply_status(kind: String, hit_dmg: int, by) -> void:
 		AltAmmo.SHOCK: stagger_t = maxf(stagger_t, AltAmmo.STUN_TIME * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
 		AltAmmo.FREEZE: slow_t = AltAmmo.SLOW_TIME
 
+## v7.13 Pulse Charge EMP: frozen for stun seconds (no swings), slowed until slow seconds.
+var emp_t := 0.0
+func emp_stun(stun: float, slow: float) -> void:
+	var k := 0.5 if ZombieTypes.is_heavy(ztype) else 1.0
+	stagger_t = maxf(stagger_t, stun * k); slow_t = maxf(slow_t, slow); emp_t = maxf(emp_t, slow)
+
 func status_kind() -> String:
 	if burn_t > 0.0: return AltAmmo.FIRE
 	if slow_t > 0.0: return AltAmmo.FREEZE
@@ -645,6 +657,9 @@ func status_kind() -> String:
 
 func _tick_status(dt: float) -> void:
 	slow_t = maxf(0.0, slow_t - dt)
+	if emp_t > 0.0:
+		emp_t -= dt
+		if game and game.fx and fmod(emp_t, 0.25) < dt: game.fx.sparks(global_position + Vector3(randf_range(-0.3, 0.3), randf_range(0.6, 1.7), randf_range(-0.3, 0.3)), Vector3.UP, Color(0.4, 0.65, 1.0), 4, 0.15, 3.0)
 	if burn_t > 0.0:
 		burn_t -= dt; burn_acc += burn_dps * dt
 		if burn_acc >= 1.0:

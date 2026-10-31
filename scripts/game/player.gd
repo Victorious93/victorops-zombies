@@ -15,6 +15,7 @@ var touch  # TouchControls or null
 var char_id := Characters.DEFAULT
 var cdef: Dictionary
 var economy := Economy.new()
+var backpack := Backpack.new()   ## v7.13 gadgets
 var armor := ArmorState.new()
 var equipment := Equipment.new()
 var loadout: Loadout
@@ -144,6 +145,8 @@ func _unhandled_input(e: InputEvent) -> void:
 			KEY_Q: use_ability()
 			KEY_V: melee()
 			KEY_G: throw_grenade()
+			KEY_F: game.use_gadget(self)
+			KEY_Z: backpack.selected = (backpack.selected + 1) % Backpack.SLOTS
 			KEY_1, KEY_2, KEY_X: swap()
 
 func swap() -> void:
@@ -215,6 +218,7 @@ func _physics_process(dt: float) -> void:
 		if touch.take("skill"): use_ability()
 		if touch.take("knife"): melee()
 		if touch.take("grenade"): throw_grenade()
+		if touch.take("gadget"): game.use_gadget(self)
 		if touch.take("jump"): jump = true
 		if touch.take("crouch"):
 			crouch = true
@@ -247,6 +251,7 @@ func _physics_process(dt: float) -> void:
 	if sprinting: spd *= 1.7 if perks.has("fleetfoot") else 1.5
 	spd *= weapon().move_mult()
 	spd *= lerpf(1.0, 0.6, ads01)
+	spd *= game.paks.speed_mult()
 	var dir := (transform.basis * Vector3(mv.x, 0, mv.y)) * spd
 	if slide_t > 0.0:
 		slide_t -= dt
@@ -345,7 +350,7 @@ func try_fire(moving: bool) -> void:
 		game.sfx.play("deny", -18, 2.0)
 		return
 	var w := weapon()
-	fire_cd = w.fire_interval * cdef.fire_interval_mult
+	fire_cd = w.fire_interval * cdef.fire_interval_mult * game.paks.fire_mult()
 	if w.spin_up > 0.0:   # v7.12 Hive Reaper: barrels spin up while the trigger is held
 		fire_cd *= w.spin_mult(spin)
 		spin = minf(1.0, spin + fire_cd / w.spin_up)
@@ -355,7 +360,7 @@ func try_fire(moving: bool) -> void:
 	for i in w.pellets:
 		var d := fwd.rotated(cam.global_basis.x, randf_range(-spread, spread)).rotated(cam.global_basis.y, randf_range(-spread, spread))
 		game.hitscan(self, origin, d.normalized(), w)
-	if a.fire():
+	if not game.paks.infinite_ammo() and a.fire():
 		game.bark(Barks.RELOAD)
 		_start_reload_sfx()
 	# learnable per-gun recoil pattern (resets after a short pause in fire), plus a little noise
@@ -426,6 +431,8 @@ func _heartbeat(dt: float) -> void:
 func take_damage(d: float, from := Vector3.INF) -> void:
 	if is_downed or game.over: return
 	if game.god_mode: d = 0.0
+	d = game.aegis_filter(d)
+	if d <= 0.0: return
 	var had := armor.value
 	health -= armor.absorb(d)
 	if had > 0.0:   # v7.12 armor hit / break sounds

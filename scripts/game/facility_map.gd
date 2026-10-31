@@ -364,6 +364,8 @@ func build(p_game) -> void:
 		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
 		bounce_lights.append(bf)
 		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
+		_fog_cards(Vector3(p.x, 0.0, p.z), 5.5)
+		_dress(Vector3(p.x, 0.0, p.z), 5.0)
 	# v7.10 secondary strip lamps: a grid across every room (and the pump house) so the power-on cascade
 	# rolls lamp-by-lamp across the ceiling. Cheap: no shadows, shafts or dust; they join room_lights.
 	for q in EXTRA_LAMPS:
@@ -386,16 +388,80 @@ func build(p_game) -> void:
 	_place_machines()
 	_place_fuses()
 
+## v7.13 graphics: low drifting fog cards (soft billboards, no collision, unshaded) - cheap stand-in for
+## volumetric ground fog on the mobile renderer. 4 quads per main lamp.
+static var _fog_mat: StandardMaterial3D
+func _fog_cards(at: Vector3, r: float) -> void:
+	if _fog_mat == null:
+		var img := Image.create(64, 32, false, Image.FORMAT_RGBA8)
+		for y in 32:
+			for x in 64:
+				var u := (x - 31.5) / 32.0; var v := (y - 15.5) / 16.0
+				var a := clampf(1.0 - sqrt(u * u + v * v), 0, 1)
+				img.set_pixel(x, y, Color(1, 1, 1, a * a))
+		_fog_mat = StandardMaterial3D.new(); _fog_mat.albedo_texture = ImageTexture.create_from_image(img)
+		_fog_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; _fog_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_fog_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y; _fog_mat.albedo_color = Color(0.62, 0.68, 0.78, 0.09)
+		_fog_mat.disable_receive_shadows = true; _fog_mat.proximity_fade_enabled = true; _fog_mat.proximity_fade_distance = 0.8
+		_fog_mat.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA; _fog_mat.distance_fade_min_distance = 1.0; _fog_mat.distance_fade_max_distance = 3.5
+	var rr := RandomNumberGenerator.new(); rr.seed = int(at.x * 31 + at.z * 17)
+	for i in 4:
+		var mi := MeshInstance3D.new(); var q := QuadMesh.new(); q.size = Vector2(rr.randf_range(4.0, 6.5), rr.randf_range(0.9, 1.4))
+		mi.mesh = q; mi.material_override = _fog_mat; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = at + Vector3(rr.randf_range(-r, r), 0.45, rr.randf_range(-r, r)); add_child(mi)
+
+## v7.13 graphics: room dressing around each main lamp - rubble chunks, loose planks, papers and a
+## dragged blood trail. Floor-flat or tiny, no collision, so navigation and bullets are unaffected.
+static var _dress_mats := {}
+func _dress(at: Vector3, r: float) -> void:
+	if _dress_mats.is_empty():
+		var rub := StandardMaterial3D.new(); rub.albedo_color = Color(0.32, 0.3, 0.28); rub.roughness = 1.0
+		rub.detail_enabled = true; rub.detail_albedo = Zombie.grime_tex(); rub.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+		var wood := StandardMaterial3D.new(); wood.albedo_color = Color(0.36, 0.25, 0.16); wood.roughness = 0.95
+		var paper := StandardMaterial3D.new(); paper.albedo_color = Color(0.72, 0.7, 0.62); paper.roughness = 1.0
+		var blood := StandardMaterial3D.new(); blood.albedo_color = Color(0.28, 0.02, 0.02, 0.85); blood.roughness = 0.35
+		blood.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; blood.albedo_texture = _blood_tex()
+		_dress_mats = {rub = rub, wood = wood, paper = paper, blood = blood}
+	var rr := RandomNumberGenerator.new(); rr.seed = int(at.x * 13 + at.z * 7 + 5)
+	for i in 7:   # rubble chunks
+		var s := rr.randf_range(0.08, 0.22)
+		var b := box(Vector3(s * rr.randf_range(1, 1.8), s * 0.6, s), at + Vector3(rr.randf_range(-r, r), s * 0.3, rr.randf_range(-r, r)), _dress_mats.rub, false)
+		b.rotation = Vector3(rr.randf_range(-0.3, 0.3), rr.randf() * TAU, rr.randf_range(-0.3, 0.3))
+	for i in 2:   # loose planks
+		var b := box(Vector3(1.1, 0.04, 0.14), at + Vector3(rr.randf_range(-r, r), 0.03, rr.randf_range(-r, r)), _dress_mats.wood, false)
+		b.rotation = Vector3(0, rr.randf() * TAU, rr.randf_range(-0.05, 0.05))
+	for i in 4:   # scattered papers
+		var b := box(Vector3(0.21, 0.004, 0.3), at + Vector3(rr.randf_range(-r, r), 0.006, rr.randf_range(-r, r)), _dress_mats.paper, false)
+		b.rotation.y = rr.randf() * TAU
+	# drag trail: a line of fading smears
+	var p0 := at + Vector3(rr.randf_range(-r, r) * 0.6, 0.008, rr.randf_range(-r, r) * 0.6)
+	var dir := Vector3(cos(rr.randf() * TAU), 0, sin(rr.randf() * TAU))
+	for k in 6:
+		var mi := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2(0.55 - k * 0.05, 0.75)
+		mi.mesh = pm; mi.material_override = _dress_mats.blood; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.position = p0 + dir * k * 0.62 + Vector3(0, k * 0.0004, 0); mi.rotation.y = atan2(dir.x, dir.z) + rr.randf_range(-0.2, 0.2)
+		mi.transparency = k * 0.13; add_child(mi)
+
+static func _blood_tex() -> Texture2D:
+	var img := Image.create(32, 64, false, Image.FORMAT_RGBA8)
+	var n := FastNoiseLite.new(); n.frequency = 0.12; n.seed = 7
+	for y in 64:
+		for x in 32:
+			var u := absf(x - 15.5) / 16.0
+			var a := clampf((1.0 - u * u * 1.6) * (0.55 + n.get_noise_2d(x, y) * 0.9), 0, 1)
+			img.set_pixel(x, y, Color(1, 1, 1, smoothstep(0.15, 0.5, a)))
+	return ImageTexture.create_from_image(img)
+
 ## Dust motes hanging in the light (the mobile renderer has no volumetric fog).
 func _dust(at: Vector3, extents: Vector3) -> void:
-	var p := CPUParticles3D.new(); p.amount = 40; p.lifetime = 8.0; p.preprocess = 8.0
+	var p := CPUParticles3D.new(); p.amount = 60; p.lifetime = 8.0; p.preprocess = 8.0
 	p.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX; p.emission_box_extents = extents
 	p.gravity = Vector3(0, -0.01, 0); p.initial_velocity_min = 0.02; p.initial_velocity_max = 0.08
 	p.direction = Vector3(1, 0.2, 0); p.spread = 180
 	var q := QuadMesh.new(); q.size = Vector2(0.025, 0.025); p.mesh = q
 	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.albedo_color = Color(1, 0.95, 0.85, 0.25); q.material = m
+	m.albedo_color = Color(1, 0.95, 0.85, 0.32); q.material = m
 	p.position = at; add_child(p); dust.append(p)
 
 ## Pump Station: x 26..46, z 10..30, south of the Loading Yard. Open-air, flooded sump, tanks + pipes.
@@ -587,6 +653,11 @@ func _place_machines() -> void:
 			func(pl): return game.perk_prompt(pl, pid),
 			func(pl): game.buy_perk(pl, pid))
 	_build_forge(Vector3(18, 0, -24.4))
+	# v7.13 Tech Locker: buy a random backpack gadget (no power needed)
+	var tl := _machine(Vector3(-3.5, 0, 9.1), 0.0, Color(0.35, 0.6, 1.0), "Tech Locker", "bolt")
+	game.add_interactable(_front(tl), 2.2,
+		func(pl): return game.tech_locker_prompt(pl),
+		func(pl): game.use_tech_locker(pl))
 	# Power switch in Generator Wing
 	var sw := Node3D.new(); sw.position = Vector3(3, 0, -24.3); add_child(sw)
 	box(Vector3(0.8, 1.2, 0.3), Vector3(0, 1.4, 0), mats.metal, true, 1, sw)

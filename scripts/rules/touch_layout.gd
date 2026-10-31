@@ -19,8 +19,9 @@ const ARC := {
 	"swap": [2, 136.0, 42.0],
 	"knife": [2, 108.0, 38.0],
 	"skill": [2, 80.0, 40.0],
+	"gadget": [2, 52.0, 38.0],   # v7.13 backpack: use selected gadget
 }
-const ORDER := ["fire", "fire_l", "ads", "reload", "jump", "crouch", "grenade", "swap", "knife", "skill", "use", "sprint", "pause"]
+const ORDER := ["fire", "fire_l", "ads", "reload", "jump", "crouch", "grenade", "swap", "knife", "skill", "gadget", "use", "sprint", "pause"]
 
 ## Returns name -> [center, radius] in pixels.
 ## [param s] screen size, [param safe] safe-area rect in the same pixels, [param scale] button size

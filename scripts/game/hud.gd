@@ -70,6 +70,7 @@ var shown_points := 0.0
 var tick_cd := 0.0
 var tut_panel: Control
 var tut_lbl: Label
+var gear: GearHud   ## v7.13 pak ring + backpack bar
 
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
@@ -89,6 +90,13 @@ func _place(c: Control, preset: int, offset: Vector2, sz := Vector2(400, 60)) ->
 	add_child(c)
 
 func _ready() -> void:
+	# v7.13 grade: a permanent soft dark vignette (one full-screen textured rect; cheap on mobile)
+	var mood := TextureRect.new(); mood.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mood.mouse_filter = Control.MOUSE_FILTER_IGNORE; mood.stretch_mode = TextureRect.STRETCH_SCALE
+	mood.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	var gt := GradientTexture2D.new(); gt.fill = GradientTexture2D.FILL_RADIAL; gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(1.05, 1.05)
+	var gr := Gradient.new(); gr.set_color(0, Color(0.02, 0.03, 0.05, 0.0)); gr.set_color(1, Color(0.02, 0.03, 0.05, 0.55)); gr.add_point(0.55, Color(0.02, 0.03, 0.05, 0.0))
+	gt.gradient = gr; gt.width = 128; gt.height = 128; mood.texture = gt; add_child(mood)
 	vignette = ColorRect.new(); vignette.color = Color(0.6, 0, 0, 0); vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE; add_child(vignette)
 	blood_rect = TextureRect.new(); blood_rect.texture = _blood_screen_tex(); blood_rect.stretch_mode = TextureRect.STRETCH_SCALE
@@ -123,6 +131,7 @@ func _ready() -> void:
 	pu_lbl = _lbl(26, Color(1, 0.9, 0.4), HORIZONTAL_ALIGNMENT_CENTER); _place(pu_lbl, Control.PRESET_CENTER_BOTTOM, Vector2(0, -60), Vector2(700, 40))
 	stand_lbl = _lbl(40, Color(1, 0.25, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(stand_lbl, Control.PRESET_CENTER, Vector2(0, 220), Vector2(900, 60))
 	stamina_bar = _bar(Color(0.9, 0.85, 0.5)); _place(stamina_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -50), Vector2(160, 6))
+	gear = GearHud.new(); gear.game = game; add_child(gear)
 
 ## Touch screens: move bars/ammo away from the stick and button clusters.
 func set_touch_layout(on: bool) -> void:
