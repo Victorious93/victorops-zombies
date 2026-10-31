@@ -96,7 +96,7 @@ func _input(e: InputEvent) -> void:
 				match b:
 					"ads": ads = not ads
 					"sprint": sprint = not sprint
-					"reload", "swap", "skill", "knife", "grenade", "jump", "crouch", "pause": _pulses[b] = true
+					"reload", "swap", "skill", "knife", "grenade", "gadget", "jump", "crouch", "pause": _pulses[b] = true
 				if b == "fire" or b == "fire_l": look_idx = e.index if look_idx == -1 else look_idx  # fire also steers aim while held
 			elif e.position.x < size.x * 0.5 and stick_idx == -1:
 				stick_idx = e.index; stick_origin = e.position if floating else stick_home(); stick_pos = e.position
@@ -218,6 +218,10 @@ func _icon(n: String, c: Vector2, s: float, col: Color) -> void:
 		"knife":   # blade
 			_ln(PackedVector2Array([Vector2(-0.6, 0.6), Vector2(-0.3, 0.3), Vector2(0.55, -0.6), Vector2(0.15, 0.05), Vector2(-0.3, 0.3)]), c, s, col, w)
 			_ln(PackedVector2Array([Vector2(-0.5, 0.15), Vector2(-0.15, 0.5)]), c, s, col, w)
+		"gadget":   # backpack: bag body + flap
+			_ln(PackedVector2Array([Vector2(-0.5, -0.2), Vector2(0.5, -0.2), Vector2(0.5, 0.6), Vector2(-0.5, 0.6), Vector2(-0.5, -0.2)]), c, s, col, w)
+			_ln(PackedVector2Array([Vector2(-0.25, -0.2), Vector2(-0.25, -0.5), Vector2(0.25, -0.5), Vector2(0.25, -0.2)]), c, s, col, w)
+			_ln(PackedVector2Array([Vector2(-0.5, 0.15), Vector2(0.5, 0.15)]), c, s, col, w)
 		"skill":   # lightning bolt
 			_ln(PackedVector2Array([Vector2(0.15, -0.75), Vector2(-0.35, 0.1), Vector2(0.05, 0.1), Vector2(-0.15, 0.75), Vector2(0.4, -0.15), Vector2(0.0, -0.15), Vector2(0.15, -0.75)]), c, s, col, w)
 		"use":   # hand / grab

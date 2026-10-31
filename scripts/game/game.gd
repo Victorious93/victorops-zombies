@@ -16,6 +16,11 @@ var facility := Facility.new()
 var crate := MysteryCrate.new()
 var forge := OverchargeForge.new()
 var annex := HiddenRoom.new()   ## v7.12 Sealed Annex
+var paks := UpgradePaks.new()   ## v7.13 kill-fed boosts
+var aegis := Backpack.Aegis.new()   ## v7.13 personal shield gadget
+var sentries: Array = []        ## v7.13 [{node, s: Backpack.Sentry, head}]
+var gear_drops: Array = []      ## v7.13 floor pickups: {node, kind ("pak"/"gadget"), id, life}
+var _pak_warn_s := -1
 var crate_node: CrateNode
 var rng := RandomNumberGenerator.new()
 var round := 0
@@ -240,6 +245,7 @@ func _process(dt: float) -> void:
 	_update_tutorial(dt)
 	for id in power.update(dt):
 		hud.info("%s wore off" % PowerUps.ALL[id].name); sfx.play("pu_end", -6)
+	_update_gear(dt)
 	player.economy.mult = 2 if power.active("doublepay") else 1
 	round_clock += dt
 	stats.time += dt
@@ -377,6 +383,15 @@ func prop_box_rids() -> Array[RID]:
 		for b in get_tree().get_nodes_in_group(FacilityMap.PROP_BOX_GROUP): _prop_box_rids.append((b as CollisionObject3D).get_rid())
 	return _prop_box_rids
 
+## v7.13: would a bullet from `from` reach zombie z? Uses exactly the hitscan mask and excludes, so
+## the sim bot (and anything else that asks) agrees with what bullets actually hit.
+func shot_clear(p: Player, from: Vector3, to: Vector3, z: Zombie) -> bool:
+	var exclude: Array[RID] = [p.get_rid()]
+	exclude.append_array(prop_box_rids())
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1 | 2 | FacilityMap.SHOT_LAYER, exclude)
+	var r := get_world_3d().direct_space_state.intersect_ray(q)
+	return r.is_empty() or r.collider == z
+
 func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 	var space := get_world_3d().direct_space_state
 	var exclude: Array[RID] = [p.get_rid()]
@@ -393,7 +408,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			var z: Zombie = r.collider
 			var part := _part_of(z, r.position.y)
 			var head := part == "head"
-			var dmg := int(w.damage * (Perks.head_mult(p.perks) if head else 1.0))
+			var dmg := int(w.damage * (Perks.head_mult(p.perks) if head else 1.0) * paks.damage_mult())
 			var before := p.economy.points
 			p.economy.on_hit()
 			var was_alive := z.state != Zombie.State.DEAD
@@ -563,6 +578,14 @@ func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> v
 	if pact.on_kill(z.global_position.distance_to(WonderQuest.STONE)):
 		hud.banner("The Pact Stone is sated", 2.5); sfx.play_at("pact_step_v7", WonderQuest.STONE, 0); announce("ann_pact_v7")
 		quest_nodes.stone_step(pact.step, false)
+	# v7.13 Upgrade Paks: kills feed the running pak; rare pak / gadget drops
+	var pak_add := paks.on_kill(headshot)
+	if pak_add > 0.0:
+		hud.gear.extended(pak_add); sfx.play("pak_extend_v13", -8, randf_range(0.97, 1.05))
+	if not _outside_map(z) and z.window:
+		var pk := paks.roll(rng)
+		if pk != "": spawn_gear_drop("pak", pk, z.global_position)
+		elif rng.randf() < Backpack.DROP_CHANCE: spawn_gear_drop("gadget", Backpack.GADGETS.keys()[rng.randi_range(0, 2)], z.global_position)
 	var pu := power.roll(rng)
 	var forced := ZombieTypes.guaranteed_drop(z.ztype)
 	if forced != "": _spawn_drop(forced, z.global_position)
@@ -1093,3 +1116,169 @@ func relocate_crate() -> void:
 
 func restart() -> void: get_tree().paused = false; restart_requested.emit()
 func to_menu() -> void: get_tree().paused = false; exit_to_menu.emit()
+
+# ---------------------------------------------------------------- v7.13 upgrade paks + backpack gadgets
+func spawn_gear_drop(kind: String, id: String, at: Vector3) -> void:
+	var d: Dictionary = UpgradePaks.ALL[id] if kind == "pak" else Backpack.GADGETS[id]
+	var root := Node3D.new(); add_child(root); root.global_position = at + Vector3.UP * 0.9
+	var mi := MeshInstance3D.new()
+	var m := StandardMaterial3D.new(); m.albedo_color = d.color; m.emission_enabled = true; m.emission = d.color; m.emission_energy_multiplier = 2.5
+	if kind == "pak":
+		var cm := CylinderMesh.new(); cm.top_radius = 0.12; cm.bottom_radius = 0.12; cm.height = 0.42; mi.mesh = cm   # canister
+	else:
+		var bm := BoxMesh.new(); bm.size = Vector3(0.36, 0.26, 0.36); mi.mesh = bm   # gadget case
+	mi.material_override = m; root.add_child(mi)
+	var icon := Label3D.new(); icon.text = d.icon; icon.font_size = 80; icon.pixel_size = 0.004; icon.position.y = 0.45
+	icon.billboard = BaseMaterial3D.BILLBOARD_ENABLED; icon.modulate = d.color; icon.outline_size = 14; root.add_child(icon)
+	var gl := OmniLight3D.new(); gl.light_color = d.color; gl.light_energy = 1.2; gl.omni_range = 2.5; root.add_child(gl)
+	gear_drops.append({node = root, kind = kind, id = id, life = PowerUps.PICKUP_LIFE})
+	sfx.play_at("pu_spawn", root.global_position, -6, 1.3)
+
+func activate_pak(id: String) -> void:
+	var d: Dictionary = UpgradePaks.ALL[id]
+	paks.activate(id); _pak_warn_s = -1
+	hud.banner(d.name, 2.0); hud.info("%s · kills add time" % d.desc); hud.pickup_flash(d.color)
+	sfx.play("pak_on_v13", 0)
+
+## Puts a gadget in the player's backpack; false (and "Bag full") when there is no room.
+func give_gadget(p: Player, id: String) -> bool:
+	if p.backpack.add(id) < 0:
+		hud.info("Bag full"); sfx.play("bag_full_v13", -4); return false
+	hud.info("+ %s" % Backpack.GADGETS[id].name); sfx.play("gadget_pickup_v13", -2)
+	return true
+
+func use_gadget(p: Player) -> void:
+	if p.is_downed: return
+	var i := p.backpack.selected if not p.backpack.slots[p.backpack.selected].is_empty() else p.backpack.first_filled()
+	var id := p.backpack.use(i)
+	if id == "": hud.info("Backpack empty"); sfx.play("deny", -12); return
+	var fwd := -p.cam.global_basis.z; fwd.y = 0; fwd = fwd.normalized()
+	match id:
+		"sentry": deploy_sentry(p.global_position + fwd * 2.6)
+		"aegis": raise_aegis()
+		"pulse": emp_blast(p.global_position + fwd * 3.0)
+
+func deploy_sentry(at: Vector3) -> Dictionary:
+	var root := Node3D.new(); add_child(root); root.global_position = Vector3(at.x, 0.0, at.z)
+	var mm := StandardMaterial3D.new(); mm.albedo_color = Color(0.25, 0.27, 0.3); mm.metallic = 0.7; mm.roughness = 0.4
+	var base := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 0.12; cm.bottom_radius = 0.35; cm.height = 0.7
+	base.mesh = cm; base.position.y = 0.35; base.material_override = mm; root.add_child(base)
+	var head := Node3D.new(); head.position.y = 0.85; root.add_child(head)
+	var hb := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = Vector3(0.36, 0.26, 0.5); hb.mesh = bm; hb.material_override = mm; head.add_child(hb)
+	var br := MeshInstance3D.new(); var bc := CylinderMesh.new(); bc.top_radius = 0.04; bc.bottom_radius = 0.04; bc.height = 0.5
+	br.mesh = bc; br.rotation.x = PI / 2; br.position = Vector3(0, 0, -0.45); br.material_override = mm; head.add_child(br)
+	var eye := MeshInstance3D.new(); var em := SphereMesh.new(); em.radius = 0.05; em.height = 0.1; eye.mesh = em
+	var gm := StandardMaterial3D.new(); gm.emission_enabled = true; gm.emission = Color(1, 0.55, 0.15); gm.emission_energy_multiplier = 4.0; gm.albedo_color = Color(1, 0.55, 0.15)
+	eye.material_override = gm; eye.position = Vector3(0, 0.08, -0.26); head.add_child(eye)
+	var l := OmniLight3D.new(); l.light_color = Color(1, 0.6, 0.2); l.light_energy = 0.8; l.omni_range = 2.5; l.position.y = 1.0; root.add_child(l)
+	var e := {node = root, s = Backpack.Sentry.new(), head = head}
+	sentries.append(e)
+	sfx.play_at("turret_deploy_v13", root.global_position, 0)
+	return e
+
+func raise_aegis() -> void:
+	aegis.start(); sfx.play("shield_up_v13", 0); hud.pickup_flash(Color(0.4, 0.8, 1.0))
+	if player:
+		var old := player.get_node_or_null("AegisDome")
+		if old: old.queue_free()
+		var dome := MeshInstance3D.new(); dome.name = "AegisDome"; var sm := SphereMesh.new(); sm.radius = 1.1; sm.height = 2.2
+		var m := StandardMaterial3D.new(); m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.albedo_color = Color(0.4, 0.8, 1.0, 0.12)
+		m.emission_enabled = true; m.emission = Color(0.3, 0.7, 1.0); m.emission_energy_multiplier = 0.6; m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		dome.mesh = sm; dome.material_override = m; dome.position.y = 0.9; player.add_child(dome)
+
+## Damage after the Aegis Bubble (0 while it holds).
+func aegis_filter(d: float) -> float:
+	if not aegis.up() or d <= 0.0: return d
+	var out := aegis.absorb(d)
+	if sfx: sfx.play("shield_hit_v13", -4, randf_range(0.95, 1.05))
+	if not aegis.up(): _drop_aegis()
+	return out
+
+func _drop_aegis() -> void:
+	aegis.time_left = 0.0
+	if sfx: sfx.play("shield_down_v13", -2)
+	if player and player.get_node_or_null("AegisDome"): player.get_node("AegisDome").queue_free()
+
+## EMP: zombies within PULSE_RADIUS are stunned, then slowed. Returns how many were hit.
+func emp_blast(at: Vector3) -> int:
+	var n := 0
+	for z in zombies:
+		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
+		if Backpack.in_pulse(at, z.global_position):
+			z.emp_stun(Backpack.PULSE_STUN, Backpack.PULSE_SLOW); n += 1
+	if sfx: sfx.play_at("emp_burst_v13", at + Vector3.UP, 2)
+	if fx:
+		for i in 24:
+			var a := TAU * i / 24.0
+			fx.sparks(at + Vector3(cos(a), 0.2, sin(a)) * randf_range(0.5, Backpack.PULSE_RADIUS), Vector3.UP, Color(0.35, 0.6, 1.0), 6, 0.35, 3.0)
+	_emp_ring(at)
+	return n
+
+func _emp_ring(at: Vector3) -> void:
+	var mi := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.9; tm.outer_radius = 1.0; mi.mesh = tm
+	var m := StandardMaterial3D.new(); m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(0.45, 0.7, 1.0, 0.85); mi.material_override = m; add_child(mi); mi.global_position = at + Vector3.UP * 0.3
+	var l := OmniLight3D.new(); l.light_color = Color(0.4, 0.65, 1.0); l.light_energy = 4.0; l.omni_range = Backpack.PULSE_RADIUS; mi.add_child(l)
+	var tw := create_tween().set_parallel(true)
+	tw.tween_property(mi, "scale", Vector3.ONE * Backpack.PULSE_RADIUS, 0.45)
+	tw.tween_property(m, "albedo_color:a", 0.0, 0.6)
+	tw.tween_property(l, "light_energy", 0.0, 0.6)
+	tw.chain().tween_callback(mi.queue_free)
+
+func _update_gear(dt: float) -> void:
+	var ended := paks.update(dt)
+	if ended != "":
+		hud.info("%s wore off" % UpgradePaks.ALL[ended].name); sfx.play("pak_off_v13", -2)
+	elif paks.warning():
+		var sec := ceili(paks.time_left)
+		if sec != _pak_warn_s: _pak_warn_s = sec; sfx.play("pak_warn_v13", -6)
+	if aegis.update(dt): _drop_aegis()
+	for e in sentries.duplicate(): _tick_sentry(e, dt)
+	for d in gear_drops.duplicate():
+		d.life -= dt
+		var n: Node3D = d.node
+		n.rotation.y += dt * 2.0
+		n.visible = d.life > 6.0 or fmod(d.life, 0.4) > 0.15
+		if d.life <= 0.0: n.queue_free(); gear_drops.erase(d); continue
+		var off := n.global_position - player.global_position; off.y = 0
+		if off.length() < 1.2 and not player.is_downed:
+			if d.kind == "pak": activate_pak(d.id)
+			elif not give_gadget(player, d.id): continue   # bag full: leave it on the floor
+			n.queue_free(); gear_drops.erase(d)
+
+func _tick_sentry(e: Dictionary, dt: float) -> void:
+	var st: Backpack.Sentry = e.s
+	var ready := st.update(dt)
+	var root: Node3D = e.node
+	if not st.alive():
+		sfx.play_at("turret_off_v13", root.global_position, -2)
+		root.queue_free(); sentries.erase(e); return
+	var best: Zombie = null; var bd := Backpack.SENTRY_RANGE
+	var muzzle := root.global_position + Vector3.UP * 0.95
+	for z in zombies:
+		if not is_instance_valid(z) or z.state != Zombie.State.CHASE: continue
+		var d: float = z.global_position.distance_to(root.global_position)
+		if d < bd: bd = d; best = z
+	if best == null: return
+	var aim := best.global_position + Vector3.UP * 1.2
+	var head: Node3D = e.head
+	head.look_at(Vector3(aim.x, head.global_position.y, aim.z), Vector3.UP)
+	if not ready: return
+	var q := PhysicsRayQueryParameters3D.create(muzzle, aim, 1 | 2 | FacilityMap.SHOT_LAYER, prop_box_rids())
+	var r := get_world_3d().direct_space_state.intersect_ray(q)
+	if not r.is_empty() and r.collider != best: return
+	st.fire()
+	best.take_damage(Backpack.SENTRY_DAMAGE, false, player, "body", (aim - muzzle).normalized() * 2.0)
+	sfx.play_at("turret_shot_v13", muzzle, -6, randf_range(0.95, 1.08))
+	if fx: fx.sparks(muzzle + (aim - muzzle).normalized() * 0.5, (aim - muzzle).normalized(), Color(1, 0.7, 0.3), 5, 0.12, 4.0)
+	_tracer(muzzle, aim, Weapons.make("rifle"))
+
+func tech_locker_prompt(p: Player) -> String:
+	return "Tech Locker (random gadget): %d" % Backpack.LOCKER_PRICE
+
+func use_tech_locker(p: Player) -> void:
+	var id: String = Backpack.GADGETS.keys()[rng.randi_range(0, Backpack.GADGETS.size() - 1)]
+	if p.backpack.is_full_for(id): hud.info("Bag full"); sfx.play("bag_full_v13", -4); return
+	if not p.economy.spend(Backpack.LOCKER_PRICE): _deny("Not enough points"); return
+	give_gadget(p, id)

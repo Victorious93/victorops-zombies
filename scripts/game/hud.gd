@@ -70,6 +70,7 @@ var shown_points := 0.0
 var tick_cd := 0.0
 var tut_panel: Control
 var tut_lbl: Label
+var gear: GearHud   ## v7.13 pak ring + backpack bar
 
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
@@ -123,6 +124,7 @@ func _ready() -> void:
 	pu_lbl = _lbl(26, Color(1, 0.9, 0.4), HORIZONTAL_ALIGNMENT_CENTER); _place(pu_lbl, Control.PRESET_CENTER_BOTTOM, Vector2(0, -60), Vector2(700, 40))
 	stand_lbl = _lbl(40, Color(1, 0.25, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(stand_lbl, Control.PRESET_CENTER, Vector2(0, 220), Vector2(900, 60))
 	stamina_bar = _bar(Color(0.9, 0.85, 0.5)); _place(stamina_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -50), Vector2(160, 6))
+	gear = GearHud.new(); gear.game = game; add_child(gear)
 
 ## Touch screens: move bars/ammo away from the stick and button clusters.
 func set_touch_layout(on: bool) -> void:

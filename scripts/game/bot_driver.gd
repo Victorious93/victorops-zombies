@@ -31,13 +31,17 @@ func _physics_process(dt: float) -> void:
 	if OS.has_environment("VOZ_SIM_DEBUG") and Engine.get_physics_frames() % 300 == 0 and game.to_spawn == 0:
 		var zs := []
 		for z in game.zombies: zs.append("%s@%s hp%d" % [Zombie.State.keys()[z.state], str(z.global_position.snapped(Vector3.ONE * 0.1)), z.hp])
-		print("[dbg] r%d t%.0f hp%.0f downed=%s player@%s zombies=%s" % [game.round, t, p.health, p.is_downed, str(p.global_position.snapped(Vector3.ONE * 0.1)), zs])
+		print("[dbg] ammo %d/%d " % [p.ammo().rounds, p.ammo().reserve] + "r%d t%.0f hp%.0f downed=%s player@%s zombies=%s" % [game.round, t, p.health, p.is_downed, str(p.global_position.snapped(Vector3.ONE * 0.1)), zs])
 	bi.fire = false; bi.mv = Vector2.ZERO; bi.ads = false; bi.sprint = false
-	var target: Zombie = null; var bd := 1e9
+	# v7.13: prefer the nearest zombie a bullet can actually reach (same mask as hitscan); the old bot
+	# emptied its sidearm into walls and the gas-tank cage at zombies still outside the windows.
+	var target: Zombie = null; var bd := 1e9; var clear := false
+	var eye0 := p.cam.global_position
 	for z in game.zombies:
 		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
 		var d: float = z.global_position.distance_to(p.global_position)
-		if d < bd: bd = d; target = z
+		var c := OS.has_environment("VOZ_SIM_NOLOS") or game.shot_clear(p, eye0, z.global_position + Vector3(0, z.head_y() if not z.crawler else 0.35, 0), z)
+		if (c and not clear) or (c == clear and d < bd): bd = d; target = z; clear = c
 	if target == null:
 		if game.intermission > 0.0 and game.intermission < 8.0: _shop()
 		return
@@ -49,9 +53,11 @@ func _physics_process(dt: float) -> void:
 	var tearing := target.state != Zombie.State.CHASE
 	if bd < 2.2 and p.knife_cd <= 0.0 and not tearing:
 		p.melee()
-	elif p.ammo().rounds > 0:
+	elif p.ammo().rounds > 0 and clear:
 		bi.fire = Engine.get_physics_frames() % 2 == 0 or p.weapon().automatic
 		bi.ads = bd > 6.0
+	elif p.ammo().rounds > 0:
+		pass   # no clear shot: hold fire
 	elif not p.ammo().is_empty():
 		p.reload()
 	else:

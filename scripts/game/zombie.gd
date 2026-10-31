@@ -644,6 +644,12 @@ func apply_status(kind: String, hit_dmg: int, by) -> void:
 		AltAmmo.SHOCK: stagger_t = maxf(stagger_t, AltAmmo.STUN_TIME * (0.4 if ZombieTypes.is_heavy(ztype) else 1.0))
 		AltAmmo.FREEZE: slow_t = AltAmmo.SLOW_TIME
 
+## v7.13 Pulse Charge EMP: frozen for stun seconds (no swings), slowed until slow seconds.
+var emp_t := 0.0
+func emp_stun(stun: float, slow: float) -> void:
+	var k := 0.5 if ZombieTypes.is_heavy(ztype) else 1.0
+	stagger_t = maxf(stagger_t, stun * k); slow_t = maxf(slow_t, slow); emp_t = maxf(emp_t, slow)
+
 func status_kind() -> String:
 	if burn_t > 0.0: return AltAmmo.FIRE
 	if slow_t > 0.0: return AltAmmo.FREEZE
@@ -651,6 +657,9 @@ func status_kind() -> String:
 
 func _tick_status(dt: float) -> void:
 	slow_t = maxf(0.0, slow_t - dt)
+	if emp_t > 0.0:
+		emp_t -= dt
+		if game and game.fx and fmod(emp_t, 0.25) < dt: game.fx.sparks(global_position + Vector3(randf_range(-0.3, 0.3), randf_range(0.6, 1.7), randf_range(-0.3, 0.3)), Vector3.UP, Color(0.4, 0.65, 1.0), 4, 0.15, 3.0)
 	if burn_t > 0.0:
 		burn_t -= dt; burn_acc += burn_dps * dt
 		if burn_acc >= 1.0:

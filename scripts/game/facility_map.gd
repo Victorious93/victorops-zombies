@@ -587,6 +587,11 @@ func _place_machines() -> void:
 			func(pl): return game.perk_prompt(pl, pid),
 			func(pl): game.buy_perk(pl, pid))
 	_build_forge(Vector3(18, 0, -24.4))
+	# v7.13 Tech Locker: buy a random backpack gadget (no power needed)
+	var tl := _machine(Vector3(-3.5, 0, 9.1), 0.0, Color(0.35, 0.6, 1.0), "Tech Locker", "bolt")
+	game.add_interactable(_front(tl), 2.2,
+		func(pl): return game.tech_locker_prompt(pl),
+		func(pl): game.use_tech_locker(pl))
 	# Power switch in Generator Wing
 	var sw := Node3D.new(); sw.position = Vector3(3, 0, -24.3); add_child(sw)
 	box(Vector3(0.8, 1.2, 0.3), Vector3(0, 1.4, 0), mats.metal, true, 1, sw)
