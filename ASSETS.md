@@ -121,3 +121,11 @@ VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code fro
 | v7.13 sounds: `pak_on_v13`, `pak_extend_v13`, `pak_warn_v13`, `pak_off_v13` (Upgrade Paks), `gadget_pickup_v13`, `bag_full_v13`, `turret_deploy_v13`, `turret_shot_v13`, `turret_off_v13`, `shield_up_v13`, `shield_hit_v13`, `shield_down_v13`, `emp_burst_v13` (Backpack gadgets) | Synthesized by `tools/gen_audio_v13.py` (numpy oscillators + noise; no samples) | Original, same license as repo |
 | v7.13 runner gait: sprinters use the `Run_Arms` clip already inside `zombie_a.glb` (Quaternius, CC0 1.0, row above); `zombie_b` falls back to its own `Run` clip | No new file | CC0 1.0 |
 | v7.12 visuals: last-zombie rim shader (`shaders/last_rim.gdshader`), crosshair points pops, Sealed Annex room + cracked panel + scratched symbol, Vault Plating / Rift Bench stations, Hive Reaper organic shell/drum/veins (over the existing CC0 Quaternius LMG mesh) | Procedural code (`zombie.gd`, `hud.gd`, `facility_map.gd`, `viewmodel.gd`) | Original, same license as repo |
+
+## v7.14
+All new v7.14 visuals are code-synthesized; no external files were added:
+- `shaders/zombie_rim.gdshader`: cool fresnel rim and procedural wound patches (value noise).
+- Blood-trail decals reuse the existing procedural blood texture in `fx.gd`.
+- Sentry Pod model (`sentry_model.gd`) is built from primitive meshes.
+- zombie_b run clip (`zombie_run_clip.gd`) is derived at runtime from the existing run animation.
+- Lamp light cones are additive quad cards using flat colors.

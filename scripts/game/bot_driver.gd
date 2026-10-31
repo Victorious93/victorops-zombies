@@ -12,10 +12,32 @@ var last_round := 0
 var hits_taken := 0
 var prev_health := 100.0
 var t := 0.0
+var gadget_cd := 0.0
+## v7.14 gear rules (pure, tested in test_v7_14): which gadget to use right now, "" for none.
+const AEGIS_HEALTH := 60.0
+const SENTRY_CROWD := 2       ## chasers within SENTRY_NEAR
+const SENTRY_NEAR := 10.0
+const PULSE_CROWD := 2        ## zombies within PULSE_NEAR
+const PULSE_NEAR := 6.5      ## = Backpack.PULSE_RADIUS
+const PICKUP_RANGE := 14.0    ## walks to a floor drop this close...
+const PICKUP_SAFE := 4.0      ## ...only while no zombie is within this
+const LOCKER_SPARE := 600     ## keeps this many points after a Tech Locker buy
+static func pick_gadget(bag: Dictionary, health: float, near_25: int, within_5: int, chasing_10: int, aegis_up: bool, sentries: int) -> String:
+	if bag.get("aegis", 0) > 0 and not aegis_up and ((health < AEGIS_HEALTH and near_25 >= 1) or near_25 >= 2): return "aegis"
+	if bag.get("pulse", 0) > 0 and within_5 >= PULSE_CROWD: return "pulse"
+	if bag.get("sentry", 0) > 0 and sentries == 0 and chasing_10 >= SENTRY_CROWD: return "sentry"
+	return ""
+static func want_pickup(drop_dist: float, nearest_zombie: float) -> bool:
+	return drop_dist <= PICKUP_RANGE and nearest_zombie > PICKUP_SAFE
+static func want_locker(points: int, round_n: int, bag_full: bool) -> bool:
+	return round_n >= 3 and not bag_full and points >= Backpack.LOCKER_PRICE + LOCKER_SPARE
 
 func _ready() -> void:
 	started_ms = Time.get_ticks_msec()
 	game.player.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
+	# VOZ_SIM_GEAR=1 starts the bot with one of each gadget (evidence clips / quick gear checks)
+	if OS.has_environment("VOZ_SIM_GEAR"):
+		for g in ["sentry", "aegis", "pulse"]: game.player.backpack.add(g)
 
 func _physics_process(dt: float) -> void:
 	var p := game.player
@@ -42,8 +64,11 @@ func _physics_process(dt: float) -> void:
 		var d: float = z.global_position.distance_to(p.global_position)
 		var c := OS.has_environment("VOZ_SIM_NOLOS") or game.shot_clear(p, eye0, z.global_position + Vector3(0, z.head_y() if not z.crawler else 0.35, 0), z)
 		if (c and not clear) or (c == clear and d < bd): bd = d; target = z; clear = c
+	gadget_cd -= dt
+	_gear(p, bd)
 	if target == null:
 		if game.intermission > 0.0 and game.intermission < 8.0: _shop()
+		_go_pickup(p, 1e9)
 		return
 	var aim := target.global_position + Vector3(0, target.head_y() if not target.crawler else 0.35, 0)
 	var eye := p.cam.global_position
@@ -73,6 +98,38 @@ func _physics_process(dt: float) -> void:
 		var local := go.rotated(Vector3.UP, -p.yaw)
 		bi.mv = Vector2(local.x, local.z)
 		bi.sprint = crowd >= 3
+	elif bi.mv == Vector2.ZERO:
+		_go_pickup(p, bd)
+
+## v7.14: use a gadget when the rules say so.
+func _gear(p: Player, nearest: float) -> void:
+	if gadget_cd > 0.0 or p.is_downed: return
+	var near_25 := 0; var within_5 := 0; var chasing_10 := 0
+	for z in game.zombies:
+		if not is_instance_valid(z) or z.state == Zombie.State.DEAD: continue
+		var d: float = z.global_position.distance_to(p.global_position)
+		if d < 2.5: near_25 += 1
+		if d < PULSE_NEAR: within_5 += 1
+		if d < SENTRY_NEAR and z.state == Zombie.State.CHASE: chasing_10 += 1
+	var bag := {}
+	for g in Backpack.GADGETS: bag[g] = p.backpack.count(g)
+	var g := pick_gadget(bag, p.health, near_25, within_5, chasing_10, game.aegis.up(), game.sentries.size())
+	if g == "": return
+	game.use_gadget(p, p.backpack.slot_of(g)); gadget_cd = 1.5
+	print("[sim] r%d used %s (hp %.0f, near %d/%d/%d)" % [game.round, g, p.health, near_25, within_5, chasing_10])
+
+## v7.14: walk over to a pak/gadget drop when it's safe (pickup is automatic within 1.2 m).
+func _go_pickup(p: Player, nearest: float) -> void:
+	var best: Dictionary = {}; var bd := 1e9
+	for d in game.gear_drops:
+		if not is_instance_valid(d.node): continue
+		if d.kind == "gadget" and p.backpack.is_full_for(d.id): continue
+		var off: Vector3 = d.node.global_position - p.global_position; off.y = 0
+		if off.length() < bd: bd = off.length(); best = d
+	if best.is_empty() or not want_pickup(bd, nearest): return
+	var go: Vector3 = best.node.global_position - p.global_position; go.y = 0
+	var local := go.normalized().rotated(Vector3.UP, -p.yaw)
+	p.bot_input.mv = Vector2(local.x, local.z)
 
 func _shop() -> void:
 	var p := game.player
@@ -95,9 +152,16 @@ func _shop() -> void:
 	for i in p.loadout.slots.size():
 		if p.loadout.slots[i].weapon.id != "sidearm" and p.loadout.current != i:
 			p.swap()
+	if want_locker(p.economy.points, game.round, _bag_full(p)):
+		game.use_tech_locker(p); print("[sim] r%d tech locker -> bag %s" % [game.round, str(p.backpack.slots)])
 	for perk in ["ironhide", "lazarus"]:
 		if game.facility.power_on and not p.perks.has(perk) and p.economy.points >= Perks.ALL[perk].cost + 300:
 			game.buy_perk(p, perk); print("[sim] r%d bought %s -> perks %s" % [game.round, perk, str(p.perks.keys())])
+
+func _bag_full(p: Player) -> bool:
+	for sl in p.backpack.slots:
+		if sl.is_empty(): return false
+	return true
 
 func _finish() -> void:
 	set_physics_process(false)
@@ -110,6 +174,7 @@ func _finish() -> void:
 	lines.append("reached round %d · kills %d · downs %d · stuck respawns %d · hits taken %d · game over %s · points %d · sim time %.0f s (+%d s breaks) · wall clock %.1f s" % [
 		game.round, game.kills, game.downs, game.stuck_respawns, hits_taken, str(game.over), game.player.economy.points, total, int(Rounds.INTERMISSION) * game.round_times.size(), (Time.get_ticks_msec() - started_ms) / 1000.0])
 	lines.append("zombie types spawned: %s" % str(game.type_counts))
+	lines.append("gear used: %s" % str(game.gear_stats))
 	for l in lines: print(l)
 	var f := FileAccess.open("user://sim_report.txt", FileAccess.WRITE)
 	if f: f.store_string("\n".join(lines))

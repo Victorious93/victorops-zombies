@@ -129,6 +129,10 @@ func _ready() -> void:
 		if n != "": anims[key] = n
 	if anims.has("HitRecieve") and not anims.has("HitReact"): anims.HitReact = anims.HitRecieve
 	if anims.has("Attack") and not anims.has("Punch"): anims.Punch = anims.Attack
+	# v7.14: zombie_b's stock Run is a human jog; swap in an original code-built shamble-sprint.
+	if ap and variant == "zombie_b" and anims.has("Run"):
+		var zr := ZombieRunClip.install(ap, anims.Run)
+		if zr != "": anims.Run = zr
 	_collect_meshes(model)
 	for mi in meshes:
 		(mi as GeometryInstance3D).visibility_range_end = 48.0
@@ -147,6 +151,7 @@ func _ready() -> void:
 		_eyes()
 	_dress()
 	_outfit()
+	_apply_rim()
 	if zpose and has_hat(): zpose.head_twitch = 0.3   # hatted heads twitch less so caps stay seated
 	if pre_maimed: _maim_silently()
 	t = 0.9; groan_cd = randf_range(1, 6)
@@ -184,12 +189,10 @@ static func grime_tex() -> Texture2D:
 				var v := n.get_noise_2d(x, y) * 0.5 + 0.5
 				var b := n.get_noise_2d(x * 3.1 + 500, y * 3.1) * 0.5 + 0.5
 				# dark grime where v is low, dried blood blotches where b is high
-				var c := Color(0.32, 0.3, 0.24).lerp(Color.WHITE, smoothstep(0.22, 0.72, v))
-				if b > 0.6: c = c.lerp(Color(0.32, 0.02, 0.02), smoothstep(0.6, 0.72, b))          # blood soak
-				var w := n.get_noise_2d(x * 5.0 + 900, y * 5.0) * 0.5 + 0.5
-				if w > 0.78: c = c.lerp(Color(0.5, 0.06, 0.05), smoothstep(0.78, 0.82, w)).lerp(Color(0.12, 0.0, 0.0), smoothstep(0.84, 0.9, w))   # open wound
-				var run := n.get_noise_2d(x * 9.0 + 200, y * 0.6) * 0.5 + 0.5
-				if run > 0.8 and b > 0.45: c = c.lerp(Color(0.25, 0.01, 0.01), 0.7)                 # vertical blood runs
+				# v7.14: neutral grey grime only. The atlas meshes sample this almost per-face, so the old
+				# red blood/wound blotches tinted whole bodies brown-orange. Wounds now live in the overlay.
+				var c := Color(0.62, 0.62, 0.6).lerp(Color.WHITE, smoothstep(0.22, 0.72, v))
+				if b > 0.7: c = c.lerp(Color(0.5, 0.47, 0.44), smoothstep(0.7, 0.8, b))
 				img.set_pixel(x, y, c)
 		_grime = ImageTexture.create_from_image(img)
 	return _grime
@@ -202,8 +205,9 @@ static func _skin_mat(src: StandardMaterial3D, type: String, idx: int) -> Standa
 		m.detail_enabled = true; m.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
 		m.detail_albedo = grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 		m.roughness = 0.7; m.metallic_specular = 0.35   # clammy
-		m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1; m.uv1_scale = Vector3(1.6, 1.6, 1.6)
-		m.rim_enabled = true; m.rim = 0.85; m.rim_tint = 0.35
+		# v7.14: uv1_scale stays 1 — scaling UV1 also shifted the albedo atlas lookups onto brown/orange
+		# cells (the real cause of "orange zombies"). Light-dependent rim off; zombie_rim overlay instead.
+		m.rim_enabled = false
 		# faint self-fill (no per-zombie light): bodies keep a readable silhouette even outside lamp pools
 		m.emission_enabled = true; m.emission = Color(tint.r, tint.g, tint.b) * 0.5; m.emission_energy_multiplier = FILL
 		if type == "bloater":
@@ -431,6 +435,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	if hp <= 0:
 		die(player, headshot, force, dmg)
 		return
+	_apply_rim()
 	# stagger: knocked back, slowed, interrupts a wind-up on big hits
 	var heavy := float(dmg) / max_hp * (0.25 if ZombieTypes.is_heavy(ztype) else 1.0)
 	if state == State.CHASE and not crawler:
@@ -465,6 +470,44 @@ func mark_last() -> void:
 	for m in meshes:
 		if m is GeometryInstance3D: (m as GeometryInstance3D).material_overlay = _rim_last
 static var _rim_last: ShaderMaterial
+## v7.14 rim/wound overlay: 4 shared materials (wound level 0..3) so it batches; lamp-independent.
+const RIM_COLOR := Color(0.55, 0.66, 0.78)
+const WOUND_LEVELS := 4
+static var _rim_mats: Array = []
+static func wound_level(hp_frac: float) -> int:
+	if hp_frac >= 0.75: return 0
+	if hp_frac >= 0.5: return 1
+	if hp_frac >= 0.25: return 2
+	return 3
+static func rim_material(level: int) -> ShaderMaterial:
+	if _rim_mats.is_empty():
+		var sh: Shader = load("res://shaders/zombie_rim.gdshader")
+		for i in WOUND_LEVELS:
+			var m := ShaderMaterial.new(); m.shader = sh
+			m.set_shader_parameter("rim_color", RIM_COLOR)
+			m.set_shader_parameter("wound", float(i) / (WOUND_LEVELS - 1))
+			m.set_shader_parameter("wound_seed", float(i) * 3.7)
+			_rim_mats.append(m)
+	return _rim_mats[clampi(level, 0, WOUND_LEVELS - 1)]
+var _wound_lv := -1
+func _apply_rim() -> void:
+	if last_glow: return
+	var lv := wound_level(float(hp) / maxf(1.0, float(max_hp)))
+	if crawler: lv = maxi(lv, 2)
+	if lv == _wound_lv: return
+	_wound_lv = lv
+	var mat := rim_material(lv)
+	for m in meshes:
+		if m is GeometryInstance3D and is_instance_valid(m): (m as GeometryInstance3D).material_overlay = mat
+## v7.14 blood trail: distance walked since the last drop.
+var trail_dist := 0.0
+func _trail(moved: float) -> void:
+	trail_dist += moved
+	var hf := float(hp) / maxf(1.0, float(max_hp))
+	if BloodTrail.should_drop(trail_dist, hf, crawler):
+		trail_dist = 0.0
+		if game and game.fx and game.fx.has_method("trail_mark"):
+			game.fx.trail_mark(global_position, -global_basis.z, BloodTrail.mark_size(hf, crawler))
 ## v7.12 rim strength (0..1) for the pulse at time t: never fully dark so the outline always reads.
 static func last_pulse(t: float) -> float: return 0.55 + 0.45 * (0.5 + 0.5 * sin(t * TAU * 1.4))
 ## v7.12 sprint ramp: in later rounds a chaser speeds up the longer it hunts (walk → jog → sprint).
@@ -893,8 +936,10 @@ func _nav_move(target: Vector3, dt: float, set_target := true) -> void:
 	knock = knock.move_toward(Vector3.ZERO, dt * 12)
 	velocity.x = v.x; velocity.z = v.z
 	velocity.y = velocity.y - 18.0 * dt if not is_on_floor() else -0.5
+	var before := global_position
 	move_and_slide()
 	_face(global_position + dir)
+	_trail(before.distance_to(global_position))
 	step_cd -= dt * speed
 	if step_cd <= 0.0:
 		step_cd = 0.55 if not crawler else 0.8

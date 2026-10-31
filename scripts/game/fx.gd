@@ -110,6 +110,29 @@ func blood_hit(at: Vector3, dir: Vector3) -> void:
 			var old = splats_alive.pop_front()
 			if is_instance_valid(old): old.queue_free()
 
+## v7.14 blood trail marks behind wounded/crawling zombies: a capped ring of reused quads
+## (BloodTrail.MAX_TRAIL), one shared material, no shadows, no per-drop allocation once warm.
+var trail_ring := BloodTrail.Ring.new(BloodTrail.MAX_TRAIL)
+var trail_marks: Array = []
+var _trail_mesh: QuadMesh
+func trail_mark(at: Vector3, dir: Vector3, size: Vector2) -> MeshInstance3D:
+	var i := trail_ring.take()
+	var mi: MeshInstance3D = trail_marks[i] if i < trail_marks.size() else null
+	if mi == null or not is_instance_valid(mi):
+		if _trail_mesh == null:
+			_trail_mesh = QuadMesh.new(); _trail_mesh.size = Vector2.ONE; _trail_mesh.orientation = PlaneMesh.FACE_Y
+		mi = MeshInstance3D.new(); mi.mesh = _trail_mesh
+		mi.material_override = _quad_mat("trail", _blood_tex, Color(0.75, 0.75, 0.75, 0.85))
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi)
+		if i < trail_marks.size(): trail_marks[i] = mi
+		else: trail_marks.append(mi)
+	dir.y = 0
+	var yaw := atan2(dir.x, dir.z) if dir.length() > 0.01 else randf() * TAU
+	mi.global_transform = Transform3D(Basis(Vector3.UP, yaw + randf_range(-0.25, 0.25)).scaled(Vector3(size.x, 1.0, size.y)), Vector3(at.x, at.y + 0.015 + i * 0.0004, at.z))
+	mi.visible = true
+	return mi
+
 func blood_pool(at: Vector3) -> void:
 	var m := surface_quad(at + Vector3.UP * 0.01, Vector3.UP, 0.2, _quad_mat("blood", _blood_tex))
 	var tw := create_tween(); tw.tween_property(m, "scale", Vector3.ONE * randf_range(3.5, 5.5), 2.4).set_ease(Tween.EASE_OUT)
