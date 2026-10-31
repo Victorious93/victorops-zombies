@@ -165,7 +165,7 @@ static var _rim_cache := {}
 static func _rim_mat(src: StandardMaterial3D) -> StandardMaterial3D:
 	if not _rim_cache.has(src):
 		var m := src.duplicate() as StandardMaterial3D
-		m.rim_enabled = true; m.rim = 0.9; m.rim_tint = 0.2
+		m.rim_enabled = true; m.rim = 0.7; m.rim_tint = 0.15
 		_rim_cache[src] = m
 	return _rim_cache[src]
 
@@ -203,7 +203,7 @@ static func _skin_mat(src: StandardMaterial3D, type: String, idx: int) -> Standa
 		m.detail_albedo = grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 		m.roughness = 0.7; m.metallic_specular = 0.35   # clammy
 		m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1; m.uv1_scale = Vector3(1.6, 1.6, 1.6)
-		m.rim_enabled = true; m.rim = 1.0; m.rim_tint = 0.35
+		m.rim_enabled = true; m.rim = 0.85; m.rim_tint = 0.35
 		# faint self-fill (no per-zombie light): bodies keep a readable silhouette even outside lamp pools
 		m.emission_enabled = true; m.emission = Color(tint.r, tint.g, tint.b) * 0.5; m.emission_energy_multiplier = FILL
 		if type == "bloater":
