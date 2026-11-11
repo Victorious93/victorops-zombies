@@ -1,7 +1,7 @@
 class_name FacilityMap
 extends NavigationRegion3D
-## "Blackwater Research Annex": original map built in code. Intake Hall (start) plus four buyable
-## areas: Generator Wing (power switch), Lab Corridor (catwalk), Cold Storage (Overcharge Forge) and the
+## "Blackwater Quarantine Annex": original map built in code. Intake Hall (start) plus buyable
+## areas joined in a loop (Intake -> Generator -> Cold Storage -> Lab -> Intake via the Service Passage): Generator Wing (power switch), Lab Corridor (catwalk), Cold Storage (Overcharge Forge) and the
 ## open-air Loading Yard (raised dock + island for training loops). PBR surfaces use CC0 ambientCG
 ## textures and props are CC0 Quaternius / Kenney models (see ASSETS.md).
 
@@ -198,7 +198,7 @@ func _make_window(p: Vector2, along_x: bool, g: Dictionary) -> void:
 	var size := Vector3(g.w, 1.4, T) if along_x else Vector3(T, 1.4, g.w)
 	box(size, Vector3(p.x, 1.65, p.y), null, true, 8).get_child(1).visible = false
 	game.add_interactable(w.center() - Vector3(outv.x, 0, outv.y) * 0.6, 2.0,
-		func(pl): return "Hold to rebuild barricade (+%d)" % Economy.REPAIR if w.bar.hp < w.bar.max_hp() else "",
+		func(pl): return "Hold to rebuild barricade (+%d points)" % Economy.REPAIR if w.bar.hp < w.bar.max_hp() else "",
 		func(pl): game.repair_window(pl, w), true)
 	# a dim light outside to silhouette the horde
 	var ol := OmniLight3D.new(); ol.light_color = Color(0.35, 0.45, 0.6); ol.light_energy = 0.6; ol.omni_range = 6
@@ -221,7 +221,7 @@ func _make_door(p: Vector2, along_x: bool, g: Dictionary) -> void:
 		l.rotation.y = rot + (0.0 if side > 0 else PI)
 		body.add_child(l)
 	game.add_interactable(Vector3(p.x, 1.0, p.y), 2.4,
-		func(pl): return "" if facility_open(g.id) else "Open %s: %d" % [d.label, d.cost],
+		func(pl): return "" if facility_open(g.id) else Game.price_text(pl.economy.points, "Open %s" % d.label, d.cost),
 		func(pl): game.buy_door(pl, g.id))
 
 func facility_open(id: String) -> bool:
@@ -346,7 +346,8 @@ func build(p_game) -> void:
 	wall(Vector2(-10, -10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "north"}])
 	wall(Vector2(10, 10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "east"}])
 	wall(Vector2(10, -10), Vector2(10, -26), [{at = 8.0, w = 2.4, kind = "door", id = "cold"}])
-	wall(Vector2(10, -10), Vector2(26, -10))
+	# v8: Service Passage at the east end (clear of the catwalk ramp) closes the four-room loop
+	wall(Vector2(10, -10), Vector2(26, -10), [{at = 15.0, w = 1.7, kind = "door", id = "service"}])
 	_build_yard()
 	_build_pump()
 	_build_catwalk()

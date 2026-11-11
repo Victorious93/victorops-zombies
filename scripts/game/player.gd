@@ -57,6 +57,13 @@ const SLIDE_SPEED := 8.5
 const LUNGE_RANGE := 3.2
 const REGEN_DELAY := 4.0
 const REGEN_RATE := 60.0
+const SWAP_TIME := 0.35        ## seconds before the newly drawn gun can fire
+const PUMP_DELAY := 0.3        ## pump-action: rack this long after the shot
+## Seconds after taking a hit during which further hits are ignored, so a stacked pack cannot delete
+## the health bar in a single frame (each zombie still has its own wind-up and cooldown).
+const HIT_GRACE := 0.4
+const PAD_DEADZONE := 0.22
+const PAD_LOOK := 3.4          ## rad/s at full right-stick deflection (scaled by look sensitivity)
 var stamina := STAMINA_MAX
 var stamina_rest := 0.0
 var slide_t := 0.0
@@ -149,16 +156,18 @@ func _unhandled_input(e: InputEvent) -> void:
 			KEY_Z: backpack.selected = (backpack.selected + 1) % Backpack.SLOTS
 			KEY_1, KEY_2, KEY_X: swap()
 
+## Weapon switch: blocked mid knife/grenade/drink; abandons the reload of the gun being put away.
 func swap() -> void:
-	if loadout.slots.size() > 1:
-		loadout.cycle(); fire_cd = 0.35
-		game.sfx.play("bolt", -10)
+	if loadout.slots.size() < 2 or vm.knife_t > 0.0 or vm.throw_t > 0.0 or vm.drinking(): return
+	loadout.cycle(); fire_cd = SWAP_TIME; reload_beats = {}; spin = 0.0
+	game.sfx.play("bolt", -10)
 
 func reload() -> void:
+	if is_downed and ammo().is_empty(): return
 	if ammo().reload(): _start_reload_sfx()
 
 func _start_reload_sfx() -> void:
-	reload_beats = {out = false, ins = false, bolt = false}
+	reload_beats = {out = false, ins = false, bolt = false, shell = ammo().by_shell(), rounds = ammo().rounds}
 	game.sfx.play("mag_release", -8)
 	if weapon().id == Weapons.ALIEN: game.sfx.play("reload_reaper_v12", -3)
 	game.sfx.play("mag_out", -6)
@@ -168,16 +177,49 @@ func _start_reload_sfx() -> void:
 func reload01() -> float:
 	var a := ammo()
 	if not a.reloading(): return -1.0
-	var total := a.weapon.reload_time * a.reload_mult
-	return 1.0 - a.reload_left / maxf(total, 0.01)
+	if a.locked: return -1.0
+	return clampf(1.0 - a.reload_left / maxf(a.reload_step(), 0.01), 0.0, 1.0)
 
 func _key(k: Key) -> bool: return Input.is_physical_key_pressed(k)
 
 func add_trauma(a: float) -> void:
 	trauma = clampf(trauma + a, 0.0, 1.0)
 
+## Gamepad (first connected pad): left stick move, right stick look, RT fire, LT aim, A jump, B crouch,
+## X use/buy (hold to repair), RB reload, Y switch weapon, LB grenade, R3 knife, L3 sprint,
+## D-pad up ability, D-pad right gadget, Start pause. Returns {} when no pad is connected.
+var _pad_prev := {}
+var _pad_sprint := false
+static func pad_axis(v: float, dead := PAD_DEADZONE) -> float:
+	return 0.0 if absf(v) < dead else signf(v) * (absf(v) - dead) / (1.0 - dead)
+func _pad_edge(dev: int, b: JoyButton) -> bool:
+	var now := Input.is_joy_button_pressed(dev, b); var was: bool = _pad_prev.get(b, false)
+	_pad_prev[b] = now
+	return now and not was
+func _read_pad(dt: float) -> Dictionary:
+	var pads := Input.get_connected_joypads()
+	if pads.is_empty(): return {}
+	var dev: int = pads[0]
+	if _pad_edge(dev, JOY_BUTTON_START): game.toggle_pause()
+	if game.paused or game.over: return {}
+	var mv := Vector2(pad_axis(Input.get_joy_axis(dev, JOY_AXIS_LEFT_X)), pad_axis(Input.get_joy_axis(dev, JOY_AXIS_LEFT_Y)))
+	var lk := Vector2(pad_axis(Input.get_joy_axis(dev, JOY_AXIS_RIGHT_X)), pad_axis(Input.get_joy_axis(dev, JOY_AXIS_RIGHT_Y)))
+	if lk != Vector2.ZERO: _look(lk * lk.length() * dt, PAD_LOOK)
+	if _pad_edge(dev, JOY_BUTTON_LEFT_STICK): _pad_sprint = not _pad_sprint
+	if mv.y > -0.3: _pad_sprint = false
+	if _pad_edge(dev, JOY_BUTTON_RIGHT_SHOULDER): reload()
+	if _pad_edge(dev, JOY_BUTTON_Y): swap()
+	if _pad_edge(dev, JOY_BUTTON_LEFT_SHOULDER): throw_grenade()
+	if _pad_edge(dev, JOY_BUTTON_RIGHT_STICK): melee()
+	if _pad_edge(dev, JOY_BUTTON_DPAD_UP): use_ability()
+	if _pad_edge(dev, JOY_BUTTON_DPAD_RIGHT): game.use_gadget(self)
+	return {mv = mv, fire = Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_RIGHT) > 0.4, ads = Input.get_joy_axis(dev, JOY_AXIS_TRIGGER_LEFT) > 0.4,
+		use = Input.is_joy_button_pressed(dev, JOY_BUTTON_X), sprint = _pad_sprint,
+		jump = Input.is_joy_button_pressed(dev, JOY_BUTTON_A), crouch = Input.is_joy_button_pressed(dev, JOY_BUTTON_B)}
+
 func _physics_process(dt: float) -> void:
 	if game.paused and touch and touch.visible and touch.take("pause"): game.toggle_pause()
+	if game.paused or game.over: _read_pad(dt)   # Start still toggles the pause menu
 	if game.over or game.paused: return
 	if is_downed: _downed_tick(dt)
 	since_hit += dt
@@ -193,6 +235,10 @@ func _physics_process(dt: float) -> void:
 	var crouch := _key(KEY_C) or _key(KEY_CTRL)
 	var jump := _key(KEY_SPACE)
 	var on_touch: bool = touch != null and touch.visible
+	var pad := _read_pad(dt)
+	if not pad.is_empty() and bot_input == null:
+		mv += pad.mv; fire = fire or pad.fire; want_ads = want_ads or pad.ads; use = use or pad.use
+		sprint_key = sprint_key or pad.sprint; jump = jump or pad.jump; crouch = crouch or pad.crouch
 	if bot_input != null:
 		mv = bot_input.mv; fire = bot_input.fire; want_ads = bot_input.ads; use = bot_input.use; sprint_key = bot_input.sprint
 	elif on_touch:
@@ -316,7 +362,13 @@ func _physics_process(dt: float) -> void:
 	ability_cd -= dt
 	vm.set_weapon(weapon())
 	var r01 := reload01()
-	if r01 >= 0.0:
+	if r01 >= 0.0 and ammo().by_shell():
+		# pump-action: one shell per beat; the pump is racked when the tube is full (or the reload is cut short)
+		if not reload_beats.get("out", false): _start_reload_sfx()
+		if ammo().rounds != int(reload_beats.get("rounds", -1)):
+			reload_beats.rounds = ammo().rounds
+			game.sfx.play("mag_in", -5, randf_range(1.25, 1.4)); vm.kick += 0.18
+	elif r01 >= 0.0:
 		if not reload_beats.get("out", false): _start_reload_sfx()
 		# layered reload: release click -> mag out -> handling -> mag seat -> rack
 		if r01 > 0.08 and not reload_beats.get("cloth", false): reload_beats.cloth = true; game.sfx.play("reload_cloth", -12, randf_range(0.9, 1.1))
@@ -324,7 +376,10 @@ func _physics_process(dt: float) -> void:
 		if r01 > 0.85 and not reload_beats.bolt:
 			reload_beats.bolt = true; game.sfx.play("rack", -4, 1.15 - weapon().weight * 0.15); game.sfx.play("bolt_v6", -2, 1.1 - weapon().weight * 0.12); vm.kick += 0.35; add_trauma(0.04)
 	else:
+		if reload_beats.get("shell", false): _pump()
 		reload_beats = {}
+		# dry gun in hand with rounds in reserve: start the reload without waiting for a trigger pull
+		if ammo().rounds == 0 and ammo().reserve > 0 and not ammo().reloading() and fire_cd <= 0.0 and not vm.drinking(): reload()
 	if fire and not sprinting and vm.knife_t <= 0.0 and vm.throw_t <= 0.0 and not vm.drinking():
 		if weapon().automatic or not prev_fire:
 			try_fire(mv.length() > 0.1)
@@ -341,9 +396,15 @@ func _physics_process(dt: float) -> void:
 		health = minf(max_health, health + REGEN_RATE * dt)
 	vm.tick(dt, ads, mv.length(), sprinting, r01)
 
+## Racks the pump: after each shot and when a shell reload ends.
+func _pump() -> void:
+	game.sfx.play("rack", -3, 0.92); game.sfx.play("bolt_v6", -5, 0.85); vm.kick += 0.4; add_trauma(0.03)
+
 func try_fire(moving: bool) -> void:
 	var a := ammo()
 	if fire_cd > 0.0: return
+	if a.can_interrupt():   # pump-action: fire what is already in the tube
+		a.cancel_reload(); reload_beats = {}
 	if not a.can_fire():
 		if not a.reloading(): reload()
 		else: return
@@ -363,6 +424,8 @@ func try_fire(moving: bool) -> void:
 	if not game.paks.infinite_ammo() and a.fire():
 		game.bark(Barks.RELOAD)
 		_start_reload_sfx()
+	elif a.by_shell() and a.rounds > 0:
+		get_tree().create_timer(PUMP_DELAY, true, true).timeout.connect(func(): if is_instance_valid(self) and weapon() == w: _pump())
 	# learnable per-gun recoil pattern (resets after a short pause in fire), plus a little noise
 	var kick: Vector2 = w.recoil_pattern[pattern_i % w.recoil_pattern.size()]
 	pattern_i += 1; pattern_reset = w.fire_interval * 2.5 + 0.15
@@ -431,6 +494,7 @@ func _heartbeat(dt: float) -> void:
 func take_damage(d: float, from := Vector3.INF) -> void:
 	if is_downed or game.over: return
 	if game.god_mode: d = 0.0
+	if d > 0.0 and since_hit < HIT_GRACE: return
 	d = game.aegis_filter(d)
 	if d <= 0.0: return
 	var had := armor.value

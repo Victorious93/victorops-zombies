@@ -1,6 +1,6 @@
 # Assets & licenses
 
-VictorOps Zombies is 100% original IP. No assets, audio, names, maps or code from any other game franchise are used or referenced. Every third-party asset below is CC0 1.0 (public domain dedication).
+VICTOR ZOMBIES (by Victorious Framework; repository name `victorops-zombies`) is 100% original IP. No assets, audio, names, maps or code from any other game franchise are used or referenced. Every third-party asset below is CC0 1.0 (public domain dedication).
 
 ## 3D models (`assets/models/`, fetched by `tools/fetch_models.py`, list in `assets/models/SOURCES.tsv`)
 

@@ -25,14 +25,19 @@ func give(w: WeaponDef) -> int:
 		slots.append(Ammo.new(w)); i = slots.size() - 1
 	else:
 		slots[current].swap(w); i = current
+	if i != current: slots[current].cancel_reload()
 	current = i
 	return i
 
 func replace_current(w: WeaponDef) -> void:
 	slots[current].swap(w)
 
+## Switching weapons abandons the reload of the gun being put away.
 func cycle() -> void:
+	if slots.size() < 2: return
+	slots[current].cancel_reload()
 	current = (current + 1) % slots.size()
 
+## Only the gun in hand reloads.
 func update(dt: float) -> void:
-	for a in slots: a.update(dt)
+	slots[current].update(dt)

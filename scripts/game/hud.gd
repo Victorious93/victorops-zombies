@@ -72,6 +72,9 @@ var tut_panel: Control
 var tut_lbl: Label
 var gear: GearHud   ## v7.13 pak ring + backpack bar
 
+var count_lbl: Label
+var hp_lbl: Label
+
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
 	l.add_theme_font_size_override("font_size", size)
@@ -114,8 +117,8 @@ func _ready() -> void:
 	points_lbl.add_theme_color_override("font_outline_color", Color(0.0, 0.25, 0.35, 0.95)); points_lbl.add_theme_constant_override("outline_size", 10)
 	perks_lbl = _lbl(22, Color(0.9, 0.9, 0.9), HORIZONTAL_ALIGNMENT_RIGHT); _place(perks_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 70), Vector2(500, 90))
 	fps_lbl = _lbl(16, Color(0.6, 0.6, 0.6), HORIZONTAL_ALIGNMENT_RIGHT); _place(fps_lbl, Control.PRESET_TOP_RIGHT, Vector2(-24, 150), Vector2(200, 30))
-	ammo_lbl = _lbl(42, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT); _place(ammo_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-430, -70))
-	weapon_lbl = _lbl(22, Color(0.85, 0.85, 0.85), HORIZONTAL_ALIGNMENT_RIGHT); _place(weapon_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-430, -110))
+	ammo_lbl = _lbl(42, Color.WHITE, HORIZONTAL_ALIGNMENT_RIGHT); _place(ammo_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-40, -70))
+	weapon_lbl = _lbl(22, Color(0.85, 0.85, 0.85), HORIZONTAL_ALIGNMENT_RIGHT); _place(weapon_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-40, -110))
 	prompt_lbl = _lbl(28, Color(1, 1, 1), HORIZONTAL_ALIGNMENT_CENTER); _place(prompt_lbl, Control.PRESET_CENTER, Vector2(0, 120), Vector2(900, 50))
 	banner_lbl = _lbl(64, Color(0.85, 0.08, 0.05), HORIZONTAL_ALIGNMENT_CENTER); _place(banner_lbl, Control.PRESET_CENTER, Vector2(0, -150), Vector2(1000, 90))
 	bark_lbl = _lbl(30, Color(1, 0.85, 0.3), HORIZONTAL_ALIGNMENT_CENTER); _place(bark_lbl, Control.PRESET_CENTER, Vector2(0, -60), Vector2(900, 50))
@@ -127,11 +130,13 @@ func _ready() -> void:
 	hit = Control.new(); hit.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); hit.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hit.draw.connect(_draw_center); add_child(hit)
 	feed_lbl = _lbl(26, Color(1, 0.3, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(feed_lbl, Control.PRESET_CENTER, Vector2(0, 60), Vector2(600, 40))
-	grenade_lbl = _lbl(22, Color(0.85, 0.85, 0.85), HORIZONTAL_ALIGNMENT_RIGHT); _place(grenade_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-430, -140))
+	grenade_lbl = _lbl(22, Color(0.85, 0.85, 0.85), HORIZONTAL_ALIGNMENT_RIGHT); _place(grenade_lbl, Control.PRESET_BOTTOM_RIGHT, Vector2(-40, -140))
 	pu_lbl = _lbl(26, Color(1, 0.9, 0.4), HORIZONTAL_ALIGNMENT_CENTER); _place(pu_lbl, Control.PRESET_CENTER_BOTTOM, Vector2(0, -60), Vector2(700, 40))
 	stand_lbl = _lbl(40, Color(1, 0.25, 0.2), HORIZONTAL_ALIGNMENT_CENTER); _place(stand_lbl, Control.PRESET_CENTER, Vector2(0, 220), Vector2(900, 60))
 	stamina_bar = _bar(Color(0.9, 0.85, 0.5)); _place(stamina_bar, Control.PRESET_BOTTOM_LEFT, Vector2(28, -50), Vector2(160, 6))
 	gear = GearHud.new(); gear.game = game; add_child(gear)
+	count_lbl = _lbl(30, Color(0.85, 0.95, 1.0), HORIZONTAL_ALIGNMENT_CENTER); _place(count_lbl, Control.PRESET_CENTER_TOP, Vector2(0, 64), Vector2(500, 44))
+	hp_lbl = _lbl(18, Color(1.0, 0.8, 0.85)); _place(hp_lbl, Control.PRESET_BOTTOM_LEFT, Vector2(300, -96), Vector2(120, 26))
 
 ## Touch screens: move bars/ammo away from the stick and button clusters.
 func set_touch_layout(on: bool) -> void:
@@ -408,7 +413,7 @@ func _process(dt: float) -> void:
 	round_lbl.visible = painted_strokes(shown_round) == 0
 	deco.queue_redraw()
 	var a: Ammo = p.ammo()
-	ammo_lbl.text = "RELOADING" if a.reloading() else "%d / %d" % [a.rounds, a.reserve]
+	ammo_lbl.text = "IN THE FORGE" if a.locked else ("RELOADING" if a.reloading() and not a.by_shell() else "%d / %d" % [a.rounds, a.reserve])
 	ammo_lbl.add_theme_color_override("font_color", Color(1, 0.3, 0.25) if a.rounds == 0 and a.reserve == 0 else (Color(1, 0.85, 0.3) if a.reserve < a.weapon.mag_size else Color.WHITE))
 	var pus: Array = []
 	for id in game.power.timers: pus.append("%s %s %ds" % [PowerUps.ICONS[id], PowerUps.ALL[id].name, ceili(game.power.timers[id])])
@@ -431,8 +436,12 @@ func _process(dt: float) -> void:
 	var pr: String = game.current_prompt
 	var touch_on: bool = game.touch != null and game.touch.visible
 	prompt_lbl.text = "" if pr == "" else ("%s %s" % ["[USE]" if touch_on else "[E]", pr])
+	count_lbl.text = countdown_text(game.round + 1, game.intermission) if game.auto_rounds and not game.over else ""
 	hit_t = maxf(0.0, hit_t - dt)
 	set_touch_layout(game.touch != null and game.touch.visible)
+	hp_lbl.text = "%d HP" % ceili(p.health)
+	hp_lbl.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	hp_lbl.position = health_bar.position + Vector2(health_bar.size.x + 10, -6)
 	feed_t -= dt; feed_lbl.visible = feed_t > 0.0
 	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
 	round_t = maxf(0.0, round_t - dt * 0.8)
@@ -486,7 +495,14 @@ func boss_bar(z) -> void:
 	boss_root.visible = true
 	boss_fill.size.x = 596.0 * clampf(float(z.hp) / maxf(1.0, float(z.max_hp)), 0.0, 1.0)
 
-func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, is_best := false) -> void:
+## "Round 4 in 7" during the break between rounds (and before round 1).
+static func countdown_text(next_round: int, left: float) -> String:
+	return "" if left <= 0.0 else ("Round %d in %d" % [next_round, ceili(left)])
+
+static func records_text(rec: Dictionary) -> String:
+	return "Best round %d  ·  Best score %d" % [int(rec.get("round", 0)), int(rec.get("score", 0))]
+
+func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, is_best := false, records := {}, new_round := false, new_score := false) -> void:
 	over_panel = VBoxContainer.new()
 	over_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	over_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -498,9 +514,15 @@ func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, 
 	else: s.text = "You survived %d round%s  ·  %d kills" % [round, "" if round == 1 else "s", kills]
 	over_panel.add_child(s)
 	var h := _lbl(30, Color(1.0, 0.85, 0.3) if is_best else Color(0.75, 0.75, 0.8), HORIZONTAL_ALIGNMENT_CENTER)
-	if is_best: h.text = "NEW HIGH SCORE!"
-	elif not best.is_empty(): h.text = "Best: round %d  ·  %d kills  ·  %d points" % [best.get("round", 0), best.get("kills", 0), best.get("points", 0)]
+	if new_round or new_score:
+		h.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+		h.text = "  ·  ".join((["NEW BEST ROUND!"] if new_round else []) + (["NEW BEST SCORE!"] if new_score else []))
+	elif is_best: h.text = "NEW HIGH SCORE!"
+	elif not best.is_empty(): h.text = "Best run: round %d  ·  %d kills  ·  %d points" % [best.get("round", 0), best.get("kills", 0), best.get("points", 0)]
 	over_panel.add_child(h)
+	if not records.is_empty():
+		var rl := _lbl(24, Color(0.75, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER); rl.text = records_text(records); over_panel.add_child(rl)
+	var brand := _lbl(18, Color(0.6, 0.6, 0.65), HORIZONTAL_ALIGNMENT_CENTER); brand.text = "VICTOR ZOMBIES  ·  By Victorious Framework"; over_panel.add_child(brand)
 	var q := _lbl(22, Color(0.8, 0.8, 0.8), HORIZONTAL_ALIGNMENT_CENTER); q.text = Barks.GAME_OVER; over_panel.add_child(q)
 	for pair in [["Play again", game.restart], ["Main menu", game.to_menu]]:
 		var b := Button.new(); b.text = pair[0]; b.custom_minimum_size = Vector2(320, 64)

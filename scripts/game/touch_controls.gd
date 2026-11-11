@@ -82,6 +82,12 @@ func _button_at(p: Vector2) -> String:
 		if d <= buttons[n][1] * TouchLayout.HIT_PAD and d < bd: best = n; bd = d
 	return best
 
+## Drops every finger: called when the game pauses or loses focus, where release events may never arrive
+## (otherwise the stick or FIRE would stay stuck after resuming). Toggles (ADS, sprint) are cleared too.
+func reset() -> void:
+	held.clear(); stick_idx = -1; look_idx = -1; move = Vector2.ZERO; _look = Vector2.ZERO
+	fire = false; use = false; ads = false; sprint = false; _pulses.clear(); queue_redraw()
+
 func set_use_available(on: bool) -> void:
 	if on != use_available: use_available = on; queue_redraw()
 

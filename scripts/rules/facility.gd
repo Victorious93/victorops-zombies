@@ -9,6 +9,9 @@ const DOORS := {
 	"cold": {"cost": 1250, "opens": "cold", "label": "Cold Storage"},
 	"yard": {"cost": 1250, "opens": "yard", "label": "Loading Yard"},
 	"pump": {"cost": 1250, "opens": "pump", "label": "Pump Station"},
+	## v8: closes the loop Intake -> Generator -> Cold Storage -> Lab -> Intake. Buyable from either side,
+	## so it opens both rooms it joins.
+	"service": {"cost": 1000, "opens": "cold", "also": "lab", "label": "Service Passage"},
 }
 ## Window id -> area it belongs to (only opened areas spawn zombies).
 const WINDOWS := {"w_west": "intake", "w_south": "intake", "w_gen": "generator", "w_lab": "lab", "w_cold": "cold", "w_yard_n": "yard", "w_yard_s": "yard", "w_pump_s": "pump", "w_pump_e": "pump"}
@@ -22,6 +25,7 @@ func buy_door(door_id: String, economy: Economy) -> String:
 	if not economy.spend(DOORS[door_id].cost): return "Not enough points"
 	open_doors[door_id] = true
 	open_areas[DOORS[door_id].opens] = true
+	if DOORS[door_id].has("also"): open_areas[DOORS[door_id].also] = true
 	return ""
 
 ## Returns true the first time the switch is thrown.

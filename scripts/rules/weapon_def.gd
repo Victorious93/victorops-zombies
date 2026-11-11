@@ -33,6 +33,8 @@ var color := Color(0.6, 0.6, 0.65)
 var alt_ammo := ""
 ## v7.12: seconds of trigger time to reach full fire rate (0 = none). Starts at SPIN_START x the interval.
 var spin_up := 0.0
+## v8 pump-action: seconds to thumb in ONE shell (0 = magazine reload). Shell reloads can be cut short by firing.
+var shell_reload := 0.0
 const SPIN_START := 2.5
 
 func _init(p_id := "", p_name := "", p_damage := 0, p_interval := 0.3) -> void:
@@ -64,7 +66,7 @@ func display_name() -> String:
 
 func duplicate_def() -> WeaponDef:
 	var w := WeaponDef.new(id, name, damage, fire_interval)
-	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight", "alt_ammo", "spin_up"]:
+	for k in ["pellets", "pierce", "splash", "tier", "mag_size", "reload_time", "automatic", "spread_deg", "recoil", "color", "reserve_mags", "ads_time", "recoil_pattern", "upgrade_name", "weight", "alt_ammo", "spin_up", "shell_reload"]:
 		w.set(k, get(k))
 	return w
 
@@ -84,6 +86,7 @@ func upgraded_version() -> WeaponDef:
 	w.splash = splash * 1.5
 	w.mag_size = int(mag_size * (2.0 if w.tier == 1 else 1.5))  ## big mag boost on the first overcharge
 	w.reload_time = reload_time * 0.85
+	w.shell_reload = shell_reload * 0.85
 	w.color = Color(0.55, 0.3, 1.0) if w.tier == 1 else Color(1.0, 0.35, 0.9)
 	w.alt_ammo = AltAmmo.for_weapon(id, w.tier)
 	return w
