@@ -76,7 +76,9 @@ var stuck_respawns := 0
 
 func on_zombie_stuck(_z) -> void: stuck_respawns += 1
 const SETTINGS_PATH := "user://settings.cfg"
-const BASE_FOG := Color(0.06, 0.07, 0.09)
+const BASE_FOG := Color(0.24, 0.28, 0.36)
+const AMBIENT_OFF := 0.5    ## before the generator runs
+const AMBIENT_ON := 0.62
 
 func _ready() -> void:
 	rng.randomize()
@@ -104,30 +106,31 @@ func _ready() -> void:
 	if not touch.visible and not OS.has_feature("headless"):
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
-const SATURATION := 0.9
+const SATURATION := 0.94
 func _build_env() -> void:
 	env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.01, 0.012, 0.02)
+	env.background_color = Color(0.2, 0.23, 0.3)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.26, 0.3, 0.42)
-	env.ambient_light_energy = 0.42   # pre-power: moody but readable (v8: lifted so silhouettes read on dim phone screens)
+	env.ambient_light_color = Color(0.4, 0.46, 0.6)
+	env.ambient_light_energy = AMBIENT_OFF   # blue-gray dusk: dim but every silhouette, door and route reads
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	# v9: atmosphere comes from composition and light, not murk. Fog is a thin aerial haze that only
+	# separates distant layers; a little hangs low over the paving.
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.06, 0.07, 0.09)
-	env.fog_density = 0.055
-	# low ground mist (height fog is per-pixel math only: mobile-safe, no volumetric buffers)
-	env.fog_height = 0.5; env.fog_height_density = 0.3
-	env.fog_aerial_perspective = 0.25
-	env.glow_enabled = true
-	env.glow_intensity = 0.7
-	env.glow_bloom = 0.08
-	env.glow_hdr_threshold = 0.9
-	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.08   # v7.13 grade: a touch more contrast for the dark mood
-	env.adjustment_saturation = SATURATION   # v7.14: gritty, slightly drained palette (lamps + neon still pop via glow)
+	env.fog_light_color = BASE_FOG
+	env.fog_density = 0.008
+	env.fog_height = 0.4; env.fog_height_density = 0.06
+	env.fog_aerial_perspective = 0.4
 	env.fog_sun_scatter = 0.0
-	env.set_glow_level(1, 0.6)   # v7.14: a wider, softer halo around lamps and emissives
+	env.glow_enabled = true
+	env.glow_intensity = 0.5
+	env.glow_bloom = 0.03
+	env.glow_hdr_threshold = 1.0
+	env.set_glow_level(1, 0.5)
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.06
+	env.adjustment_saturation = SATURATION
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 
 static func load_settings(s: GameSettings) -> void:
@@ -170,7 +173,7 @@ func apply_settings() -> void:
 		music.volume_db = music_base()
 	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
 	if player:
-		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
+		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist; player.shake_scale = settings.shake
 		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
 		if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	if touch:
@@ -245,7 +248,7 @@ func _notification(what: int) -> void:
 static func wants_auto_pause(enabled: bool, is_paused: bool, is_over: bool, scripted: bool) -> bool:
 	return enabled and not is_paused and not is_over and not scripted
 
-## "Open Lab Corridor — 1000 points", or the same with what is missing when the player cannot pay.
+## "Open General Store — 1000 points", or the same with what is missing when the player cannot pay.
 static func price_text(points: int, action: String, cost: int) -> String:
 	if points >= cost: return "%s — %d points" % [action, cost]
 	return "%s — %d points (need %d more)" % [action, cost, cost - points]
@@ -404,6 +407,12 @@ func _part_of(z: Zombie, y: float) -> String:
 func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
 	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain; hud.points_pop(gain)
+
+## Can a zombie at `from` reach a player at `to` with a swing? Walls and closed doors (world layer)
+## stop melee; furniture boxes do not (a zombie leans over a table).
+func melee_clear(from: Vector3, to: Vector3) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(from + Vector3.UP * 1.0, to + Vector3.UP * 1.0, 1, prop_box_rids())
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 var _prop_box_rids: Array[RID] = []
 func prop_box_rids() -> Array[RID]:
@@ -979,13 +988,13 @@ func throw_power(lever: Node3D) -> void:
 	hud.banner("Power restored", 3.0)
 	hud.power_flash()
 	var g := create_tween(); g.tween_interval(wave * 0.5); g.tween_callback(func(): player.add_trauma(0.35))
-	env.ambient_light_energy = 0.58
+	env.ambient_light_energy = AMBIENT_ON
 	if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	player.add_trauma(0.3)
 
 func perk_prompt(p: Player, id: String) -> String:
 	var d: Dictionary = Perks.ALL[id]
-	if not facility.power_on: return "%s — no power (throw the switch in the Generator Wing)" % d.name
+	if not facility.power_on: return "%s — no power (start the generator in the Back Alley)" % d.name
 	if p.perks.get(id, false) == true: return ""
 	if id == "lazarus" and int(p.perks.get("_lazarus_buys", 0)) >= Perks.LAZARUS_MAX: return "%s — sold out" % d.name
 	return price_text(p.economy.points, "%s (%s)" % [d.name, d.desc], d.cost)
@@ -1002,7 +1011,7 @@ func buy_perk(p: Player, id: String) -> void:
 
 func forge_prompt(p: Player) -> String:
 	if forge_busy > 0.0: return ""
-	if not facility.power_on: return "%s — no power (throw the switch in the Generator Wing)" % OverchargeForge.NAME
+	if not facility.power_on: return "%s — no power (start the generator in the Back Alley)" % OverchargeForge.NAME
 	var c := forge.cost_for(p.weapon())
 	if c < 0: return "%s — %s is fully upgraded" % [OverchargeForge.NAME, p.weapon().display_name()]
 	return price_text(p.economy.points, "Upgrade %s to Mk.%d" % [p.weapon().name, p.weapon().tier + 2], c)

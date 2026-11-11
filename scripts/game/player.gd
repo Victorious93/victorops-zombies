@@ -34,6 +34,7 @@ var yaw := 0.0
 var pitch := 0.0
 var recoil := 0.0
 var trauma := 0.0
+var shake_scale := 1.0   ## Settings > Camera shake (0 = off)
 var shake_t := 0.0
 var head: Node3D
 var cam: Camera3D
@@ -107,7 +108,7 @@ func _ready() -> void:
 	var cs := CollisionShape3D.new(); var cap := CapsuleShape3D.new(); cap.radius = 0.35; cap.height = 1.8
 	cs.shape = cap; cs.position.y = 0.9; add_child(cs)
 	head = Node3D.new(); head.position.y = 1.62; add_child(head)
-	cam = Camera3D.new(); cam.fov = 75; cam.near = 0.03; cam.far = 140; head.add_child(cam)
+	cam = Camera3D.new(); cam.fov = 75; cam.near = 0.03; cam.far = 240; head.add_child(cam)
 	cam.current = true
 	vm = Viewmodel.new(); vm.setup(cdef.get("color", Color(0.4, 0.4, 0.45))); cam.add_child(vm)
 	# gun-mounted flashlight: rides the viewmodel so the beam sways, kicks and dips on reload
@@ -339,7 +340,7 @@ func _physics_process(dt: float) -> void:
 	recoil = lerpf(recoil, 0.0, clampf(dt * GunFeel.recovery_rate(weapon().weight), 0, 1))
 	trauma = move_toward(trauma, 0.0, dt * 1.6)
 	shake_t += dt * 30.0
-	var sh := trauma * trauma
+	var sh := trauma * trauma * shake_scale
 	rotation.y = yaw
 	head.rotation.x = clampf(pitch + recoil, -1.5, 1.5) + sin(shake_t * 1.3) * sh * 0.05
 	head.rotation.z = sin(shake_t * 0.9 + 1.7) * sh * 0.06

@@ -2,41 +2,47 @@
 **By Victorious Framework**
 
 Original offline, single-player, first-person, round-based zombie survival for **Android** (first-class) and desktop.
-Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **8.0.0**, package `com.victorious.zombie`.
+Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **9.0.0**, package `com.victorious.zombie`.
 
 This README is the project's living guide (Victorious Framework): status, controls, architecture, how to run, export and verify, attribution, and what is left.
 
-## Status (v8.0.0)
+## Status (v9.0.0)
 
 | Area | State |
 |---|---|
 | Main menu → match → results → restart | Done |
-| Real 3D map, first-person movement, 3D weapons, animated 3D zombies | Done (since v1–v7) |
-| Pistol / automatic rifle / pump-action shotgun (+ SMG, LMG, rail, wonder weapons) | Done; pump-action shell reload new in v8 |
-| Rounds, points, doors, wall weapons, ammo, upgrade station, pickups, records | Done |
-| Looping map route | Done in v8 (Service Passage) |
-| Touch, keyboard + mouse, gamepad | Done; gamepad new in v8 and **not tested on hardware** |
-| Pause on focus loss / Android back | Done in v8; **not tested on a device** |
-| Android APK | Exports and signs with the steps below; **never run on a phone or emulator in this pass** |
-| Measured performance on a phone | **Not measured** — 30/60 fps are targets only |
+| **Map art direction: abandoned town (v9)** | Done: the quarantine facility is replaced by Ashgrove's Main Street. Reviewed from the first-person camera in 16 views × 2 lighting states (software OpenGL, desktop) |
+| Pistol / automatic rifle / pump-action shotgun (+ SMG, LMG, rail, wonder weapons) | Done |
+| Rounds, points, doors, wall weapons, ammo, upgrade station, pickups, records | Done; carried over unchanged onto the new map |
+| Looping routes | Two loops: Diner–Back Alley–Garage–Store (v8) and Store–Main Street–Courtyard–Side Alley (new in v9) |
+| Walls stop bullets **and zombie melee** | Melee wall check new in v9 |
+| Touch, keyboard + mouse, gamepad | Done in code and in the scripted scene check; **not tested on hardware** |
+| Settings | Look sensitivity, look curve, camera shake (new in v9), graphics preset, touch button size / opacity / layout, gyro, volumes |
+| Android APK | See *Export an Android APK* for what was built in this pass; **never run on a phone or emulator** |
+| Measured performance on a phone | **Not measured.** Desktop draw-call counts are listed under *Remaining work and limits* |
 | Co-op, more maps | Deferred |
 
 ## The game loop
 
 Menu → **START MATCH** → a 4 s countdown → round 1. Kill zombies for points (+10 hit, +60 kill, +100 headshot kill, +130 knife kill), spend them, survive the 10 s break (health refills, countdown on screen), repeat until you bleed out. The results screen shows the run, **best round** and **best score** (saved in `user://highscore.cfg`), then *Play again* or *Main menu*.
 
-**Map — Blackwater Quarantine Annex.** You start in the Intake Hall (two boarded windows, a wall weapon, the Tech Locker). Doors are bought with points and each opens exactly once:
+**Map — Ashgrove, Main Street.** An abandoned town at blue-gray dusk, mid-evacuation. You start in the **Victory Diner** (two boarded windows, a wall weapon, the Tech Locker). Doors are bought with points and each opens exactly once:
 
 ```
-            Sealed Annex (hidden)
-                  |
-   Generator Wing ──(Cold Storage 1250)── Cold Storage ── Overcharge Forge
-     750 |  power switch                      | Service Passage 1000
-   Intake Hall ──(Lab Corridor 1000)──── Lab Corridor ──(1250)── Loading Yard ──(1250)── Pump Station
-     start                               catwalk, Mystery Crate     raised dock
+        Sealed Annex (hidden)                         army container blockade
+              |                                              |
+   Back Alley ──(Garage 1250)── Hollis Auto Repair      MAIN STREET ── storefronts
+   generator + power switch     Overcharge Forge             |   (pharmacy, barber, hotel)
+     750 |                          | Service Door 1000      |
+   Victory Diner ──(1000)── Mercer's General Store ──(1250)──┘
+     start                  mezzanine, Mystery Crate         |
+                                    | Side Alley 1000    (Courtyard gate 1250)
+                                    └────────────── COURTYARD (Evacuation Point B)
 ```
 
-Intake → Generator → Cold Storage → Lab → Intake is a closed loop once the Service Passage is open, so a horde can be led round instead of backing into a dead end. Zombies enter only through the windows of rooms you have opened, never beside you.
+Two closed loops: Diner → Back Alley → Garage → Store → Diner, and Store → Main Street → Courtyard → Side Alley → Store. Zombies enter only through the boarded windows of areas you have opened: from the parking lot into the diner, and out of the neighbouring buildings everywhere else. The diner and store also have shattered display windows you can see through but not pass or shoot through.
+
+The rule ids for the areas are unchanged from v8 (`intake`, `generator`, `cold`, `lab`, `yard`, `pump`), which is why the economy, spawns and tests carried over; only the labels and the scenery changed, plus the one new `alley` door.
 
 **Weapons** (tuning in `scripts/rules/weapons.gd`):
 
@@ -49,7 +55,7 @@ Intake → Generator → Cold Storage → Lab → Intake is a closed loop once t
 Headshots ×2 (the top of the zombie's body, hit by the bullet ray itself). Walls stop bullets. Ammo refills at the wall for half the gun's price.
 Reload rules: a magazine reload is all-or-nothing and is abandoned if you switch weapons; the shotgun loads one shell at a time and firing interrupts it; a gun inside the Forge cannot be used; an empty gun in hand starts reloading by itself.
 
-**Upgrade station:** the Overcharge Forge in Cold Storage (needs the power switch in the Generator Wing): 5000 points → Mk.2 with ×2 damage, ×2 magazine, faster fire and reload, a new name and tracer colour.
+**Upgrade station:** the Overcharge Forge in the garage (needs the generator in the Back Alley running): 5000 points → Mk.2 with ×2 damage, ×2 magazine, faster fire and reload, a new name and tracer colour.
 **Pickups** (dropped by kills, 30 s): RESTOCK (all ammo), DOUBLE PAY (points ×2), ONE TOUCH, BLACKOUT, HANDYMAN.
 **Zombies:** shamblers only in rounds 1–2, joggers from 3, sprinters from 5–6, Bloaters and a Brute every 8 rounds; at most 24 alive; the last one of a round crawls. Each swing has a wind-up, and hits landing within 0.4 s of each other count once, so a stacked pack cannot delete your health in one frame. Health regenerates 4 s after the last hit.
 
@@ -80,12 +86,18 @@ In the Android Godot editor: open the folder, let it import, press Play.
 ## Verify
 
 ```bash
-godot --headless -s addons/gut/gut_cmdln.gd -gexit      # 254 rule tests (pure logic)
-godot --headless --fixed-fps 60 -- --check              # 65 scene checks, exit code 0 = all passed
+godot --headless -s addons/gut/gut_cmdln.gd -gexit      # 263 rule tests (pure logic)
+godot --headless --fixed-fps 60 -- --check              # 74 scene checks, exit code 0 = all passed
 godot --headless --fixed-fps 60 -- --sim=10             # a bot plays rounds 1-10 and prints a report
 ```
 `--check` (`scripts/game/self_check.gd`) drives the real scene without a renderer: countdown and three rounds, exact single damage, headshot region, walls blocking shots, shotgun pellets, reload and switch rules, ammo never negative, door bought once and not by holding the button, navigation before and after each door, the loop, wall weapons and ammo, the Forge, pickups, hit grace and regeneration, pause and resume, three simultaneous touches (move + aim + fire), death, saved records and restart.
-None of these prove rendering, sound, frame rate or how the touch controls feel in the hand; those need a device.
+New in v9: a zombie's swing through a wall does no damage, the Side Alley loop opens the Courtyard and closes onto Main Street, every window has a walkable spawn lane and a way in, every purchase / machine / pick-up can be walked up to, and the player capsule travels both loops without snagging on scenery.
+
+Review sheets from this pass (desktop, software OpenGL, with test walkers): `docs/v9_town_dusk.jpg`, `docs/v9_town_power.jpg`.
+
+Visual review (needs a display or `xvfb-run`; software OpenGL is enough): `godot --rendering-driver opengl3 -- --town=<dir>` saves 16 first-person views (diner, back alley, garage, store, Main Street, courtyard, Side Alley) before and after the power is on and prints draw calls per view. `VOZ_TOWN_ZOMBIES=1` stands walkers in each view, `VOZ_PRESET=low` uses the phone preset.
+
+None of these prove rendering on a phone GPU, sound, frame rate or how the touch controls feel in the hand; those need a device.
 
 ## Export an Android APK
 
@@ -105,9 +117,18 @@ Release: `--export-release` with `GODOT_ANDROID_KEYSTORE_RELEASE_*`, then `tools
 ## Architecture
 
 - `scripts/rules/` — pure, unit-tested rules and **all tuning values**: `rounds.gd` (counts, health, speed, spawn pace, cap), `weapons.gd` / `weapon_def.gd`, `economy.gd`, `facility.gd` (doors, areas, windows), `forge.gd`, `power_ups.gd`, `ammo.gd`, `loadout.gd`, `high_score.gd`, `game_settings.gd` (quality presets), `zombie_types.gd`, `gait.gd`.
-- `scripts/game/` — the 3D game: `game.gd` (match, round director, purchases, pause), `player.gd` (movement, input, guns), `zombie.gd` (navmesh AI, attacks, death), `facility_map.gd` + `scenery.gd` (map built in code, navmesh rebaked when a door opens), `hud.gd`, `touch_controls.gd`, `viewmodel.gd` / `fps_arms.gd`, `fx.gd`, `sfx.gd`, `self_check.gd`.
-- `scripts/main.gd` — menu and command-line modes (`--check`, `--sim`, `--shots`, `--clip`, `--views`, `--hud`, `--v8shots`).
+- `scripts/game/` — the 3D game: `game.gd` (match, round director, purchases, pause), `player.gd` (movement, input, guns), `zombie.gd` (navmesh AI, attacks, death), `facility_map.gd` (town shell: walls, roofs, facades, lamps, machines; navmesh rebaked when a door opens) + `town_kit.gd` (mesh batcher and building / furniture pieces) + `scenery.gd` (dressing, vehicles, signage, skyline), `hud.gd`, `touch_controls.gd`, `viewmodel.gd` / `fps_arms.gd`, `fx.gd`, `sfx.gd`, `self_check.gd`.
+- `scripts/main.gd` — menu and command-line modes (`--check`, `--sim`, `--shots`, `--clip`, `--views`, `--hud`, `--v8shots`, `--town`).
 - `tests/` — GUT tests. `tools/` — audio generators and APK signing. `legacy/libgdx/` — the earlier 2D Kotlin/libGDX version, kept as the backup of the original project.
+
+Decisions in v9 (town rebuild):
+- **Same coordinates, new town.** Every wall line, door gap, window and station keeps its v8 position, so collision, navigation, spawn safety, purchases and progression were preserved by construction rather than re-tuned. The cost: room proportions are inherited (the diner is 20 × 20 m).
+- **Batched architecture.** `TownKit` merges static boxes into one mesh per material per 10 m cell (structure) or 20 m cell (small detail, distance-culled at 36 m). 10 m cells keep every lit surface under the renderer's 8-lights-per-object limit. Collision is separate invisible boxes, so visuals never change the navmesh.
+- **Indoor render layer.** Roofed geometry is on render layer 3 and the dusk directional light skips it, so the skylight cannot leak indoors when shadows are off (the Low and Medium presets).
+- **Occlusion culling** is on (`rendering/occlusion_culling`): every solid wall run and roof is a `BoxOccluder3D`.
+- **Atmosphere without murk.** Fog density went from 0.055 to 0.008 (thin aerial haze), ambient is a readable blue-gray, the sky is a procedural gradient instead of the night HDRI, and the ground-mist and fog cards were removed. Mood comes from warm lanterns, red emergency lamps, firelight and the skyline.
+- **Original art, generated.** `tools/gen_town_art.py` draws the facades, skyline, signs, broken glass, road paint, corrugated steel and booth vinyl deterministically; no new third-party assets were added (the sandbox has no access to asset sites).
+- GL Compatibility only: shadowed omni lamps directly overhead rendered the first-person arms black through the viewmodel overlay; omni shadows are now off on that renderer (the dusk light keeps its shadow).
 
 Decisions in v8: the loop was closed with one extra door rather than re-cutting rooms; the per-shell reload keeps the old 2.4 s full-reload time (6 × 0.4 s); hit grace lives in the player so every damage source obeys it; records are stored beside the existing best run so old save files still load.
 
@@ -121,13 +142,17 @@ Decisions in v8: the loop was closed with one extra door rather than re-cutting 
 ## Remaining work and limits
 
 - Not yet run on a physical phone: frame rate, thermals, touch feel, gyro, safe-area insets, focus-loss pause and gamepad mapping are untested on hardware.
+- **Draw calls are over the project's own 300 budget in the widest views.** Measured on desktop software OpenGL at the Low preset (no shadows), 16 first-person views: 130–550 per frame, median about 270; the worst are looking the length of the Back Alley or across the diner with doors open. At High (shadows on) the same views are 330–1340. Occlusion culling and detail batching brought Low down from 160–730. Next steps if a phone shows a problem: merge the small Quaternius props per area, and atlas the kit materials.
+- Occlusion culling needs the engine's Embree module, which Godot ships for arm64 and x86_64; on a 32-bit ARM phone it silently does nothing and the draw-call numbers are the higher ones.
+- The town's room proportions are inherited from the v8 layout (see *Decisions in v9*).
+- The main-menu backdrop still shows the old concrete bay.
 - APK size: about 203 MB with both ABIs because the engine libraries are stored uncompressed; an arm64-only build with `gradle_build/compress_native_libraries=true` is about 80 MB. Texture and audio trimming is open.
 - Lighting is real-time with fake light pools, not baked.
 - Later: co-op (design in `docs/VICTORLINK64.md`), a second map, more controller polish (rebinding, menu navigation by pad).
 
 ## Assets
 
-All third-party assets are CC0; sources and licences are listed file by file in `ASSETS.md` (Quaternius and Kenney models, ambientCG textures, Poly Haven sky). Sounds and music are original and synthesised by the scripts in `tools/`. Game code is under the licence in `LICENSE`.
+All third-party assets are CC0; sources and licences are listed file by file in `ASSETS.md` (Quaternius and Kenney models, ambientCG textures). The town art in `assets/town/` is original, generated by `tools/gen_town_art.py`. Sounds and music are original and synthesised by the scripts in `tools/`. Game code is under the licence in `LICENSE`.
 
 ---
 

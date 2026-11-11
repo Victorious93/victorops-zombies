@@ -816,7 +816,7 @@ func _physics_process(dt: float) -> void:
 				windup_t -= dt; _face(pl.global_position); velocity = Vector3.ZERO
 				if windup_t <= 0.0:
 					windup_t = -1.0
-					if d < (1.25 if crawler else 1.75) and dy < 1.6 and not pl.is_downed:
+					if d < (1.25 if crawler else 1.75) and dy < 1.6 and not pl.is_downed and game.melee_clear(global_position, pl.global_position):
 						pl.take_damage((CRAWLER_DAMAGE if crawler else SWIPE_DAMAGE) * dmg_mult, global_position)
 						if ZombieTypes.is_heavy(ztype): pl.add_trauma(0.5)
 						game.sfx.play_at("zombie_attack", global_position + Vector3.UP, -2, voice_pitch)

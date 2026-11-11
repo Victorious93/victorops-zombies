@@ -82,11 +82,22 @@ func _t_shooting() -> void:
 	z.hp = 100000
 	game.hitscan(pl, Vector3(0.9, 1.66, 3), Vector3(0, 0, -1), w)
 	ok(z.hp == 100000, "a shot past the head misses")
-	# zombie behind the closed Generator Wing wall: the bullet must stop at the wall
+	# zombie behind the closed Back Alley wall: the bullet must stop at the wall
 	z.global_position = Vector3(4, 0.05, -11.5)
 	await frames(3)
 	game.hitscan(pl, Vector3(4, 1.1, -8.5), Vector3(0, 0, -1), w)
 	ok(z.hp == 100000, "walls block shots")
+	# the same zombie winds up a swing through that wall: it must not connect
+	pl.global_position = Vector3(4, 0.1, -9.2); await frames(2)
+	var hp0: float = pl.health
+	ok(not game.melee_clear(z.global_position, pl.global_position), "walls block the melee line", "gap %.1f m" % z.global_position.distance_to(pl.global_position))
+	z.set_physics_process(true); z.windup_t = 0.05
+	await frames(20)
+	z.set_physics_process(false)
+	ok(is_equal_approx(pl.health, hp0), "a swing through a wall does not hurt", "health %.0f" % pl.health)
+	z.global_position = Vector3(4, 0.05, -7.9); await frames(2)
+	ok(game.melee_clear(z.global_position, pl.global_position), "an open melee line is clear")
+	pl.global_position = Vector3(0, 0.1, 3); await frames(2)
 	# shotgun: every pellet stays inside the spread cone
 	var sg := Weapons.make("scatter")
 	z.global_position = Vector3(0, 0.05, -3); await frames(3)
@@ -141,6 +152,45 @@ func _reach(to: Vector3) -> bool:
 	var e := path[path.size() - 1]
 	return Vector2(e.x - to.x, e.z - to.z).length() < 1.2
 
+## Town integrity with every door open: each window's approach lane is walkable, every machine and
+## pick-up can be reached, and the open combat lanes have room for the player.
+func _t_town() -> void:
+	var nav := game.map.get_navigation_map()
+	var bad := []
+	for id in game.map.windows:
+		var w: WindowBarricade = game.map.windows[id]
+		for off in [Vector3(-3.5, 0, 0), Vector3.ZERO, Vector3(3.5, 0, 0)]:
+			var from: Vector3 = w.spawn_point + w.global_basis * off
+			var path := NavigationServer3D.map_get_path(nav, from, w.outside_point, true)
+			if path.is_empty() or Vector2(path[path.size() - 1].x - w.outside_point.x, path[path.size() - 1].z - w.outside_point.z).length() > 0.9 \
+					or Vector2(path[0].x - from.x, path[0].z - from.z).length() > 1.0: bad.append(id); break
+		if not _reach(w.inside_point): bad.append(id + " (inside)")
+	ok(bad.is_empty(), "every window has a clear spawn lane and a way in", str(bad))
+	bad = []
+	for it in game.interactables:
+		if HiddenRoom.inside(it.pos): continue   # the Sealed Annex is walled off until its crack is broken
+		var c: Vector3 = NavigationServer3D.map_get_closest_point(nav, Vector3(it.pos.x, 0.3, it.pos.z))
+		var gap := Vector2(c.x - it.pos.x, c.z - it.pos.z).length()
+		if gap > float(it.r) - 0.5 or not _reach(c): bad.append("%.1f,%.1f" % [it.pos.x, it.pos.z])
+	ok(bad.is_empty(), "every purchase, machine and pick-up can be walked up to", "%d checked, blocked: %s" % [game.interactables.size(), str(bad)])
+	# the player capsule can travel the main routes without snagging on scenery
+	bad = []
+	var space := game.get_world_3d().direct_space_state
+	var cap := CapsuleShape3D.new(); cap.radius = 0.35; cap.height = 1.6
+	var q := PhysicsShapeQueryParameters3D.new(); q.shape = cap; q.collision_mask = 1 | 8
+	for leg in [[Vector3(0, 0, 3), Vector3(0, 0, -9)], [Vector3(0, 0, -11), Vector3(0, 0, -17)], [Vector3(0, 0, -18), Vector3(9, 0, -18)], [Vector3(11, 0, -18), Vector3(12.4, 0, -20.5)],
+			[Vector3(12.4, 0, -20.5), Vector3(22, 0, -20.5)], [Vector3(22, 0, -20.5), Vector3(25, 0, -11)], [Vector3(25, 0, -9), Vector3(22, 0, 0)], [Vector3(22, 0, 0), Vector3(1, 0, 0)],
+			[Vector3(22, 0, 0), Vector3(27, 0, 0)], [Vector3(27, 0, 0), Vector3(31.8, 0, 2.6)], [Vector3(31.8, 0, 2.6), Vector3(36, 0, 9)], [Vector3(36, 0, 11), Vector3(32, 0, 16)],
+			[Vector3(32, 0, 16), Vector3(27.5, 0, 12)], [Vector3(27.5, 0, 12), Vector3(22.5, 0, 12)], [Vector3(22.5, 0, 12), Vector3(22.5, 0, 8)], [Vector3(22.5, 0, 8), Vector3(22, 0, 0)],
+			[Vector3(36, 0, 8), Vector3(40.2, 0, 2)], [Vector3(40.2, 0, 2), Vector3(40.0, 0, -5.4)], [Vector3(40.0, 0, -5.4), Vector3(33, 0, -6.6)], [Vector3(33, 0, -6.6), Vector3(31.8, 0, 2.6)],
+			[Vector3(39.60, 0, 20.00), Vector3(38.55, 0, 22.55)], [Vector3(38.55, 0, 22.55), Vector3(36.00, 0, 23.60)], [Vector3(36.00, 0, 23.60), Vector3(33.45, 0, 22.55)], [Vector3(33.45, 0, 22.55), Vector3(32.40, 0, 20.00)], [Vector3(32.40, 0, 20.00), Vector3(33.45, 0, 17.45)], [Vector3(33.45, 0, 17.45), Vector3(36.00, 0, 16.40)], [Vector3(36.00, 0, 16.40), Vector3(38.55, 0, 17.45)], [Vector3(38.55, 0, 17.45), Vector3(39.60, 0, 20.00)]]:
+		var n := int(leg[0].distance_to(leg[1]) / 0.4) + 1
+		for i in n + 1:
+			var p: Vector3 = leg[0].lerp(leg[1], float(i) / n)
+			q.transform = Transform3D(Basis.IDENTITY, p + Vector3(0, 1.0, 0))
+			if not space.intersect_shape(q, 1).is_empty(): bad.append("%.1f,%.1f" % [p.x, p.z]); break
+	ok(bad.is_empty(), "both escape loops are clear for the player capsule", str(bad))
+
 func _t_purchases_and_nav() -> void:
 	var lab := Vector3(18, 0.1, 4); var cold := Vector3(18, 0.1, -18); var gen := Vector3(0, 0.1, -18)
 	await frames(5)
@@ -148,11 +198,11 @@ func _t_purchases_and_nav() -> void:
 	pl.global_position = Vector3(8.4, 0.1, 0); pl.yaw = -PI / 2; pl.velocity = Vector3.ZERO
 	await frames(4)
 	pl.economy.points = 400; game._update_prompt()
-	ok(game.current_prompt == "Open Lab Corridor — 1000 points (need 600 more)", "prompt explains an unaffordable door", game.current_prompt)
+	ok(game.current_prompt == "Open General Store — 1000 points (need 600 more)", "prompt explains an unaffordable door", game.current_prompt)
 	game.player_use(pl, true, false)
 	ok(pl.economy.points == 400 and not game.facility.open_doors.has("east"), "cannot buy without the points")
 	pl.economy.points = 3000; game._update_prompt()
-	ok(game.current_prompt == "Open Lab Corridor — 1000 points", "prompt shows action and price", game.current_prompt)
+	ok(game.current_prompt == "Open General Store — 1000 points", "prompt shows action and price", game.current_prompt)
 	for i in 20: game.player_use(pl, false, true)   # button held: no purchase without a fresh press
 	ok(pl.economy.points == 3000, "holding the use button does not buy")
 	game.player_use(pl, true, false)
@@ -167,9 +217,22 @@ func _t_purchases_and_nav() -> void:
 	pl.economy.points = 5000
 	game.buy_door(pl, "cold"); game.buy_door(pl, "north")
 	await frames(240)
-	ok(_reach(gen), "the loop Intake - Generator - Cold - Lab is fully connected")
+	ok(_reach(gen), "the loop Diner - Back Alley - Garage - Store is fully connected")
 	var p0 := NavigationServer3D.map_get_path(game.map.get_navigation_map(), Vector3(0, 0.1, 3), cold, true)
 	ok(p0.size() >= 2, "navmesh path exists after doors change", "%d points" % p0.size())
+	# second loop: Store -> Side Alley -> Courtyard -> gate -> Main Street -> Store
+	var court := Vector3(40, 0.1, 24); var street := Vector3(36, 0.1, 2)
+	ok(not _reach(court) and not _reach(street), "street and courtyard stay locked")
+	pl.economy.points = 5000
+	game.buy_door(pl, "alley")
+	await frames(240)
+	ok(_reach(court) and not _reach(street) and game.facility.active_windows().has("w_pump_s"), "the Side Alley opens the Courtyard from the store")
+	game.buy_door(pl, "pump")
+	await frames(240)
+	ok(_reach(street) and not game.facility.open_doors.has("yard"), "the courtyard gate closes the loop onto Main Street")
+	game.buy_door(pl, "yard")
+	await frames(240)
+	await _t_town()
 	# wall weapon: buy once, then ammo only when not full
 	pl.economy.points = 5000
 	game.buy_wall(pl, "rifle")

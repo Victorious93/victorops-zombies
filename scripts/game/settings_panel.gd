@@ -39,6 +39,7 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	var t := Label.new(); t.text = "SETTINGS"; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	t.add_theme_font_size_override("font_size", 44); t.add_theme_color_override("font_color", Color(0.85, 0.1, 0.06)); box.add_child(t)
 	_slider(_row(box, "Look sensitivity"), 0.2, 3.0, st.sensitivity, 0.05, func(x): st.set_sensitivity(x); on_change.call())
+	_slider(_row(box, "Camera shake"), 0.0, 1.5, st.shake, 0.05, func(x): st.shake = clampf(x, 0.0, 1.5); on_change.call())
 	var gh := _row(box, "Graphics")
 	var grp := ButtonGroup.new()
 	for id in GameSettings.ORDER:
