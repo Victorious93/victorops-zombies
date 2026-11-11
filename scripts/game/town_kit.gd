@@ -9,6 +9,9 @@ const CELL := 10.0
 ## Roofed interiors render on this layer only, so the dusk skylight (which skips it) never leaks indoors
 ## when shadows are switched off on low-end phones.
 const INDOOR_LAYER := 4
+const DETAIL_CELL := 20.0
+const DETAIL_RANGE := 36.0     ## metres: small props and trim stop drawing beyond this
+const BIG := 3.0               ## a box with a side this long counts as structure
 ## Box faces: [normal, u axis, v axis] with u x v = normal (v is "up" on the four sides).
 const FACES := [
 	[Vector3(0, 0, 1), Vector3(1, 0, 0), Vector3(0, 1, 0)], [Vector3(0, 0, -1), Vector3(-1, 0, 0), Vector3(0, 1, 0)],
@@ -28,11 +31,14 @@ var mesh_count := 0
 func _init(m: Node3D) -> void:
 	map = m
 
-func _tool(mat: Material, at: Vector3, shadow: bool) -> SurfaceTool:
-	var key := "%d|%d|%d|%d|%d" % [mat.get_instance_id(), floori(at.x / CELL), floori(at.z / CELL), int(outdoor), int(shadow)]
+## `big` pieces (walls, floors, roofs, facades: the surfaces lamps light) batch per 10 m cell so no mesh
+## exceeds the per-object light limit. Small detail batches per 20 m cell and is distance-culled.
+func _tool(mat: Material, at: Vector3, shadow: bool, big := true) -> SurfaceTool:
+	var cell := CELL if big else DETAIL_CELL
+	var key := "%d|%d|%d|%d|%d|%d" % [mat.get_instance_id(), floori(at.x / cell), floori(at.z / cell), int(outdoor), int(shadow), int(big)]
 	if not _st.has(key):
 		var st := SurfaceTool.new(); st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		_st[key] = st; _info[key] = [mat, outdoor, shadow]
+		_st[key] = st; _info[key] = [mat, outdoor, shadow, big]
 	return _st[key]
 
 ## Axis-aligned (optionally yawed) box. uv_m > 0 writes metre-based UVs (u along the face, v down from
@@ -42,7 +48,7 @@ func box(mat: Material, size: Vector3, pos: Vector3, yaw := 0.0, uv_m := Vector2
 	box_xf(mat, size, xf, uv_m, shadow)
 
 func box_xf(mat: Material, size: Vector3, xf: Transform3D, uv_m := Vector2.ZERO, shadow := true) -> void:
-	var st := _tool(mat, xf.origin, shadow)
+	var st := _tool(mat, xf.origin, shadow, maxf(size.x, maxf(size.y, size.z)) >= BIG)
 	var h := size * 0.5
 	for f in FACES:
 		var n: Vector3 = f[0]; var u: Vector3 = f[1]; var v: Vector3 = f[2]
@@ -59,7 +65,7 @@ func box_xf(mat: Material, size: Vector3, xf: Transform3D, uv_m := Vector2.ZERO,
 
 ## Single quad facing +Z of xf (signs, posters, glass). uv = atlas rect in 0..1.
 func quad(mat: Material, w: float, h: float, xf: Transform3D, uv := Rect2(0, 0, 1, 1), shadow := false) -> void:
-	var st := _tool(mat, xf.origin, shadow)
+	var st := _tool(mat, xf.origin, shadow, maxf(w, h) >= BIG)
 	var a := Vector3(-w / 2, -h / 2, 0); var b := Vector3(w / 2, -h / 2, 0); var c := Vector3(w / 2, h / 2, 0); var d := Vector3(-w / 2, h / 2, 0)
 	var ua := Vector2(uv.position.x, uv.end.y); var ub := uv.end; var uc := Vector2(uv.end.x, uv.position.y); var ud := uv.position
 	var n := xf.basis.z.normalized()
@@ -69,7 +75,7 @@ func quad(mat: Material, w: float, h: float, xf: Transform3D, uv := Rect2(0, 0, 
 ## Upright (or tilted) cylinder with a top cap: posts, stools, drums, fountain rims.
 func cyl(mat: Material, r: float, h: float, pos: Vector3, segs := 10, shadow := true, r_top := -1.0, tilt := Vector3.ZERO) -> void:
 	var xf := Transform3D(Basis.from_euler(tilt), pos)
-	var st := _tool(mat, pos, shadow)
+	var st := _tool(mat, pos, shadow, maxf(r * 2.0, h) >= BIG)
 	var rt := r if r_top < 0.0 else r_top
 	for i in segs:
 		var a0 := TAU * i / segs; var a1 := TAU * (i + 1) / segs
@@ -92,6 +98,7 @@ func commit() -> void:
 		var mi := MeshInstance3D.new(); mi.mesh = mesh; mi.name = "Town_%d" % mesh_count
 		mi.layers = 1 if inf[1] else INDOOR_LAYER
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if inf[2] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		if not inf[3]: mi.visibility_range_end = DETAIL_RANGE; mi.visibility_range_end_margin = 2.0
 		map.add_child(mi); mesh_count += 1
 	_st.clear(); _info.clear()
 

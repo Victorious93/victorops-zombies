@@ -183,6 +183,12 @@ func box(size: Vector3, pos: Vector3, mat: Material, collide := true, layer := 1
 	sb.add_child(cs); sb.add_child(mi); parent.add_child(sb)
 	return sb
 
+## Occlusion culling: solid walls and roofs hide whatever is behind them, so standing in the diner
+## does not draw the street. Boxes are slightly thinner than the wall so nothing visible is culled.
+func occluder(size: Vector3, pos: Vector3) -> void:
+	var oi := OccluderInstance3D.new(); var bo := BoxOccluder3D.new(); bo.size = size
+	oi.occluder = bo; oi.position = pos; add_child(oi)
+
 ## Invisible collision box (world geometry whose visuals are batched by the kit).
 func collider(size: Vector3, pos: Vector3, yaw := 0.0, layer := 1) -> StaticBody3D:
 	var sb := StaticBody3D.new(); sb.collision_layer = layer; sb.collision_mask = 0; sb.position = pos; sb.rotation.y = yaw
@@ -242,6 +248,7 @@ func _wall_piece(a: Vector2, dir: Vector2, along_x: bool, s0: float, s1: float, 
 	var len := s1 - s0
 	var size := Vector3(len, y1 - y0, T) if along_x else Vector3(T, y1 - y0, len)
 	collider(size, Vector3(mid.x, (y0 + y1) / 2.0, mid.y))
+	if len > 1.0 and y1 - y0 > 2.5: occluder(size * Vector3(1.0 if along_x else 0.6, 1, 0.6 if along_x else 1.0), Vector3(mid.x, (y0 + y1) / 2.0, mid.y))
 	var n := Vector3(0, 0, 1) if along_x else Vector3(1, 0, 0)
 	var core: Material = style.get("core", mats.brick)
 	# visuals in <= 8 m runs so no mesh collects more than the renderer's per-object light limit
@@ -435,6 +442,7 @@ func roof(r: Rect2, ceil_mat: Material, band: Material, cap: Material, band_h :=
 	for i in nx:
 		for j in nz:
 			kit.box(ceil_mat, Vector3(r.size.x / nx, 0.3, r.size.y / nz), Vector3(r.position.x + (i + 0.5) * r.size.x / nx, H + 0.15, r.position.y + (j + 0.5) * r.size.y / nz), 0.0, uv_m)
+	occluder(Vector3(r.size.x - 0.4, 0.2, r.size.y - 0.4), Vector3(r.get_center().x, H + 0.15, r.get_center().y))
 	kit.outdoor = true
 	var c := r.get_center()
 	for e in [[Vector3(r.size.x + 0.7, band_h, 0.3), Vector3(c.x, H + band_h / 2.0, r.position.y - 0.2)], [Vector3(r.size.x + 0.7, band_h, 0.3), Vector3(c.x, H + band_h / 2.0, r.end.y + 0.2)],
@@ -733,18 +741,16 @@ func _dress(at: Vector3, r: float) -> void:
 		blood.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; blood.albedo_texture = _blood_tex()
 		_dress_mats = {rub = rub, wood = wood, paper = paper, blood = blood}
 	var rr := RandomNumberGenerator.new(); rr.seed = int(at.x * 13 + at.z * 7 + 5)
+	kit.outdoor = not in_roofed(at.x, at.z)
 	for i in 7:   # rubble chunks
 		var s := rr.randf_range(0.08, 0.22)
-		var b := box(Vector3(s * rr.randf_range(1, 1.8), s * 0.6, s), at + Vector3(rr.randf_range(-r, r), s * 0.3, rr.randf_range(-r, r)), _dress_mats.rub, false)
-		b.rotation = Vector3(rr.randf_range(-0.3, 0.3), rr.randf() * TAU, rr.randf_range(-0.3, 0.3))
+		kit.box(_dress_mats.rub, Vector3(s * rr.randf_range(1, 1.8), s * 0.6, s), at + Vector3(rr.randf_range(-r, r), s * 0.3 + 0.03, rr.randf_range(-r, r)), rr.randf() * TAU, Vector2.ZERO, false, Vector3(rr.randf_range(-0.3, 0.3), 0, rr.randf_range(-0.3, 0.3)))
 	for i in 2:   # loose planks
-		var b := box(Vector3(1.1, 0.04, 0.14), at + Vector3(rr.randf_range(-r, r), 0.03, rr.randf_range(-r, r)), _dress_mats.wood, false)
-		b.rotation = Vector3(0, rr.randf() * TAU, rr.randf_range(-0.05, 0.05))
+		kit.box(_dress_mats.wood, Vector3(1.1, 0.04, 0.14), at + Vector3(rr.randf_range(-r, r), 0.06, rr.randf_range(-r, r)), rr.randf() * TAU, Vector2.ZERO, false)
 	for i in 4:   # scattered papers
-		var b := box(Vector3(0.21, 0.004, 0.3), at + Vector3(rr.randf_range(-r, r), 0.006, rr.randf_range(-r, r)), _dress_mats.paper, false)
-		b.rotation.y = rr.randf() * TAU
+		kit.box(_dress_mats.paper, Vector3(0.21, 0.004, 0.3), at + Vector3(rr.randf_range(-r, r), 0.036, rr.randf_range(-r, r)), rr.randf() * TAU, Vector2.ZERO, false)
 	# drag trail: a line of fading smears
-	var p0 := at + Vector3(rr.randf_range(-r, r) * 0.6, 0.008, rr.randf_range(-r, r) * 0.6)
+	var p0 := at + Vector3(rr.randf_range(-r, r) * 0.6, 0.04, rr.randf_range(-r, r) * 0.6)
 	var dir := Vector3(cos(rr.randf() * TAU), 0, sin(rr.randf() * TAU))
 	for k in 6:
 		var mi := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2(0.55 - k * 0.05, 0.75)

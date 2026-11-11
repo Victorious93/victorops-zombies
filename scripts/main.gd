@@ -226,6 +226,12 @@ func _town(dir: String) -> void:
 	start_game()
 	game.auto_rounds = false; game.allow_tutorial = false; game.god_mode = true
 	await _wait(12)
+	if OS.get_environment("VOZ_PRESET") != "": game.settings.set_preset(OS.get_environment("VOZ_PRESET")); game.apply_settings()
+	var kinds := {}
+	for n in game.map.find_children("*", "GeometryInstance3D", true, false):
+		var key: String = "town" if n.name.begins_with("Town_") else ("mm" if n is MultiMeshInstance3D else ("particles" if n is CPUParticles3D else ("label" if n is Label3D else "mesh")))
+		kinds[key] = kinds.get(key, 0) + 1
+	print("[town] geometry nodes: ", kinds)
 	for d in Facility.DOORS: game.map.open_door(d); game.facility.open_doors[d] = true
 	var pl := game.player
 	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
@@ -248,6 +254,8 @@ func _town(dir: String) -> void:
 					var dv: Vector3 = v[1] - z.global_position; z.rotation.y = atan2(-dv.x, -dv.z); z.model.rotation.y = PI; z._locomotion(); zs.append(z)
 			await _wait(10)
 			await _snap(dir, "%s_%s.png" % [v[0], "power" if pass_i == 1 else "dusk"])
+			print("[town] %s %s draw_calls=%d primitives=%d objects=%d" % [v[0], "power" if pass_i == 1 else "dusk", RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_DRAW_CALLS_IN_FRAME),
+				RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_PRIMITIVES_IN_FRAME), RenderingServer.get_rendering_info(RenderingServer.RENDERING_INFO_TOTAL_OBJECTS_IN_FRAME)])
 			for z in zs:
 				if is_instance_valid(z): z.queue_free()
 			game.zombies.clear()
