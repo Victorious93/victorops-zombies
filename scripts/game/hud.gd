@@ -74,6 +74,10 @@ var gear: GearHud   ## v7.13 pak ring + backpack bar
 
 var count_lbl: Label
 var hp_lbl: Label
+var obj_lbl: Label      ## v10 objective tracker (top centre)
+var area_lbl: Label     ## v10 "entering" call-out
+var area_t := 0.0
+var info_hold := 0.0    ## seconds an info line stays fully visible before it fades
 
 func _lbl(size: int, color := Color.WHITE, align := HORIZONTAL_ALIGNMENT_LEFT) -> Label:
 	var l := Label.new()
@@ -137,6 +141,20 @@ func _ready() -> void:
 	gear = GearHud.new(); gear.game = game; add_child(gear)
 	count_lbl = _lbl(30, Color(0.85, 0.95, 1.0), HORIZONTAL_ALIGNMENT_CENTER); _place(count_lbl, Control.PRESET_CENTER_TOP, Vector2(0, 64), Vector2(500, 44))
 	hp_lbl = _lbl(18, Color(1.0, 0.8, 0.85)); _place(hp_lbl, Control.PRESET_BOTTOM_LEFT, Vector2(300, -96), Vector2(120, 26))
+	obj_lbl = _lbl(20, Color(1.0, 0.82, 0.35), HORIZONTAL_ALIGNMENT_CENTER); _place(obj_lbl, Control.PRESET_CENTER_TOP, Vector2(0, 14), Vector2(900, 30))
+	area_lbl = _lbl(34, Color(0.92, 0.96, 1.0), HORIZONTAL_ALIGNMENT_CENTER); _place(area_lbl, Control.PRESET_CENTER_TOP, Vector2(0, 118), Vector2(900, 84))
+	area_lbl.modulate.a = 0.0
+	info_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; info_lbl.vertical_alignment = VERTICAL_ALIGNMENT_TOP; info_lbl.size.y = 90
+
+## v10 objective tracker: one amber line at the top of the screen ("" hides it).
+func set_objective(text: String) -> void:
+	if obj_lbl == null: return
+	var t := ("▸ " + text) if text != "" else ""
+	if obj_lbl.text != t: obj_lbl.text = t
+
+## v10: room name + district the first time a room is entered.
+func area_callout(room: String, district: String) -> void:
+	area_lbl.text = "%s\n%s" % [room.to_upper(), district]; area_t = 3.5
 
 ## Touch screens: move bars/ammo away from the stick and button clusters.
 func set_touch_layout(on: bool) -> void:
@@ -371,8 +389,10 @@ func round_flash() -> void:
 func show_pause(on: bool) -> void:
 	if pause_panel: pause_panel.queue_free(); pause_panel = null
 	if not on: return
+	var touch_on: bool = game.touch != null and game.touch.visible
 	pause_panel = SettingsPanel.make(game.settings, func(): game.apply_settings(); Game.save_settings(game.settings),
-		[["Resume", game.toggle_pause], ["Main menu", game.to_menu]])
+		[["Resume", game.toggle_pause], ["How to play", func(): pause_panel.add_child(HelpPanel.make(touch_on))], ["Restart match", game.restart], ["Main menu", game.to_menu]],
+		"PAUSED", game.status_lines())
 	add_child(pause_panel)
 
 func banner(text: String, dur := 3.0) -> void:
@@ -381,8 +401,8 @@ func banner(text: String, dur := 3.0) -> void:
 func bark(text: String) -> void:
 	bark_lbl.text = text; bark_t = Barks.DURATION
 
-func info(text: String) -> void:
-	info_lbl.text = text; info_lbl.modulate.a = 1.0
+func info(text: String, hold := 1.0) -> void:
+	info_lbl.text = text; info_lbl.modulate.a = 1.0; info_hold = hold
 
 var dmg_marks: Array = []  ## [{from: Vector3, t: float}]
 var desat := 0.0
@@ -421,7 +441,7 @@ func _process(dt: float) -> void:
 	stand_lbl.visible = p.is_downed
 	if p.is_downed:
 		stand_lbl.text = ("GETTING UP  %.1f" if p.last_stand.will_revive else "BLEEDING OUT  %.1f") % maxf(p.last_stand.left, 0.0)
-	stamina_bar.max_value = p.STAMINA_MAX * (1.6 if p.perks.get("fleetfoot", false) else 1.0); stamina_bar.value = p.stamina
+	stamina_bar.max_value = p.stamina_max(); stamina_bar.value = p.stamina
 	stamina_bar.visible = stamina_bar.value < stamina_bar.max_value - 0.01
 	weapon_lbl.text = p.weapon().display_name()
 	var pk: Array = []
@@ -437,6 +457,7 @@ func _process(dt: float) -> void:
 	var touch_on: bool = game.touch != null and game.touch.visible
 	prompt_lbl.text = "" if pr == "" else ("%s %s" % ["[USE]" if touch_on else "[E]", pr])
 	count_lbl.text = countdown_text(game.round + 1, game.intermission) if game.auto_rounds and not game.over else ""
+	obj_lbl.visible = not game.over; area_lbl.visible = not game.over
 	hit_t = maxf(0.0, hit_t - dt)
 	set_touch_layout(game.touch != null and game.touch.visible)
 	hp_lbl.text = "%d HP" % ceili(p.health)
@@ -458,7 +479,9 @@ func _process(dt: float) -> void:
 	grenade_lbl.text = "Grenades %d  ·  Knife [V]" % p.equipment.grenades if not touch_layout else "Grenades %d" % p.equipment.grenades
 	banner_t -= dt; banner_lbl.visible = banner_t > 0
 	bark_t -= dt; bark_lbl.visible = bark_t > 0
-	info_lbl.modulate.a = maxf(0.0, info_lbl.modulate.a - dt * 0.5)
+	info_hold -= dt
+	if info_hold <= 0.0: info_lbl.modulate.a = maxf(0.0, info_lbl.modulate.a - dt * 0.5)
+	area_t = maxf(0.0, area_t - dt); area_lbl.modulate.a = clampf(area_t / 0.8, 0.0, 1.0)
 	dmg_t = maxf(0.0, dmg_t - dt)
 	for m in dmg_marks: m.t -= dt
 	dmg_marks = dmg_marks.filter(func(m): return m.t > 0.0)
@@ -493,7 +516,17 @@ func boss_bar(z) -> void:
 		boss_fill = ColorRect.new(); boss_fill.color = Color(0.7, 0.2, 0.9); boss_fill.position = Vector2(2, 24); boss_fill.size = Vector2(596, 10); boss_root.add_child(boss_fill)
 		boss_lbl = _lbl(22, Color(0.85, 0.6, 1.0), HORIZONTAL_ALIGNMENT_CENTER); boss_lbl.text = "THE WARDEN"; boss_lbl.size = Vector2(600, 22); boss_root.add_child(boss_lbl)
 	boss_root.visible = true
+	var brute: bool = z.ztype == "brute"
+	boss_lbl.text = elite_bar_text(z.ztype, z.exposed, z.slam_t > 0.0)
+	boss_fill.color = (Color(1.0, 0.75, 0.2) if z.exposed else Color(0.95, 0.4, 0.1)) if brute else Color(0.7, 0.2, 0.9)
+	boss_lbl.add_theme_color_override("font_color", Color(1.0, 0.7, 0.35) if brute else Color(0.85, 0.6, 1.0))
 	boss_fill.size.x = 596.0 * clampf(float(z.hp) / maxf(1.0, float(z.max_hp)), 0.0, 1.0)
+
+static func elite_bar_text(type: String, exposed: bool, slamming: bool) -> String:
+	var n := "THE WARDEN" if type == "warden" else "BRUTE"
+	if slamming: return n + "  ·  SLAM — MOVE!"
+	if exposed: return n + "  ·  WINDED — armour down"
+	return n + ("  ·  aim for the head" if type == "brute" else "")
 
 ## "Round 4 in 7" during the break between rounds (and before round 1).
 static func countdown_text(next_round: int, left: float) -> String:
@@ -502,7 +535,7 @@ static func countdown_text(next_round: int, left: float) -> String:
 static func records_text(rec: Dictionary) -> String:
 	return "Best round %d  ·  Best score %d" % [int(rec.get("round", 0)), int(rec.get("score", 0))]
 
-func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, is_best := false, records := {}, new_round := false, new_score := false) -> void:
+func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, is_best := false, records := {}, new_round := false, new_score := false, totals := {}) -> void:
 	over_panel = VBoxContainer.new()
 	over_panel.alignment = BoxContainer.ALIGNMENT_CENTER
 	over_panel.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -522,6 +555,8 @@ func show_game_over(round: int, kills: int, stats: RunStats = null, best := {}, 
 	over_panel.add_child(h)
 	if not records.is_empty():
 		var rl := _lbl(24, Color(0.75, 0.9, 1.0), HORIZONTAL_ALIGNMENT_CENTER); rl.text = records_text(records); over_panel.add_child(rl)
+	if not totals.is_empty():
+		var tl := _lbl(20, Color(0.7, 0.8, 0.85), HORIZONTAL_ALIGNMENT_CENTER); tl.text = HighScore.totals_text(totals); over_panel.add_child(tl)
 	var brand := _lbl(18, Color(0.6, 0.6, 0.65), HORIZONTAL_ALIGNMENT_CENTER); brand.text = "VICTOR ZOMBIES  ·  By Victorious Framework"; over_panel.add_child(brand)
 	var q := _lbl(22, Color(0.8, 0.8, 0.8), HORIZONTAL_ALIGNMENT_CENTER); q.text = Barks.GAME_OVER; over_panel.add_child(q)
 	for pair in [["Play again", game.restart], ["Main menu", game.to_menu]]:

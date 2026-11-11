@@ -9,6 +9,9 @@ var time := 0.0
 var parts := 0
 var pact := false
 var bosses := 0
+var elites := 0        ## Brutes killed
+var power := false     ## generator started this match
+var districts := 1     ## districts opened (1-3)
 
 static func fmt_time(sec: float) -> String:
 	var s := int(sec)
@@ -23,5 +26,5 @@ func lines(round: int) -> Array:
 		"Kills  %d   ·   Headshots  %d" % [kills, headshots],
 		"Points earned  %d" % points_earned,
 		"Downs  %d   ·   Time  %s" % [downs, fmt_time(time)],
-		"Harp parts  %d/3   ·   Pact  %s   ·   Wardens slain  %d" % [parts, "sealed" if pact else "unsealed", bosses],
+		"Districts  %d/3   ·   Power  %s   ·   Brutes slain  %d   ·   Wardens  %d" % [districts, "restored" if power else "off", elites, bosses],
 	]

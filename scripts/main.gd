@@ -27,6 +27,7 @@ func _ready() -> void:
 	elif args.has("check"): _check()
 	elif args.has("v8shots"): _v8shots(args["v8shots"])
 	elif args.has("town"): _town(args["town"])
+	elif args.has("v10shots"): _v10shots(args["v10shots"])
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -78,7 +79,7 @@ func _menu_btn(text: String, size: int, w: float, h: float) -> Button:
 
 func show_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	get_tree().paused = false
+	get_tree().paused = false; Engine.time_scale = 1.0
 	if game: game.queue_free(); game = null
 	Game.load_settings(settings)
 	_build_diorama()
@@ -121,6 +122,8 @@ func show_menu() -> void:
 		panel.get_child(0).add_child(close)
 		close.pressed.connect(panel.queue_free)
 		menu.add_child(panel))
+	var hb := _menu_btn("How to play", 24, 220, 54); row.add_child(hb)
+	hb.pressed.connect(func(): menu.add_child(HelpPanel.make(args.has("touch") or DisplayServer.is_touchscreen_available() or OS.has_feature("mobile"))))
 	var ab := _menu_btn("Armory", 24, 220, 54); row.add_child(ab)
 	ab.pressed.connect(_show_armory)
 	if not OS.has_feature("mobile") and not OS.has_feature("web"):
@@ -131,6 +134,12 @@ func show_menu() -> void:
 	rec.add_theme_font_size_override("font_size", 22); rec.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
 	rec.add_theme_color_override("font_outline_color", Color.BLACK); rec.add_theme_constant_override("outline_size", 6)
 	box.add_child(rec)
+	var tot := hs.load_totals()
+	if int(tot.matches) > 0:
+		var tl := Label.new(); tl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER; tl.text = HighScore.totals_text(tot)
+		tl.add_theme_font_size_override("font_size", 18); tl.add_theme_color_override("font_color", Color(0.75, 0.9, 1.0))
+		tl.add_theme_color_override("font_outline_color", Color.BLACK); tl.add_theme_constant_override("outline_size", 5)
+		box.add_child(tl)
 	var note := Label.new(); note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	note.text = "Offline single-player  ·  touch, keyboard + mouse or gamepad  ·  v%s" % ProjectSettings.get_setting("application/config/version", "")
 	note.add_theme_font_size_override("font_size", 18); note.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
@@ -160,6 +169,7 @@ func _show_armory() -> void:
 func start_game() -> void:
 	if menu: menu.queue_free(); menu = null
 	if diorama: diorama.queue_free(); diorama = null
+	get_tree().paused = false; Engine.time_scale = 1.0   # nothing from the last match leaks into the next
 	if game: game.queue_free()
 	game = Game.new(); game.character_id = selected; game.force_touch = args.has("touch")
 	game.auto_pause = not _scripted()
@@ -169,9 +179,73 @@ func start_game() -> void:
 
 ## True for capture / bot runs started from the command line: those must never auto-pause.
 func _scripted() -> bool:
-	for k in ["shots", "sim", "probe", "clip", "views", "hud", "check", "v8shots", "town"]:
+	for k in ["shots", "sim", "probe", "clip", "views", "hud", "check", "v8shots", "town", "v10shots"]:
 		if args.has(k): return true
 	return false
+
+## --v10shots=<dir>: review captures for v10 — menu, How to play, the power objective (before / after),
+## the crate sign, a Brute mid-slam and winded, the pause status screen and the results screen.
+func _v10shots(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	if OS.get_environment("VOZ_TOUCH") != "": args["touch"] = "1"
+	var brute_only := OS.get_environment("VOZ_BRUTE_ONLY") != ""
+	if not brute_only:
+		await _wait(30); await _snap(dir, "v10_01_menu.png")
+		var help := HelpPanel.make(args.has("touch")); menu.add_child(help)
+		await _wait(6); await _snap(dir, "v10_02_how_to_play.png")
+	start_game()
+	game.allow_tutorial = false; game.god_mode = true; game.auto_rounds = false
+	var pl := game.player
+	await _wait(20)
+	if OS.get_environment("VOZ_PRESET") != "": game.settings.set_preset(OS.get_environment("VOZ_PRESET")); game.apply_settings()
+	for d in Facility.DOORS: game.map.open_door(d); game.facility.open_doors[d] = true; game.facility.open_areas[Facility.DOORS[d].opens] = true
+	pl.economy.points = 4200
+	if not brute_only:
+		pl.global_position = Vector3(0.6, 0.1, -4.0); pl.yaw = 0.0; pl.pitch = 0.12; pl.velocity = Vector3.ZERO
+		await _wait(90); await _snap(dir, "v10_03_diner_no_power_sign.png")
+		pl.global_position = Vector3(1.0, 0.1, -17.5); pl.yaw = -0.12; pl.pitch = 0.02
+		await _wait(30); await _snap(dir, "v10_04_alley_cable_generator.png")
+		pl.global_position = Vector3(3, 0.1, -22.2); pl.yaw = 0.0; pl.pitch = 0.1
+		game.facility.cranks = 2
+		await _wait(20); await _snap(dir, "v10_05_crank_prompt.png")
+		game.throw_power(game.map.get_node_or_null("Lever") if game.map.has_node("Lever") else Node3D.new())
+		await _wait(200); await _snap(dir, "v10_06_power_on.png")
+		pl.global_position = Vector3(16, 0.1, 2.8); pl.yaw = PI; pl.pitch = 0.1
+		await _wait(30); await _snap(dir, "v10_07_crate_sign.png")
+	# Brute on Main Street: armoured approach, slam ring, winded
+	game.round = 4
+	pl.global_position = Vector3(0, 0.1, 4.5); pl.yaw = 0.0; pl.pitch = -0.02
+	var z: Zombie = game.spawn_zombie("", "brute")
+	z.drop_in = false; z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
+	z.global_position = Vector3(0, 0.05, -1.0); z.rotation.y = PI; z.slam_cd = 99.0; z.set_physics_process(false); z._locomotion()
+	game.elite = z
+	await _wait(30); await _snap(dir, "v10_08_brute.png")
+	z.set_physics_process(true); z.slam_cd = 0.0
+	pl.global_position = Vector3(0, 0.1, 2.6)
+	var n := 0
+	while z.slam_t <= 0.0 and n < 300: await _wait(1); n += 1
+	z.set_physics_process(false); z.slam_t = ZombieTypes.SLAM_WINDUP * 0.4; z._slam_ring_update()   # hold the telegraph for the capture
+	pl.pitch = -0.25
+	await _wait(6); await _snap(dir, "v10_09_brute_slam_ring.png")
+	z.set_physics_process(true); pl.pitch = -0.02
+	pl.global_position = Vector3(0, 0.1, 4.6)
+	n = 0
+	while z.winded_t <= 0.0 and n < 300: await _wait(1); n += 1
+	await _wait(8); await _snap(dir, "v10_10_brute_winded.png")
+	z.queue_free(); game.zombies.clear(); game.elite = null
+	if brute_only: get_tree().quit(); return
+	pl.perks["ironhide"] = true; pl.perks["fleetfoot"] = true; pl.set_max_health_from_perks()
+	game.collect_power("doublepay")
+	await _wait(10)
+	game.toggle_pause()
+	await _wait(8); await _snap(dir, "v10_11_pause_status.png")
+	game.toggle_pause()
+	game.round = 9; game.kills = 187; game.stats.kills = 187; game.stats.headshots = 64; game.stats.points_earned = 21450; game.stats.elites = 2
+	game.high = HighScore.new("user://v10shots_highscore.cfg")
+	game.on_player_bled_out(pl)
+	await _wait(8); await _snap(dir, "v10_12_results.png")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://v10shots_highscore.cfg"))
+	get_tree().quit()
 
 ## --v8shots=<dir>: menu, the Service Passage door prompt, the between-round countdown and the results screen.
 func _v8shots(dir: String) -> void:

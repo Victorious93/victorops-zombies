@@ -20,3 +20,4 @@ android/
 *.idsig
 *.apk
 *.aab
+docs/*.import

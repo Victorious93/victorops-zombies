@@ -45,6 +45,14 @@ var stagger_t := 0.0
 var lunge_cd := 1.5
 var lunge_t := 0.0
 var windup_t := -1.0     ## >0: an attack is winding up and lands when it reaches 0
+## v10 elite ground slam (Brute / Warden), see ZombieTypes.SLAM_*
+var type_scale := Vector3.ONE   ## the type's silhouette scale (kept through hit flashes)
+var slam_cd := 3.0       ## seconds until the next slam may start
+var slam_t := -1.0       ## >0: slam winding up (red ring growing on the floor)
+var winded_t := 0.0      ## >0: recovering after a slam; armour is down
+var exposed := false     ## armour does nothing while true
+var slam_ring: MeshInstance3D
+var weak_light: OmniLight3D
 const RISE_TIME := 1.5   ## v7.10 seconds to claw out of the ground
 var rise_kick := 0.0
 ## v7.10 ground-rise height for progress k (0 buried → 1 standing): three jolting heaves, eased out.
@@ -122,6 +130,7 @@ func _ready() -> void:
 		cap.radius = 0.5; cap.height = HEIGHT * sc; shape.position.y = HEIGHT * sc / 2
 	elif ztype == "bloater":
 		cap.radius = 0.48
+	type_scale = model.scale
 	model.rotation.y = PI  # model faces +Z; gameplay forward is -Z
 	add_child(model)
 	for key in ["Walk", "Run", "Run_Arms", "Punch", "Attack", "Death", "Crawl", "HitReact", "HitRecieve", "Idle", "Idle_Attack", "Run_Attack"]:
@@ -250,8 +259,12 @@ func _dress() -> void:
 	glow.emission = Color(0.55, 1.0, 0.15); glow.emission_energy_multiplier = 1.6
 	var parts: Array = []
 	if ZombieTypes.is_heavy(ztype):
-		parts = [["Head", Vector3(0.36, 0.18, 0.38), Vector3(0, 0.22, 0), plate], ["Shoulder.L", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate],
-			["Shoulder.R", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate], ["Torso", Vector3(0.5, 0.36, 0.14), Vector3(0, 0.15, 0.17), plate]]
+		# v10: no helmet. The bare, ember-lit skull is the weak point; everything else is plated.
+		# The rig's head is wider than any plate, so the weak point is drawn as a hot halo around it.
+		var ember := StandardMaterial3D.new(); ember.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ember.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; ember.albedo_color = Color(1.0, 0.42, 0.06, 0.3)
+		parts = [["Head", Vector3(1.0, 1.0, 1.0), Vector3(0, 0.3, 0.02), ember], ["Torso", Vector3(0.62, 0.36, 0.12), Vector3(0, 0.12, -0.26), plate], ["Shoulder.L", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate],
+			["Shoulder.R", Vector3(0.3, 0.12, 0.34), Vector3(0, 0.08, 0), plate], ["Torso", Vector3(0.62, 0.4, 0.14), Vector3(0, 0.12, 0.3), plate]]
 	else:
 		for i in 6: parts.append(["Body", Vector3.ONE * randf_range(0.12, 0.2), Vector3(randf_range(-0.2, 0.2), randf_range(0.1, 0.55), randf_range(0.05, 0.22)), glow])
 	for pt in parts:
@@ -259,13 +272,18 @@ func _dress() -> void:
 		if skel and skel.find_bone(pt[0]) >= 0:
 			var ba := BoneAttachment3D.new(); ba.bone_name = pt[0]; skel.add_child(ba); holder = ba
 		var mi := MeshInstance3D.new()
-		if ZombieTypes.is_heavy(ztype):
+		if ZombieTypes.is_heavy(ztype) and pt[0] == "Head":
+			var hm := SphereMesh.new(); hm.radius = pt[1].x / 2; hm.height = pt[1].x; hm.radial_segments = 20; hm.rings = 10; mi.mesh = hm
+		elif ZombieTypes.is_heavy(ztype):
 			var bm := BoxMesh.new(); bm.size = pt[1]; mi.mesh = bm
 		else:
 			var sm := SphereMesh.new(); sm.radius = pt[1].x / 2; sm.height = pt[1].x; sm.radial_segments = 8; sm.rings = 4; mi.mesh = sm
 			pustules.append(mi)
 		mi.material_override = pt[3]
-		if holder != root: mi.scale = inv; mi.position = pt[2] * inv
+		# v10: heavy parts are sized in model metres and grow with the model, so they stay outside the
+		# enlarged body (before, they kept their absolute size and sat hidden inside a scaled-up Brute)
+		var grow: Vector3 = model.scale if ZombieTypes.is_heavy(ztype) else Vector3.ONE
+		if holder != root: mi.scale = inv * grow; mi.position = pt[2] * inv * grow
 		else: mi.position = pt[2]
 		mi.set_meta("base_scale", mi.scale)
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -273,6 +291,9 @@ func _dress() -> void:
 	if ztype == "bloater":
 		var l := OmniLight3D.new(); l.light_color = Color(0.5, 1.0, 0.2); l.light_energy = 0.8; l.omni_range = 2.5
 		l.position = Vector3(0, 1.0, 0); add_child(l)
+	if ZombieTypes.is_heavy(ztype):
+		weak_light = OmniLight3D.new(); weak_light.light_color = Color(1.0, 0.45, 0.1); weak_light.light_energy = 1.1; weak_light.omni_range = 2.6
+		weak_light.position = Vector3(0, head_y() + 0.25, 0); add_child(weak_light)
 
 ## v7.4 variety: procedural (original) clothing on light zombies — worker hi-vis + hard hat, lab coat, guard uniform + cap, or bare rags.
 const OUTFITS := ["worker", "labcoat", "guard", "rags"]
@@ -415,8 +436,8 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 	if state == State.DEAD: return
 	if game and game.power.active("onetouch"): dmg = maxi(dmg, hp)
 	knifed = knife
-	dmg = ZombieTypes.damage_taken(ztype, dmg, headshot, explosive_hit)
-	if ZombieTypes.is_heavy(ztype) and not headshot and not explosive_hit and game and game.fx:
+	dmg = ZombieTypes.damage_taken(ztype, dmg, headshot, explosive_hit, exposed)
+	if ZombieTypes.is_heavy(ztype) and not headshot and not explosive_hit and not exposed and game and game.fx:
 		game.fx.sparks(global_position + Vector3.UP * 1.3, force.normalized() * -1.0 + Vector3.UP * 0.3, Color(1, 0.8, 0.4), 8, 0.3, 4.0)
 		game.sfx.play_at("plank_rip", global_position + Vector3.UP * 1.3, -12, 2.2)
 	hp -= dmg
@@ -442,7 +463,7 @@ func take_damage(dmg: int, headshot: bool, player, part := "body", force := Vect
 		var f := force; f.y = 0
 		knock += f.limit_length(6.0) * clampf(heavy * 2.5, 0.15, 1.0)
 		stagger_t = maxf(stagger_t, clampf(0.12 + heavy * 0.8, 0.12, 0.6))
-		if heavy > 0.2: windup_t = -1.0; lunge_t = 0.0
+		if heavy > 0.2 and slam_t <= 0.0: windup_t = -1.0; lunge_t = 0.0
 		if heavy > 0.12 or headshot:
 			cur_anim = ""; _play("HitReact", 0.04, 1.4); attack_anim_t = stagger_t
 	# directional hit reaction: head snaps back, side hits twist, leg hits stumble, big hits shove
@@ -585,6 +606,9 @@ func die(player, headshot: bool, force := Vector3.ZERO, dmg := 0) -> void:
 		if is_instance_valid(e): e.visible = false
 	state = State.DEAD; t = 4.0
 	collision_layer = 0
+	slam_t = -1.0; winded_t = 0.0; exposed = false
+	if slam_ring: slam_ring.queue_free(); slam_ring = null
+	if weak_light: weak_light.queue_free(); weak_light = null
 	if slow_t > 0.0 and game and game.fx:   # frozen kill shatters into ice
 		game.fx.sparks(global_position + Vector3.UP, Vector3.UP, AltAmmo.COLORS[AltAmmo.FREEZE], 18, 0.6, 5.0)
 		game.sfx.play_at("shatter_v7", global_position + Vector3.UP, -2)
@@ -722,7 +746,7 @@ func _physics_process(dt: float) -> void:
 	if flash_t > 0.0:
 		flash_t -= dt
 		var on := flash_t > 0.0
-		model.scale = Vector3.ONE * (1.03 if on else 1.0)
+		model.scale = type_scale * (1.03 if on else 1.0)   # v10 fix: the hit flash used to reset every type to scale 1
 	attack_anim_t -= dt
 	if state != State.DEAD: _tick_status(dt)
 	match state:
@@ -811,7 +835,21 @@ func _physics_process(dt: float) -> void:
 			if zpose: zpose.reach_target = 1.0 if (d < 7.0 and attack_anim_t <= 0.0 and not crawler and not runner) else (0.4 if d < 7.0 and runner else 0.0)
 			var dy: float = absf(pl.global_position.y - global_position.y)
 			lunge_cd -= dt
-			if windup_t > 0.0:
+			slam_cd -= dt
+			if winded_t > 0.0:
+				# winded after a slam: rooted, bent over, armour down
+				winded_t -= dt; velocity = Vector3.ZERO
+				if winded_t <= 0.0: _slam_recover()
+			elif slam_t > 0.0:
+				# telegraph: it only tracks the player for the first half, so stepping out of the ring works
+				slam_t -= dt; velocity = Vector3.ZERO
+				if slam_t > ZombieTypes.SLAM_WINDUP * 0.5: _face(pl.global_position)
+				_slam_ring_update()
+				if slam_t <= 0.0: _slam_land(pl)
+			elif ZombieTypes.is_heavy(ztype) and slam_cd <= 0.0 and windup_t <= 0.0 and stagger_t <= 0.0 and d < ZombieTypes.SLAM_TRIGGER and dy < 1.6 \
+					and not pl.is_downed and game.melee_clear(global_position, pl.global_position):
+				_slam_start()
+			elif windup_t > 0.0:
 				# committed swing: keep facing, land it if still in reach
 				windup_t -= dt; _face(pl.global_position); velocity = Vector3.ZERO
 				if windup_t <= 0.0:
@@ -882,8 +920,57 @@ func _tells(dt: float) -> void:
 			game.sfx.play_at("bloater_gurgle", global_position + Vector3.UP, -4 if d < 7.0 else -10, randf_range(0.9, 1.05))
 
 func _start_swing() -> void:
-	windup_t = WINDUP
-	cur_anim = ""; _play("Punch", 0.06, 1.7); attack_anim_t = 0.5
+	var heavy := ZombieTypes.is_heavy(ztype)
+	windup_t = ZombieTypes.HEAVY_SWING_WINDUP if heavy else WINDUP
+	cur_anim = ""; _play("Punch", 0.06, 0.9 if heavy else 1.7); attack_anim_t = 0.8 if heavy else 0.5
+
+# ---------------------------------------------------------------- v10 elite ground slam
+func _slam_start() -> void:
+	slam_t = ZombieTypes.SLAM_WINDUP; slam_cd = ZombieTypes.SLAM_COOLDOWN; lean = -0.45
+	cur_anim = ""; _play("Idle", 0.1)
+	if slam_ring == null:
+		slam_ring = MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.9; tm.outer_radius = 1.0; tm.rings = 32; tm.ring_segments = 4
+		slam_ring.mesh = tm
+		var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.albedo_color = Color(1.0, 0.12, 0.05, 0.85); m.no_depth_test = false; slam_ring.material_override = m
+		slam_ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		slam_ring.top_level = true; add_child(slam_ring)
+	slam_ring.visible = true; slam_ring.global_position = global_position + Vector3.UP * 0.06
+	slam_ring.global_rotation = Vector3.ZERO; _slam_ring_update()
+	if game:
+		game.sfx.play_at("brute_roar", global_position + Vector3.UP * 2, 4, 1.25)
+		game.on_elite_slam_start(self)
+
+func _slam_ring_update() -> void:
+	if slam_ring == null: return
+	var k := clampf(1.0 - slam_t / ZombieTypes.SLAM_WINDUP, 0.0, 1.0)
+	# the ring is drawn at the full danger radius from the first frame and fills inward, so the
+	# safe distance is readable immediately; it flashes faster as the hit approaches
+	var s := ZombieTypes.SLAM_RADIUS
+	slam_ring.scale = Vector3(s, 1.0 + k * 3.0, s)
+	var m := slam_ring.material_override as StandardMaterial3D
+	m.albedo_color.a = 0.45 + 0.5 * absf(sin(k * k * 22.0))
+
+func _slam_land(pl) -> void:
+	slam_t = -1.0; winded_t = ZombieTypes.SLAM_WINDED; exposed = true; lean = 0.55
+	if slam_ring: slam_ring.visible = false
+	if game == null: return
+	var d := _flat_dist(pl.global_position)
+	var hit: bool = d < ZombieTypes.SLAM_RADIUS and absf(pl.global_position.y - global_position.y) < 1.6 and not pl.is_downed \
+		and game.melee_clear(global_position, pl.global_position)
+	if hit: pl.take_damage(ZombieTypes.SLAM_DAMAGE * (1.0 if ztype == "brute" else 1.3), global_position)
+	pl.add_trauma(clampf(0.9 - d * 0.08, 0.15, 0.8))
+	game.sfx.play_at("land_thud", global_position, 6, 0.55); game.sfx.play_at("rumble", global_position, 0, 1.3)
+	if game.fx:
+		for i in 10:
+			var a := TAU * i / 10.0
+			game.fx.dirt_burst(global_position + Vector3(cos(a), 0, sin(a)) * ZombieTypes.SLAM_RADIUS * 0.8)
+	if weak_light: weak_light.light_energy = 3.0; weak_light.omni_range = 4.5
+	game.on_elite_slam_land(self, hit)
+
+func _slam_recover() -> void:
+	winded_t = 0.0; exposed = false; lean = 0.0
+	if weak_light: weak_light.light_energy = 1.1; weak_light.omni_range = 2.6
 
 ## Re-path when blocked: no progress toward the goal -> sidestep, then re-enter from the window nearest
 ## the closest player (out of sight if possible). Runs in TO_WINDOW and CHASE.

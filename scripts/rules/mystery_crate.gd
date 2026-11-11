@@ -19,9 +19,11 @@ func probability_of(weapon_id: String) -> float:
 		if e[0] == weapon_id: w += e[1]
 	return float(w) / total_weight()
 
-## Never returns [exclude] unless it is the only entry.
-func roll(rng: RandomNumberGenerator, exclude: String = "") -> String:
-	var pool := table.filter(func(e): return e[0] != exclude)
+## Never returns an excluded weapon unless nothing else is left. [exclude] is one id or a list of ids
+## (v10: every weapon the player already carries, so the crate cannot overwrite an upgraded gun).
+func roll(rng: RandomNumberGenerator, exclude = "") -> String:
+	var skip: Array = exclude if exclude is Array else [exclude]
+	var pool := table.filter(func(e): return not (e[0] in skip))
 	if pool.is_empty(): pool = table
 	var sum := 0
 	for e in pool: sum += e[1]
@@ -32,6 +34,6 @@ func roll(rng: RandomNumberGenerator, exclude: String = "") -> String:
 	return pool[-1][0]
 
 ## Spend and roll; "" if unaffordable.
-func buy(economy: Economy, rng: RandomNumberGenerator, current: String = "") -> String:
+func buy(economy: Economy, rng: RandomNumberGenerator, current = "") -> String:
 	if not economy.spend(cost): return ""
 	return roll(rng, current)

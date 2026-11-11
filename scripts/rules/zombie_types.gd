@@ -4,15 +4,27 @@ class_name ZombieTypes
 ##  brute:    armoured mini-boss every BRUTE_EVERY rounds; slow, huge, chain rattle + roar; drops RESTOCK.
 ##  bloater:  swollen, slow; gurgles when close, bursts into a lingering gas cloud on death or when it reaches you.
 
-const BRUTE_EVERY := 8
+const BRUTE_EVERY := 4        ## v10: the elite arrives on rounds 4, 8, 12, ... (was every 8)
+const BRUTE_PAIR_FROM := 12   ## two Brutes per elite round from here on
+## Ground slam (the Brute's telegraphed attack): it plants its feet, a red ring grows on the floor for
+## SLAM_WINDUP seconds, then everything inside SLAM_RADIUS is hit. It is then winded for SLAM_WINDED
+## seconds: it stands still and its armour does nothing, so body shots count in full.
+const SLAM_TRIGGER := 4.2
+const SLAM_RADIUS := 3.2
+const SLAM_WINDUP := 1.1
+const SLAM_DAMAGE := 70.0
+const SLAM_COOLDOWN := 7.0
+const SLAM_WINDED := 2.0
+const HEAVY_SWING_WINDUP := 0.5   ## a Brute's ordinary swing is slower than a walker's 0.22 s
+const BRUTE_HINT := "BRUTE  ·  armour shrugs off body shots  ·  shoot the glowing head, or unload while it is winded after a slam"
 const SPRINTER_FROM := 3
 const BLOATER_FROM := 4
 
 const ALL := {
 	"walker":   {"hp": 1.0, "speed": 1.0, "scale": 1.0, "dmg": 1.0, "armor": 0.0, "tint": Color(1, 1, 1), "points": 0},
 	"sprinter": {"hp": 0.6, "speed": 1.9, "scale": 0.9, "dmg": 0.7, "armor": 0.0, "tint": Color(1.0, 1.02, 0.86), "points": 20},
-	"brute":    {"hp": 8.0, "speed": 0.75, "scale": 1.45, "dmg": 2.2, "armor": 0.5, "tint": Color(0.78, 0.7, 0.66), "points": 500},
-	"warden":   {"hp": 30.0, "speed": 0.9, "scale": 1.85, "dmg": 3.0, "armor": 0.6, "tint": Color(0.66, 0.54, 0.8), "points": 2500},
+	"brute":    {"hp": 6.0, "speed": 0.75, "scale": 1.45, "dmg": 1.4, "armor": 0.5, "tint": Color(0.78, 0.7, 0.66), "points": 500},
+	"warden":   {"hp": 30.0, "speed": 0.9, "scale": 1.85, "dmg": 1.9, "armor": 0.6, "tint": Color(0.66, 0.54, 0.8), "points": 2500},
 	"bloater":  {"hp": 1.6, "speed": 0.7, "scale": 1.15, "dmg": 1.0, "armor": 0.0, "tint": Color(0.75, 0.9, 0.45), "points": 60},
 }
 const BLOATER_RADIUS := 3.2      ## burst damage radius (m)
@@ -23,6 +35,11 @@ const BLOATER_TRIGGER := 1.6     ## bursts on its own when this close to the pla
 
 static func is_brute_round(round: int) -> bool:
 	return round >= BRUTE_EVERY and round % BRUTE_EVERY == 0
+
+## How many Brutes an elite round sends (0 on other rounds).
+static func brute_count(round: int) -> int:
+	if not is_brute_round(round): return 0
+	return 2 if round >= BRUTE_PAIR_FROM else 1
 
 ## Share of normal spawns that become sprinters / bloaters for a round.
 static func sprinter_chance(round: int) -> float:
@@ -42,8 +59,9 @@ static func health(type: String, base_hp: int) -> int:
 	return maxi(1, int(round(base_hp * float(ALL[type].hp))))
 
 ## Damage after armour; armour shrugs off body shots but not headshots or explosives.
-static func damage_taken(type: String, dmg: int, headshot: bool, explosive: bool) -> int:
-	if headshot or explosive: return dmg
+## [exposed]: the armour is down (a Brute winded after its slam).
+static func damage_taken(type: String, dmg: int, headshot: bool, explosive: bool, exposed := false) -> int:
+	if headshot or explosive or exposed: return dmg
 	return maxi(1, int(round(dmg * (1.0 - float(ALL[type].armor)))))
 
 ## Player damage from a bloater burst at [dist] metres (linear falloff).

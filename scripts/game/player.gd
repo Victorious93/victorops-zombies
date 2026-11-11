@@ -49,6 +49,7 @@ var use_repeat := 0.0
 var step_t := 0.0
 var reload_beats := {}
 var sens := 1.0
+var invert_y := false   ## Settings > Invert vertical look
 var aim_assist := true
 ## Feel: stamina sprint, slide, per-gun recoil pattern, ADS ramp, knife lunge, last stand.
 const STAMINA_MAX := 4.0       ## seconds of sprint
@@ -131,8 +132,9 @@ func ammo() -> Ammo: return loadout.ammo()
 func _look(d: Vector2, base: float) -> void:
 	var k := base * sens * lerpf(1.0, GunFeel.ads_sens(weapon().id, weapon().is_upgraded()), ads01)
 	yaw -= d.x * k
-	pitch = clampf(pitch - d.y * k, -1.45, 1.45)
-	vm.add_sway(Vector2(d.x, -d.y) * k)
+	var dy := -d.y if invert_y else d.y
+	pitch = clampf(pitch - dy * k, -1.45, 1.45)
+	vm.add_sway(Vector2(d.x, -dy) * k)
 
 func _unhandled_input(e: InputEvent) -> void:
 	if touch and touch.visible: return
@@ -276,7 +278,7 @@ func _physics_process(dt: float) -> void:
 		sprint_key = false; crouch = false; jump = false; crouched = false
 	ads = want_ads and not sprinting
 	ads01 = move_toward(ads01, 1.0 if ads else 0.0, dt / maxf(weapon().ads_time, 0.05))
-	var stam_max := STAMINA_MAX * (1.6 if perks.has("fleetfoot") else 1.0)
+	var stam_max := stamina_max()
 	sprinting = sprint_key and mv.y < -0.3 and not ads and stamina > 0.0
 	if sprinting:
 		stamina = maxf(0.0, stamina - dt); stamina_rest = STAMINA_REGEN
@@ -290,12 +292,12 @@ func _physics_process(dt: float) -> void:
 	elif crouch and not crouch_key_prev and not sprinting and not on_touch:
 		crouched = not crouched
 	crouch_key_prev = crouch
-	var spd: float = WALK * cdef.speed_mult * (1.15 if perks.has("fleetfoot") else 1.0)
+	var spd: float = WALK * cdef.speed_mult * (Perks.SPEED_MULT if perks.get("fleetfoot", false) else 1.0)
 	if is_downed: spd *= 0.25
 	if crouched:
 		spd *= 0.55
 		if sprinting: crouched = false
-	if sprinting: spd *= 1.7 if perks.has("fleetfoot") else 1.5
+	if sprinting: spd *= Perks.SPRINT_MULT if perks.get("fleetfoot", false) else 1.5
 	spd *= weapon().move_mult()
 	spd *= lerpf(1.0, 0.6, ads01)
 	spd *= game.paks.speed_mult()
@@ -546,8 +548,12 @@ func _dir_angle(from: Vector3) -> float:
 	return atan2(off.x, -off.z)
 
 func set_max_health_from_perks() -> void:
-	max_health = cdef.max_health * (2.0 if perks.has("ironhide") else 1.0)
+	max_health = cdef.max_health * (Perks.HEALTH_MULT if perks.get("ironhide", false) else 1.0)
 	health = max_health
 
 func apply_reload_perk() -> void:
-	for s in loadout.slots: s.reload_mult = 0.5 if perks.has("quickhand") else 1.0
+	for s in loadout.slots: s.reload_mult = Perks.RELOAD_MULT if perks.get("quickhand", false) else 1.0
+
+## Seconds of sprint available (Fleetfoot Phial: 60% more).
+func stamina_max() -> float:
+	return STAMINA_MAX * (Perks.STAMINA_MULT if perks.get("fleetfoot", false) else 1.0)

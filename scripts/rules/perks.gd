@@ -5,10 +5,17 @@ class_name Perks
 const ALL := {
 	"ironhide": {"name": "Iron Hide Tonic", "cost": 2500, "desc": "Doubles max health", "color": Color(0.85, 0.15, 0.1)},
 	"quickhand": {"name": "Quickhand Draught", "cost": 3000, "desc": "Reloads twice as fast", "color": Color(0.1, 0.7, 0.3)},
-	"fleetfoot": {"name": "Fleetfoot Phial", "cost": 2000, "desc": "+15% move speed, more stamina", "color": Color(0.2, 0.5, 1.0)},
+	"fleetfoot": {"name": "Fleetfoot Phial", "cost": 2000, "desc": "Sprint 60% longer, move 15% faster", "color": Color(0.2, 0.5, 1.0)},
 	"lazarus": {"name": "Lazarus Fizz", "cost": 2000, "desc": "Solo: get back up once when downed (max 3 buys)", "color": Color(0.35, 0.85, 1.0)},
 	"marksman": {"name": "Marksman Mist", "cost": 2500, "desc": "Headshots hit 1.5x harder, steadier aim down sights", "color": Color(1.0, 0.75, 0.15)},
 }
+## The three core enhancements (health, reload, sprint); the other two are side-grades.
+const CORE := ["ironhide", "quickhand", "fleetfoot"]
+const STAMINA_MULT := 1.6
+const SPEED_MULT := 1.15
+const SPRINT_MULT := 1.7       ## sprint speed factor with Fleetfoot (1.5 without)
+const RELOAD_MULT := 0.5
+const HEALTH_MULT := 2.0
 const MARKSMAN_HEAD := 1.5
 const MARKSMAN_ADS_SPREAD := 0.6
 
@@ -28,6 +35,13 @@ static func buy(perk_id: String, owned: Dictionary, economy: Economy, power_on: 
 	owned[perk_id] = true
 	if perk_id == "lazarus": owned["_lazarus_buys"] = int(owned.get("_lazarus_buys", 0)) + 1
 	return ""
+
+## "Iron Hide Tonic — Doubles max health" for every tonic held (pause screen and results).
+static func effect_lines(owned: Dictionary) -> Array:
+	var out := []
+	for id in ALL:
+		if owned.get(id, false) == true: out.append("%s — %s" % [ALL[id].name, ALL[id].desc])
+	return out
 
 ## Perk ids held (skips bookkeeping keys).
 static func held(owned: Dictionary) -> Array:

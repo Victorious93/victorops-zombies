@@ -334,6 +334,8 @@ func _make_door(p: Vector2, along_x: bool, g: Dictionary) -> void:
 	var rot := 0.0 if along_x else PI / 2
 	for side in [-1, 1]:
 		var l := Label3D.new(); l.text = "%s\n%d" % [d.label, d.cost]; l.font_size = 40; l.pixel_size = 0.004
+		var dist: String = Facility.DISTRICTS[Facility.district_of(d.opens)].name
+		if dist != d.label: l.text = "%s\n%s  ·  %d" % [d.label, dist, d.cost]
 		l.outline_size = 8; l.modulate = Color(1, 0.85, 0.3); l.shaded = false
 		l.position = (Vector3(0, 0.7, 0.18 * side) if along_x else Vector3(0.18 * side, 0.7, 0))
 		l.rotation.y = rot + (0.0 if side > 0 else PI)
@@ -911,10 +913,12 @@ func _place_machines() -> void:
 	box(Vector3(0.12, 0.8, 0.12), Vector3(0, 0.4, 0), mats.trim, false, 1, sw)
 	var lever := box(Vector3(0.1, 0.5, 0.1), Vector3(0, 1.5, 0.25), _emit(Color(1, 0.2, 0.1), 2.0), false, 1, sw)
 	lever.rotation.x = 0.6; lever.name = "Lever"
-	label("POWER", Vector3(3, 2.3, -24.1), 0.0, 48, Color(1, 0.3, 0.2))
+	power_label = label("GENERATOR\nNO POWER", Vector3(3, 2.45, -24.1), 0.0, 44, Color(1, 0.3, 0.2))
+	# v10 power objective: hold USE to crank the starter (Facility.POWER_CRANKS pulls)
 	game.add_interactable(Vector3(3, 1.0, -23.3), 2.2,
-		func(pl): return "" if game.facility.power_on else "Throw the power switch",
-		func(pl): game.throw_power(lever))
+		func(pl): return game.crank_prompt(pl),
+		func(pl): game.crank_power(lever), true)
+	_power_cues()
 	# Mystery Crate: starts in the Lab, relocates between these spots
 	crate_spots = [
 		[Vector3(16, 0, 6.6), PI, "General Store"],
@@ -925,7 +929,7 @@ func _place_machines() -> void:
 	]
 	var crate := CrateNode.new(); crate.game = game; add_child(crate); crate.build()
 	game.crate_node = crate
-	var marker := label("MYSTERY CRATE", Vector3(0, 2.3, 0), 0.0, 44, Color(0.5, 0.9, 1.0))
+	var marker := label("MYSTERY CRATE\n%d  ·  random weapon" % game.crate.cost, Vector3(0, 2.3, 0), 0.0, 40, Color(0.5, 0.9, 1.0))
 	marker.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	remove_child(marker); crate.add_child(marker)
 	game.crate_it = game.add_interactable(Vector3.ZERO, 2.2, func(pl): return game.crate_prompt(pl), func(pl): game.use_crate(pl))
@@ -943,6 +947,45 @@ func _place_machines() -> void:
 	_armor_rack("medium", Vector3(25.6, 0, -4), -PI / 2)
 	_armor_rack("heavy", Vector3(13.6, 0, -25.6), 0.0)
 	_annex_stations()
+
+## v10 environmental cues for the power objective: a heavy cable runs from the diner's back door to
+## the generator with amber marker lamps along it, a beacon strobes over the breaker, and a sign over
+## the diner's north door names the job. All of it turns green once the generator runs.
+var power_label: Label3D
+var power_beacon_light: OmniLight3D
+var power_cue_mat: StandardMaterial3D
+var power_signs: Array = []
+const POWER_CUE_OFF := Color(1.0, 0.6, 0.1)
+const POWER_CUE_ON := Color(0.3, 1.0, 0.45)
+func _power_cues() -> void:
+	power_cue_mat = _emit(POWER_CUE_OFF, 2.2)
+	var cable := _mat(Color(0.03, 0.03, 0.035), 0.7)
+	# cable: diner back door (0,-10) -> along the alley -> breaker (3,-24.3); two straight runs
+	var pts := [Vector3(1.6, 0.04, -10.6), Vector3(1.6, 0.04, -22.6), Vector3(3.0, 0.04, -22.6), Vector3(3.0, 0.04, -24.0)]
+	for i in pts.size() - 1:
+		var a: Vector3 = pts[i]; var b: Vector3 = pts[i + 1]
+		var along_x := absf(b.x - a.x) > absf(b.z - a.z)
+		var len := a.distance_to(b) + 0.1
+		box(Vector3(len, 0.08, 0.1) if along_x else Vector3(0.1, 0.08, len), (a + b) / 2.0, cable, false)
+	for z: float in [-12.0, -15.0, -18.0, -21.0]:
+		box(Vector3(0.16, 0.1, 0.16), Vector3(1.6, 0.1, z), power_cue_mat, false)
+	# strobing beacon on a post above the breaker
+	box(Vector3(0.22, 0.22, 0.22), Vector3(3, 3.0, -24.3), power_cue_mat, false)
+	power_beacon_light = OmniLight3D.new(); power_beacon_light.light_color = POWER_CUE_OFF; power_beacon_light.light_energy = 2.0
+	power_beacon_light.omni_range = 7.0; power_beacon_light.position = Vector3(3, 2.9, -23.8); add_child(power_beacon_light)
+	# signs: inside the diner over the back door, and on the alley side
+	for s in [[Vector3(0, 3.25, -9.72), 0.0], [Vector3(0, 3.25, -10.28), PI]]:
+		var l := label("NO POWER\nGENERATOR ▸ BACK ALLEY", s[0], s[1], 60, POWER_CUE_OFF)
+		power_signs.append(l)
+
+## Called once the generator runs: cues go green and stop strobing.
+func power_beacon(on: bool) -> void:
+	var c := POWER_CUE_ON if on else POWER_CUE_OFF
+	if power_cue_mat: power_cue_mat.albedo_color = c; power_cue_mat.emission = c
+	if power_beacon_light: power_beacon_light.light_color = c
+	if power_label: power_label.text = "GENERATOR\nRUNNING" if on else "GENERATOR\nNO POWER"; power_label.modulate = c
+	for l in power_signs:
+		(l as Label3D).text = "POWER ON\nFORGE ▸ HOLLIS AUTO REPAIR" if on else "NO POWER\nGENERATOR ▸ BACK ALLEY"; (l as Label3D).modulate = c
 
 func move_crate(pos: Vector3, rot_y: float) -> void:
 	var c: CrateNode = game.crate_node
@@ -1007,6 +1050,9 @@ func _process(dt: float) -> void:
 		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1) * (1.0 + 7.0 * sin(clampf(forge_work / OverchargeForge.FORGE_TIME, 0, 1) * PI))
 		r.scale = Vector3.ONE * (1.0 + (0.25 * sin(_t * 20.0) if forge_work > 0.0 else 0.0))
 		r.rotation.x += dt * spd; r.rotation.y += dt * spd * 0.7
+	if power_beacon_light:   # strobe until the generator runs, then a steady glow
+		power_beacon_light.light_energy = 1.2 if on else 2.6 * pow(0.5 + 0.5 * sin(_t * 6.0), 3.0)
+		if power_cue_mat: power_cue_mat.emission_energy_multiplier = 1.6 if on else 0.6 + 2.6 * pow(0.5 + 0.5 * sin(_t * 6.0), 3.0)
 	var alarm: bool = game != null and game.round >= ALARM_ROUND and not game.over
 	var pulse := 0.5 + 0.5 * sin(_t * 5.0)
 	for i in alarm_lights.size():

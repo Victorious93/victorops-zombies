@@ -27,7 +27,11 @@ var round := 0
 var to_spawn := 0
 var spawn_cd := 0.0
 var intermission := 4.0
-var brute_pending := false
+var brutes_pending := 0         ## v10: Brutes still to spawn this round
+var elite: Zombie = null        ## the Brute currently alive (HUD bar)
+var elite_hint_shown := false
+var slam_hint_shown := false
+var cur_area := "intake"        ## room the player is standing in (Facility.area_at)
 var gas_clouds: Array = []   ## {node, pos, life}
 var slowmo_t := 0.0
 var type_counts := {}        ## sim/test stats: spawned per zombie type
@@ -174,6 +178,7 @@ func apply_settings() -> void:
 	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
 	if player:
 		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist; player.shake_scale = settings.shake
+		player.invert_y = settings.invert_y
 		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
 		if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	if touch:
@@ -277,10 +282,15 @@ func _process(dt: float) -> void:
 		hud.info("%s wore off" % PowerUps.ALL[id].name); sfx.play("pu_end", -6)
 	_update_gear(dt)
 	player.economy.mult = 2 if power.active("doublepay") else 1
+	hud.set_objective(facility.objective() if tutorial == null else "")
 	round_clock += dt
 	stats.time += dt
 	if boss and (not is_instance_valid(boss) or boss.state == Zombie.State.DEAD): boss = null
-	hud.boss_bar(boss)
+	if elite and (not is_instance_valid(elite) or elite.state == Zombie.State.DEAD):
+		elite = null
+		for z in zombies:   # a second Brute takes over the bar
+			if is_instance_valid(z) and z.ztype == "brute" and z.state != Zombie.State.DEAD: elite = z; break
+	hud.boss_bar(boss if boss else elite)
 	# distant groans from outside the walls
 	groan_t -= dt
 	if groan_t <= 0.0:
@@ -289,12 +299,16 @@ func _process(dt: float) -> void:
 		sfx.play_at("groan%d" % (rng.randi() % 3 + 1), player.global_position + Vector3(cos(a), 0.5, sin(a)) * 22.0, -10, rng.randf_range(0.7, 0.85))
 	tint = move_toward(tint, 0.0, dt * 0.35)
 	env.adjustment_saturation = SATURATION - tint * 0.3
-	env.fog_light_color = BASE_FOG.lerp(Color(0.35, 0.03, 0.02), tint) if not Rounds.is_special(round) else Color(0.2, 0.03, 0.02)
+	env.fog_light_color = fog_base().lerp(Color(0.35, 0.03, 0.02), tint) if not Rounds.is_special(round) else Color(0.2, 0.03, 0.02)
 
 func _update_prompt() -> void:
 	current_prompt = ""; current_target = null
 	var best := 1e9
 	var pp := player.global_position
+	_track_area(pp)
+	if player.is_downed:
+		if touch: touch.set_use_available(false)
+		return
 	var fwd := -player.global_basis.z
 	for it in interactables:
 		var off: Vector3 = it.pos - pp; off.y = 0
@@ -308,7 +322,7 @@ func _update_prompt() -> void:
 	if touch: touch.set_use_available(current_prompt != "")
 
 func player_use(p: Player, just_pressed: bool, repeat_tick: bool) -> void:
-	if current_target == null: return
+	if current_target == null or over or p.is_downed: return   # no shopping from the floor
 	if current_target.hold:
 		if repeat_tick: current_target.use.call(p)
 	elif just_pressed:
@@ -340,8 +354,11 @@ func _update_rounds(dt: float) -> void:
 			if not boss_pending: cue("ann_round_v7", 0, CueQueue.Prio.VOICE, true, ROUND_MIX.ann_round_delay)
 			duck_music(5.0)
 			sfx.play("rumble", -3); player.add_trauma(0.45)
-			brute_pending = ZombieTypes.is_brute_round(round)
-			if brute_pending: hud.banner("Round %d · BRUTE" % round, 3.5)
+			brutes_pending = ZombieTypes.brute_count(round)
+			if brutes_pending > 0:
+				hud.banner("Round %d · BRUTE" % round, 3.5)
+				if not elite_hint_shown: elite_hint_shown = true; hud.info(ZombieTypes.BRUTE_HINT, 9.0)
+			_apply_atmosphere()
 			tint = 1.0
 			hud.round_flash(); hud.tally_flip(round); hud.round_slam(round)
 			if round > 1:
@@ -349,11 +366,12 @@ func _update_rounds(dt: float) -> void:
 	elif to_spawn > 0:
 		spawn_cd -= dt
 		if spawn_cd <= 0.0 and zombies.size() < Rounds.MAX_ALIVE:
-			var ty := "brute" if brute_pending and to_spawn <= Rounds.zombie_count(round) / 2 else ZombieTypes.pick(round, rng.randf())
-			if ty == "brute": brute_pending = false
+			var ty := "brute" if brutes_pending > 0 and to_spawn <= Rounds.zombie_count(round) / 2 else ZombieTypes.pick(round, rng.randf())
+			if ty == "brute": brutes_pending -= 1
 			if boss_pending and to_spawn <= Rounds.boss_escort(round) - 2: ty = "warden"; boss_pending = false
 			var nz := spawn_zombie("", ty)
 			if ty == "warden": boss = nz
+			if ty == "brute" and elite == null: elite = nz
 			to_spawn -= 1
 			spawn_cd = Rounds.spawn_interval(round)
 	elif zombies.size() == 1 and zombies[0].state != Zombie.State.DEAD and not zombies[0].crawler:
@@ -452,7 +470,7 @@ func hitscan(p: Player, origin: Vector3, dir: Vector3, w: WeaponDef) -> void:
 			z.take_damage(dmg, head, p, part, dir * (3.0 + w.damage * 0.02) * w.kick_mult())
 			var killed := was_alive and z.state == Zombie.State.DEAD
 			_pay(p, r.position + Vector3.UP * 0.3, before)
-			var armored := ZombieTypes.is_heavy(z.ztype) and not head
+			var armored := ZombieTypes.is_heavy(z.ztype) and not head and not z.exposed
 			hud.hitmarker(killed, head, armored)
 			sfx.play("hitmarker", -10, 1.25 if head else 1.0)
 			sfx.play("hit_tick_v6", -8 if killed else -12, 0.8 if killed else (1.2 if head else 1.0))
@@ -612,6 +630,9 @@ func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> v
 	if headshot: stats.headshots += 1
 	if z.ztype == "warden":
 		stats.bosses += 1; hud.banner("THE WARDEN FALLS", 3.5); announce("ann_sealed_v7")
+	if z.ztype == "brute":
+		stats.elites += 1
+		hud.banner("BRUTE DOWN  ·  +%d" % (ZombieTypes.ALL.brute.points * (p.economy.mult if p else 1)), 2.5)
 	if pact.on_kill(z.global_position.distance_to(WonderQuest.STONE)):
 		hud.banner("The Pact Stone is sated", 2.5); sfx.play_at("pact_step_v7", WonderQuest.STONE, 0); announce("ann_pact_v7")
 		quest_nodes.stone_step(pact.step, false)
@@ -640,6 +661,36 @@ func on_zombie_killed(z: Zombie, p: Player, headshot: bool, knife := false) -> v
 		hud.kill_feed(headshot)
 	if rng.randf() < ArmorState.DROP_CHANCE:
 		_drop_armor(z.global_position)
+
+## v10 elite hooks (called by Zombie): the first slam explains itself.
+func on_elite_slam_start(_z: Zombie) -> void:
+	if not slam_hint_shown:
+		slam_hint_shown = true; hud.info("SLAM incoming  ·  get out of the red ring", 5.0)
+
+func on_elite_slam_land(_z: Zombie, hit_player: bool) -> void:
+	if not hit_player: hud.info("Brute is winded  ·  its armour is down, hit it anywhere", 4.0)
+
+## Which room the player is in; announces a room the first time it is entered.
+var seen_areas := {"intake": true}
+func _track_area(pp: Vector3) -> void:
+	var a := Facility.area_at(pp.x, pp.z)
+	if a == "" or a == cur_area: return
+	cur_area = a
+	if not seen_areas.has(a):
+		seen_areas[a] = true
+		hud.area_callout(Facility.AREA_NAMES[a], Facility.DISTRICTS[Facility.district_of(a)].name)
+
+## v10 escalating atmosphere: the haze thickens and warms toward a dull red as the rounds climb.
+## Purely cosmetic and capped, so late rounds stay readable.
+static func atmosphere01(r: int) -> float: return clampf((r - 1) / 14.0, 0.0, 1.0)
+func _apply_atmosphere() -> void:
+	if env == null: return
+	var k := atmosphere01(round)
+	env.fog_density = lerpf(0.008, 0.02, k)
+	env.ambient_light_energy = (AMBIENT_ON if facility.power_on else AMBIENT_OFF) * lerpf(1.0, 0.86, k)
+
+func fog_base() -> Color:
+	return BASE_FOG.lerp(Color(0.3, 0.14, 0.12), atmosphere01(round) * 0.7)
 
 func headless_sim() -> bool:
 	return DisplayServer.get_name() == "headless"
@@ -791,14 +842,17 @@ func on_player_revived(p: Player) -> void:
 			z.push((z.global_position - p.global_position).normalized() * 12.0)
 
 func on_player_bled_out(p: Player) -> void:
+	if over: return
 	over = true
+	Engine.time_scale = 1.0; slowmo_t = 0.0
+	stats.power = facility.power_on; stats.districts = facility.districts_open()
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	hud.banner("", 0)
 	stats.parts = quest.count(); stats.pact = pact.done
-	var run := {"round": round, "kills": kills, "points": stats.points_earned, "headshots": stats.headshots}
+	var run := {"round": round, "kills": kills, "points": stats.points_earned, "headshots": stats.headshots, "elites": stats.elites}
 	var prev := high.load_best().duplicate()
 	var is_best := high.submit(run)
-	hud.show_game_over(round, kills, stats, prev, is_best, high.records, high.new_round, high.new_score)
+	hud.show_game_over(round, kills, stats, prev, is_best, high.records, high.new_round, high.new_score, high.totals)
 	announce("ann_gameover_v7", 0.4)
 	if is_best: announce("ann_highscore_v7", 2.6)
 	sfx.play("round_end", 0, 0.7)
@@ -875,6 +929,8 @@ func use_bench(p: Player) -> void:
 	if quest.build():
 		quest_nodes.bench_built(); sfx.play_at("wonder_build_v7", WonderQuest.BENCH + Vector3.UP, 0)
 		announce("ann_built_v7", 1.2); hud.banner("The Gloam Harp is assembled", 3.0); p.add_trauma(0.3)
+	elif quest.built and not quest.taken and _gun_busy(p):
+		return
 	elif quest.take():
 		quest_nodes.bench_taken()
 		var w := Weapons.make(Weapons.QUEST_WONDER)
@@ -980,15 +1036,36 @@ func buy_door(p: Player, id: String) -> void:
 	map.open_door(id)
 	hud.info("%s opened" % Facility.DOORS[id].label)
 
+## v10 power objective: each hold tick is one pull on the generator's starter; the last one starts it.
+func crank_prompt(_p: Player) -> String:
+	if facility.power_on: return ""
+	return "Hold to crank the generator  %d/%d" % [facility.cranks, Facility.POWER_CRANKS]
+
+func crank_power(lever: Node3D) -> void:
+	if facility.power_on: return
+	var done := facility.crank_power()
+	sfx.play("rack", -2, 0.55 + 0.12 * facility.cranks); sfx.play("rumble", -12, 1.4 + 0.2 * facility.cranks)
+	player.add_trauma(0.1)
+	if is_instance_valid(lever): lever.rotation.x = 0.6 - 1.2 * float(facility.cranks) / Facility.POWER_CRANKS
+	if done: _power_restored(lever)
+	else: hud.info("Generator turning over...  %d/%d" % [facility.cranks, Facility.POWER_CRANKS])
+
 func throw_power(lever: Node3D) -> void:
 	if not facility.throw_power(): return
+	facility.cranks = Facility.POWER_CRANKS
+	_power_restored(lever)
+
+func _power_restored(lever: Node3D) -> void:
+	stats.power = true
+	hud.info("Overcharge Forge and tonic machines are online", 6.0)
+	map.power_beacon(true)
 	lever.rotation.x = -0.6
 	var wave: float = map.power_cascade(lever.global_position if lever.is_inside_tree() else player.global_position)
 	sfx.play("power_on")
 	hud.banner("Power restored", 3.0)
 	hud.power_flash()
 	var g := create_tween(); g.tween_interval(wave * 0.5); g.tween_callback(func(): player.add_trauma(0.35))
-	env.ambient_light_energy = AMBIENT_ON
+	_apply_atmosphere()
 	if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	player.add_trauma(0.3)
 
@@ -1007,7 +1084,8 @@ func buy_perk(p: Player, id: String) -> void:
 	p.vm.drink(Perks.ALL[id].color)
 	if id == "ironhide": p.set_max_health_from_perks()
 	if id == "quickhand": p.apply_reload_perk()
-	hud.info("%s active" % Perks.ALL[id].name)
+	if id == "fleetfoot": p.stamina = p.stamina_max()
+	hud.info("%s active — %s" % [Perks.ALL[id].name, Perks.ALL[id].desc], 4.0)
 
 func forge_prompt(p: Player) -> String:
 	if forge_busy > 0.0: return ""
@@ -1017,9 +1095,8 @@ func forge_prompt(p: Player) -> String:
 	return price_text(p.economy.points, "Upgrade %s to Mk.%d" % [p.weapon().name, p.weapon().tier + 2], c)
 
 func use_forge(p: Player) -> void:
-	if not facility.power_on: _deny("Power required"); return
+	if not facility.power_on: _deny("Power required — crank the generator in the Back Alley"); return
 	if forge_busy > 0.0: return
-	var slot := p.loadout.current
 	var up := forge.upgrade(p.weapon(), p.economy)
 	if up == null:
 		if p.weapon().is_maxed(): _deny("Already fully upgraded")
@@ -1027,33 +1104,49 @@ func use_forge(p: Player) -> void:
 		return
 	# the forge swallows the gun for ~5 s, then hands back the overcharged version
 	forge_busy = OverchargeForge.FORGE_TIME
-	var held: Ammo = p.loadout.slots[slot]
+	var held: Ammo = p.loadout.ammo()
 	held.reload_left = 0.0; held.locked = true   # can't fire, reload or swap-cancel it while it's in the machine
 	sfx.play("forge"); sfx.play("forge_jingle", -5); announce("ann_forge_v7", 0.4); hud.info("%s working..." % OverchargeForge.NAME)
 	map.forge_working(OverchargeForge.FORGE_TIME)
 	var tw := create_tween(); tw.tween_property(self, "forge_busy", 0.0, OverchargeForge.FORGE_TIME)
 	tw.tween_callback(func():
-		if p.loadout.slots.size() > slot and p.loadout.slots[slot] == held: held.swap(up)
-		else: p.loadout.give(up)
+		# the gun comes back into the slot it left, even if the player went down in the meantime
+		# (last stand swaps in a temporary loadout; the real one is parked in saved_loadout)
+		var home: Loadout = p.saved_loadout if p.is_downed and p.saved_loadout else p.loadout
+		if held in home.slots: held.swap(up)
+		else: home.give(up)
 		p.apply_reload_perk()
 		sfx.play("forge_done", 0)
 		hud.banner(up.display_name() + ("  ·  " + AltAmmo.NAMES[up.alt_ammo] if up.alt_ammo != "" else ""), 2.5))
+
+## True (and says why) while the gun in hand is inside the Forge: it cannot be traded away.
+func _gun_busy(p: Player) -> bool:
+	if not p.ammo().locked: return false
+	_deny("Your weapon is still in the %s" % OverchargeForge.NAME)
+	return true
+
+func _owned_ids(p: Player) -> Array:
+	var ids := []
+	for s in p.loadout.slots: ids.append(s.weapon.id)
+	return ids
 
 func crate_prompt(p: Player) -> String:
 	match crate_node.state:
 		CrateNode.State.ROLLING: return ""
 		CrateNode.State.READY: return "Take %s (%ds)" % [Weapons.make(crate_node.result).name, ceili(crate_node.t)]
-	return price_text(p.economy.points, "Mystery Crate (random weapon)", crate.cost)
+	return price_text(p.economy.points, "Mystery Crate (random weapon, replaces the gun in hand)" if p.loadout.slots.size() >= Loadout.MAX_SLOTS else "Mystery Crate (random weapon)", crate.cost)
 
 func use_crate(p: Player) -> void:
 	match crate_node.state:
 		CrateNode.State.IDLE:
-			var id := crate.buy(p.economy, rng, p.weapon().id)
+			var id := crate.buy(p.economy, rng, _owned_ids(p))
 			if id == "": _deny_cost(p, crate.cost); return
 			crate_node.start(id); sfx.play_at("crate", crate_node.global_position + Vector3.UP)
 			sfx.play_at("crate_jingle", crate_node.global_position + Vector3.UP, -4)
 			if crate_mover.on_roll(rng): crate_node.move_after = true
 		CrateNode.State.READY:
+			if _gun_busy(p): return
+			if Weapons.make(crate_node.result) == null: crate_node.take(); return   # never grant an unknown weapon
 			var w := Weapons.make(crate_node.take())
 			p.loadout.give(w); p.apply_reload_perk()
 			hud.info("Got %s!" % w.name); sfx.play("buy", -6)
@@ -1073,6 +1166,7 @@ func buy_wall(p: Player, id: String) -> void:
 		var ac: int = Weapons.ammo_price(id) * (5 if a.weapon.tier > 0 else 1)
 		if not p.economy.spend(ac): _deny_cost(p, ac); return
 		a.refill(); sfx.play("buy", -4); hud.info("Ammo refilled"); return
+	if _gun_busy(p): return
 	if not p.economy.spend(Weapons.WALL_PRICES[id]): _deny_cost(p, Weapons.WALL_PRICES[id]); return
 	p.loadout.give(Weapons.make(id)); p.apply_reload_perk()
 	if tutorial: tutorial.event("buy")
@@ -1119,7 +1213,7 @@ func rift_prompt(p: Player) -> String:
 	return "%s: %s" % [RiftBench.NAME, "only first overcharge - use the Forge" if c < 0 else "-> Mk.2  %d" % c]
 
 func use_rift(p: Player) -> void:
-	if not annex.revealed: return
+	if not annex.revealed or _gun_busy(p): return
 	var up := RiftBench.upgrade(p.weapon(), p.economy)
 	if up == null: _deny("Already overcharged" if p.weapon().tier >= 1 else "Not enough points"); return
 	var held: Ammo = p.loadout.slots[p.loadout.current]
@@ -1139,7 +1233,8 @@ func buy_reaper(p: Player) -> void:
 		if a.is_full(): return
 		if not p.economy.spend(Weapons.ALIEN_AMMO): _deny("Not enough points"); return
 		a.refill(); sfx.play("buy", -4); hud.info("Drum regrown"); return
-	if not p.economy.spend(Weapons.ALIEN_PRICE): _deny("Not enough points"); return
+	if _gun_busy(p): return
+	if not p.economy.spend(Weapons.ALIEN_PRICE): _deny_cost(p, Weapons.ALIEN_PRICE); return
 	p.loadout.give(Weapons.make(Weapons.ALIEN)); p.apply_reload_perk()
 	sfx.play("buy", -4); sfx.play("reload_reaper_v12", -2); hud.banner("HIVE REAPER", 2.5)
 
@@ -1157,8 +1252,27 @@ func relocate_crate() -> void:
 	sfx.play_at("crate_move", spot[0] + Vector3.UP, 0)
 	hud.info("The Mystery Crate moved: %s" % spot[2])
 
-func restart() -> void: get_tree().paused = false; restart_requested.emit()
-func to_menu() -> void: get_tree().paused = false; exit_to_menu.emit()
+func restart() -> void: get_tree().paused = false; Engine.time_scale = 1.0; restart_requested.emit()
+func to_menu() -> void: get_tree().paused = false; Engine.time_scale = 1.0; exit_to_menu.emit()
+func _exit_tree() -> void: Engine.time_scale = 1.0   # a match can never leave slow motion behind
+
+## v10 pause screen: what the player currently has and what it does, in plain lines.
+func status_lines() -> Array:
+	var out := []
+	var obj := facility.objective()
+	out.append("OBJECTIVE  ·  %s" % (obj if obj != "" else "Survive — every district is open and the power is on"))
+	out.append("Round %d  ·  %d kills  ·  %d headshots  ·  %d points" % [round, kills, stats.headshots, player.economy.points])
+	for s in player.loadout.slots:
+		var w: WeaponDef = s.weapon
+		out.append("%s  ·  %d damage%s  ·  %d-round magazine%s" % [w.display_name(), w.damage, (" x %d pellets" % w.pellets) if w.pellets > 1 else "", w.mag_size,
+			("  ·  Forge Mk.%d" % (w.tier + 1)) if w.tier > 0 else ""])
+	var tonics := Perks.effect_lines(player.perks)
+	if tonics.is_empty(): out.append("No tonics yet — the machines need power (currently %s)" % ("on" if facility.power_on else "off"))
+	else: out.append_array(tonics)
+	for id in power.timers: out.append("%s — %s  (%ds left)" % [PowerUps.ALL[id].name, PowerUps.ALL[id].desc, ceili(power.timers[id])])
+	if paks.active(): out.append("%s — %s  (%ds left, kills add time)" % [UpgradePaks.ALL[paks.id].name, UpgradePaks.ALL[paks.id].desc, ceili(paks.time_left)])
+	if player.armor.value > 0: out.append("Armor %d" % int(player.armor.value))
+	return out
 
 # ---------------------------------------------------------------- v7.13 upgrade paks + backpack gadgets
 func spawn_gear_drop(kind: String, id: String, at: Vector3) -> void:
@@ -1322,6 +1436,6 @@ func tech_locker_prompt(p: Player) -> String:
 func use_tech_locker(p: Player) -> void:
 	var id: String = Backpack.GADGETS.keys()[rng.randi_range(0, Backpack.GADGETS.size() - 1)]
 	if p.backpack.is_full_for(id): hud.info("Bag full"); sfx.play("bag_full_v13", -4); return
-	if not p.economy.spend(Backpack.LOCKER_PRICE): _deny("Not enough points"); return
+	if not p.economy.spend(Backpack.LOCKER_PRICE): _deny_cost(p, Backpack.LOCKER_PRICE); return
 	_stat("locker")
 	give_gadget(p, id)
