@@ -238,7 +238,7 @@ func _street() -> void:
 	var beacon := _practical(Vector3(36, 2.1, -1), Color(1.0, 0.1, 0.06), 1.5, 8.0, true); beacon.set("rate", 0.5)
 	_p("sports_car", 4.2, Vector3(43.0, 0, -7.0), 1.9, false, true)
 	wreck_fire(Vector3(43.0, 0.9, -7.0))
-	_p("sports_car", 4.2, Vector3(29.9, 0, 4.0), 0.06, false, true)
+	_p("sports_car", 4.2, Vector3(29.9, 0, 5.4), 0.06, false, true)
 	# checkpoint: barriers, cones, sandbags, floodlights on the platform, the blockade notice
 	_p("traffic_barrier", 1.9, Vector3(31.4, 0, -8.6), 0.1, false, true); _p("traffic_barrier", 1.9, Vector3(40.4, 0, -9.2), -0.2, false, true)
 	for c in [Vector3(38.0, 0, 2.0), Vector3(33.0, 0, -5.0), Vector3(39.5, 0, -6.4), Vector3(34.4, 0, -8.9)]: _p("traffic_cone", 0.6, c, 0.01, true)
@@ -338,7 +338,7 @@ func _court() -> void:
 	map.collider(Vector3(0.5, 0.9, 1.7), Vector3(31.4, 0.45, 20)); k.bench(m, Vector3(31.4, 0, 20), PI / 2)
 	map.collider(Vector3(2.0, 0.7, 2.0), Vector3(30.6, 0.35, 25.2)); k.box(m.kerb, Vector3(2.0, 0.6, 2.0), Vector3(30.6, 0.3, 25.2)); k.box(m.dirt, Vector3(1.7, 0.04, 1.7), Vector3(30.6, 0.61, 25.2))
 	_p("dead_tree", 6.0, Vector3(30.6, 0.55, 25.2), 0.4, true)
-	_p("traffic_barrier", 1.8, Vector3(33.0, 0, 13.4), 0.2, false, true)
+	_p("traffic_barrier", 1.8, Vector3(39.0, 0, 13.0), 1.4, false, true)
 	_p("barrel", 0.95, Vector3(43.6, 0, 27.4), 0.3, true, true); _p("barrel_explosive", 0.95, Vector3(38.6, 0, 27.6), 0.01, true, true)
 	_p("trashcan", 0.9, Vector3(27.2, 0, 28.6), 0.01, true, true); _p("debris_pile", 1.4, Vector3(44.6, 0, 28.6))
 	fire_barrel(Vector3(29.0, 0, 28.0))

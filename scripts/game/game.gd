@@ -173,7 +173,7 @@ func apply_settings() -> void:
 		music.volume_db = music_base()
 	AudioServer.set_bus_volume_db(0, GameSettings.linear_to_db_safe(settings.sfx))
 	if player:
-		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist
+		player.sens = settings.sensitivity; player.aim_assist = settings.aim_assist; player.shake_scale = settings.shake
 		player.auto_fire = settings.auto_fire; player.gyro_mode = settings.gyro; player.look_curve = settings.look_curve
 		if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	if touch:
@@ -407,6 +407,12 @@ func _part_of(z: Zombie, y: float) -> String:
 func _pay(p: Player, at: Vector3, before: int) -> void:
 	var gain := p.economy.points - before
 	if gain > 0: fx.popup(at, "+%d" % gain); stats.points_earned += gain; hud.points_pop(gain)
+
+## Can a zombie at `from` reach a player at `to` with a swing? Walls and closed doors (world layer)
+## stop melee; furniture boxes do not (a zombie leans over a table).
+func melee_clear(from: Vector3, to: Vector3) -> bool:
+	var q := PhysicsRayQueryParameters3D.create(from + Vector3.UP * 1.0, to + Vector3.UP * 1.0, 1, prop_box_rids())
+	return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 var _prop_box_rids: Array[RID] = []
 func prop_box_rids() -> Array[RID]:
