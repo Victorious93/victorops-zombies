@@ -32,6 +32,8 @@ jobs:
         run: godot --headless --import
       - name: Unit tests (GUT)
         run: godot --headless -s addons/gut/gut_cmdln.gd -gexit 2>&1 | tee gut.txt; grep -q "All tests passed" gut.txt
+      - name: Scene self-check (headless)
+        run: godot --headless --fixed-fps 60 -- --check
       - name: Configure Android export
         run: |
           set -euo pipefail
@@ -70,10 +72,10 @@ jobs:
           set -euo pipefail
           mkdir -p build
           export GODOT_ANDROID_KEYSTORE_RELEASE_PATH="$VOZ_KEYSTORE_PATH" GODOT_ANDROID_KEYSTORE_RELEASE_USER="$VOZ_KEY_ALIAS" GODOT_ANDROID_KEYSTORE_RELEASE_PASSWORD="$VOZ_KEYSTORE_PASSWORD"
-          godot --headless --export-release Android build/victorops-zombies.apk
-          test -s build/victorops-zombies.apk
+          godot --headless --export-release Android build/victor-zombies.apk
+          test -s build/victor-zombies.apk
       - name: Sign v2+v3 and verify
-        run: tools/sign_apk.sh build/victorops-zombies.apk | tee verify.txt
+        run: tools/sign_apk.sh build/victor-zombies.apk | tee verify.txt
       - name: Check ABIs / SDK
         run: |
           grep -q "native-code: 'arm64-v8a' 'armeabi-v7a'" verify.txt
@@ -82,5 +84,5 @@ jobs:
           grep -q "name='com.victorious.zombie'" verify.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: victorops-zombies-apk
-          path: build/victorops-zombies.apk
+          name: victor-zombies-apk
+          path: build/victor-zombies.apk

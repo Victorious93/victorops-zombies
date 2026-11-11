@@ -2,6 +2,12 @@ extends Node
 ## Main menu + match host. Cmdline (after --): --shots=<dir> renders screenshots then quits; --touch forces touch UI.
 
 const LOGO := "res://assets/victorops-zombies-logo.jpg"
+const TITLE := "VICTOR ZOMBIES"
+const BYLINE := "By Victorious Framework"
+
+## Android back on the main menu leaves the game (in a match it opens the pause menu, see Game).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST and menu != null and game == null: get_tree().quit()
 var game: Game
 var menu: CanvasLayer
 var selected := Characters.DEFAULT
@@ -18,6 +24,8 @@ func _ready() -> void:
 	elif args.has("clip"): _clip(args["clip"])
 	elif args.has("views"): _views(args["views"])
 	elif args.has("hud"): _hud(args["hud"], args.get("prefix", ""))
+	elif args.has("check"): _check()
+	elif args.has("v8shots"): _v8shots(args["v8shots"])
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -77,10 +85,18 @@ func show_menu() -> void:
 	var shade := ColorRect.new(); shade.color = Color(0, 0, 0, 0.35); shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE; menu.add_child(shade)
 	var box := VBoxContainer.new(); box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	box.alignment = BoxContainer.ALIGNMENT_CENTER; box.add_theme_constant_override("separation", 14); menu.add_child(box)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER; box.add_theme_constant_override("separation", 9); menu.add_child(box)
 	var logo := TextureRect.new(); logo.texture = load(LOGO)
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	logo.custom_minimum_size = Vector2(0, 220); box.add_child(logo)
+	logo.custom_minimum_size = Vector2(0, 112); box.add_child(logo)
+	var title := Label.new(); title.text = TITLE; title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 68); title.add_theme_color_override("font_color", Color(0.9, 0.1, 0.07))
+	title.add_theme_color_override("font_outline_color", Color(0.05, 0.0, 0.0)); title.add_theme_constant_override("outline_size", 14)
+	box.add_child(title)
+	var by := Label.new(); by.text = BYLINE; by.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	by.add_theme_font_size_override("font_size", 22); by.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0))
+	by.add_theme_color_override("font_outline_color", Color.BLACK); by.add_theme_constant_override("outline_size", 6)
+	box.add_child(by)
 	var pick := HBoxContainer.new(); pick.alignment = BoxContainer.ALIGNMENT_CENTER; pick.add_theme_constant_override("separation", 20)
 	box.add_child(pick)
 	var desc := Label.new(); desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -95,18 +111,27 @@ func show_menu() -> void:
 		pick.add_child(b)
 	desc.text = Characters.ALL[selected].tagline
 	box.add_child(desc)
-	var play := _menu_btn("SURVIVE", 36, 360, 80); play.pressed.connect(start_game); box.add_child(play)
-	var sb := _menu_btn("Settings", 24, 240, 56); box.add_child(sb)
+	var play := _menu_btn("START MATCH", 36, 360, 76); play.pressed.connect(start_game); box.add_child(play)
+	var row := HBoxContainer.new(); row.alignment = BoxContainer.ALIGNMENT_CENTER; row.add_theme_constant_override("separation", 16); box.add_child(row)
+	var sb := _menu_btn("Settings", 24, 220, 54); row.add_child(sb)
 	sb.pressed.connect(func():
 		var panel := SettingsPanel.make(settings, func(): Game.save_settings(settings), [])
 		var close := _menu_btn("Back", 28, 320, 64)
 		panel.get_child(0).add_child(close)
 		close.pressed.connect(panel.queue_free)
 		menu.add_child(panel))
-	var ab := _menu_btn("Armory", 24, 240, 56); box.add_child(ab)
+	var ab := _menu_btn("Armory", 24, 220, 54); row.add_child(ab)
 	ab.pressed.connect(_show_armory)
+	if not OS.has_feature("mobile") and not OS.has_feature("web"):
+		var qb := _menu_btn("Quit", 24, 220, 54); row.add_child(qb); qb.pressed.connect(get_tree().quit)
+	var rec := Label.new(); rec.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var hs := HighScore.new(); var r := hs.load_records()
+	rec.text = Hud.records_text(r) if int(r.round) > 0 or int(r.score) > 0 else "No record yet — survive your first round"
+	rec.add_theme_font_size_override("font_size", 22); rec.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	rec.add_theme_color_override("font_outline_color", Color.BLACK); rec.add_theme_constant_override("outline_size", 6)
+	box.add_child(rec)
 	var note := Label.new(); note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	note.text = "Solo · Co-op coming next · WASD/mouse, V knife, G grenade, Q ability · or touch"
+	note.text = "Offline single-player  ·  touch, keyboard + mouse or gamepad  ·  v%s" % ProjectSettings.get_setting("application/config/version", "")
 	note.add_theme_font_size_override("font_size", 18); note.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
 	box.add_child(note)
 
@@ -136,9 +161,48 @@ func start_game() -> void:
 	if diorama: diorama.queue_free(); diorama = null
 	if game: game.queue_free()
 	game = Game.new(); game.character_id = selected; game.force_touch = args.has("touch")
+	game.auto_pause = not _scripted()
 	game.exit_to_menu.connect(func(): call_deferred("show_menu"))
 	game.restart_requested.connect(func(): call_deferred("start_game"))
 	add_child(game)
+
+## True for capture / bot runs started from the command line: those must never auto-pause.
+func _scripted() -> bool:
+	for k in ["shots", "sim", "probe", "clip", "views", "hud", "check", "v8shots"]:
+		if args.has(k): return true
+	return false
+
+## --v8shots=<dir>: menu, the Service Passage door prompt, the between-round countdown and the results screen.
+func _v8shots(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	await _wait(30); await _snap(dir, "v8_01_menu.png")
+	start_game()
+	game.allow_tutorial = false; game.god_mode = true
+	var pl := game.player
+	await _wait(20)
+	game.auto_rounds = false
+	game.throw_power(Node3D.new()); game.map.open_door("east"); game.facility.open_doors["east"] = true
+	pl.economy.points = 600
+	pl.global_position = Vector3(25.0, 0.1, -6.2); pl.yaw = 0.0; pl.pitch = 0.05; pl.velocity = Vector3.ZERO
+	await _wait(70)
+	await _snap(dir, "v8_02_service_door_prompt.png")
+	game.auto_rounds = true; game.intermission = 6.0
+	pl.global_position = Vector3(0, 0.1, 5); pl.yaw = 0.0; pl.pitch = 0.0
+	pl.loadout.give(Weapons.make("scatter"))
+	await _wait(40)
+	await _snap(dir, "v8_03_countdown_shotgun.png")
+	game.round = 7; game.kills = 96; game.stats.kills = 96; game.stats.headshots = 31; game.stats.points_earned = 11840
+	game.high = HighScore.new("user://v8shots_highscore.cfg")
+	game.on_player_bled_out(pl)
+	await _wait(6)
+	await _snap(dir, "v8_04_results.png")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://v8shots_highscore.cfg"))
+	get_tree().quit()
+
+## `godot --headless --fixed-fps 60 -- --check`: scene-level self-check (see scripts/game/self_check.gd).
+func _check() -> void:
+	args["touch"] = "1"
+	var sc := SelfCheck.new(); sc.main = self; add_child(sc)
 
 func _snap(dir: String, name: String) -> void:
 	await RenderingServer.frame_post_draw

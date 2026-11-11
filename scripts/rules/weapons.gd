@@ -7,7 +7,7 @@ static func make(id: String) -> WeaponDef:
 	match id:
 		"sidearm": return WeaponDef.new("sidearm", "Volt Sidearm", 80, 0.28).setup({weight = 0.6, mag_size = 8, reserve_mags = 10, reload_time = 1.3, spread_deg = 0.5, recoil = 1.8, ads_time = 0.15,
 			recoil_pattern = [Vector2(1, 0.1), Vector2(1, -0.2)], upgrade_name = "Volt Tempest", color = Color(0.45, 0.5, 0.55)})
-		"scatter": return WeaponDef.new("scatter", "Scatterbolt", 60, 0.75).setup({weight = 1.25, pellets = 6, mag_size = 6, reserve_mags = 9, reload_time = 2.4, spread_deg = 5.0, recoil = 4.5, ads_time = 0.25,
+		"scatter": return WeaponDef.new("scatter", "Scatterbolt", 60, 0.75).setup({weight = 1.25, pellets = 6, mag_size = 6, reserve_mags = 9, reload_time = 2.4, shell_reload = 0.4, spread_deg = 5.0, recoil = 4.5, ads_time = 0.25,
 			recoil_pattern = [Vector2(1, 0.3)], upgrade_name = "Thunderclap", color = Color(0.55, 0.38, 0.22)})
 		"rifle": return WeaponDef.new("rifle", "Pulse Rifle", 110, 0.11).setup({weight = 1.0, mag_size = 30, reserve_mags = 6, reload_time = 2.0, automatic = true, spread_deg = 1.0, recoil = 1.1, ads_time = 0.25,
 			recoil_pattern = [Vector2(1, 0.1), Vector2(1, 0.3), Vector2(0.9, -0.1), Vector2(1.1, 0.4), Vector2(0.8, -0.3)], upgrade_name = "Storm Pulse", color = Color(0.25, 0.32, 0.25)})

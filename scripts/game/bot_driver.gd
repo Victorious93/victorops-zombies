@@ -165,7 +165,7 @@ func _bag_full(p: Player) -> bool:
 
 func _finish() -> void:
 	set_physics_process(false)
-	var lines: Array[String] = ["VictorOps Zombies bot sim · %d rounds requested" % max_rounds]
+	var lines: Array[String] = ["VICTOR ZOMBIES bot sim · %d rounds requested" % max_rounds]
 	lines.append("round | seconds | zombies | zombie HP")
 	var total := 0.0
 	for r in game.round_times:

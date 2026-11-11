@@ -111,7 +111,7 @@ func _build_env() -> void:
 	env.background_color = Color(0.01, 0.012, 0.02)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.26, 0.3, 0.42)
-	env.ambient_light_energy = 0.32   # pre-power: moody but readable
+	env.ambient_light_energy = 0.42   # pre-power: moody but readable (v8: lifted so silhouettes read on dim phone screens)
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	env.fog_enabled = true
 	env.fog_light_color = Color(0.06, 0.07, 0.09)
@@ -226,10 +226,32 @@ func _start_music() -> void:
 func toggle_pause() -> void:
 	if over: return
 	paused = not paused
+	if touch: touch.reset()
 	hud.show_pause(paused)
 	if not touch.visible:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if paused else Input.MOUSE_MODE_CAPTURED
 	get_tree().paused = paused
+
+## v8: the match pauses itself when the app loses focus or is backgrounded (Android home / task switch /
+## incoming call), and the Android back gesture opens the pause menu instead of quitting.
+var auto_pause := true   ## scripted captures and the bot sim turn this off
+func _notification(what: int) -> void:
+	match what:
+		NOTIFICATION_APPLICATION_PAUSED, NOTIFICATION_APPLICATION_FOCUS_OUT, NOTIFICATION_WM_WINDOW_FOCUS_OUT:
+			if wants_auto_pause(auto_pause, paused, over, player != null and player.bot_input != null) and hud and not headless_sim():
+				toggle_pause()
+		NOTIFICATION_WM_GO_BACK_REQUEST:
+			if hud and not over: toggle_pause()
+static func wants_auto_pause(enabled: bool, is_paused: bool, is_over: bool, scripted: bool) -> bool:
+	return enabled and not is_paused and not is_over and not scripted
+
+## "Open Lab Corridor — 1000 points", or the same with what is missing when the player cannot pay.
+static func price_text(points: int, action: String, cost: int) -> String:
+	if points >= cost: return "%s — %d points" % [action, cost]
+	return "%s — %d points (need %d more)" % [action, cost, cost - points]
+
+func _deny_cost(p: Player, cost: int) -> void:
+	_deny("Not enough points — need %d more" % maxi(cost - p.economy.points, 0))
 
 func add_interactable(pos: Vector3, radius: float, prompt: Callable, use: Callable, hold := false) -> Dictionary:
 	var it := {pos = pos, r = radius, prompt = prompt, use = use, hold = hold}
@@ -340,6 +362,7 @@ func _update_rounds(dt: float) -> void:
 		round_times[round] = round_clock
 		intermission = Rounds.INTERMISSION
 		hud.banner("Round %d survived" % round, 3.0)
+		hud.info("Round %d complete — restock and rebuild" % round)
 		sfx.play("round_end", -7)
 		sfx.play("round_end_v6", -1)
 		if pact.on_round_end(round): _seal_pact()
@@ -766,7 +789,7 @@ func on_player_bled_out(p: Player) -> void:
 	var run := {"round": round, "kills": kills, "points": stats.points_earned, "headshots": stats.headshots}
 	var prev := high.load_best().duplicate()
 	var is_best := high.submit(run)
-	hud.show_game_over(round, kills, stats, prev, is_best)
+	hud.show_game_over(round, kills, stats, prev, is_best, high.records, high.new_round, high.new_score)
 	announce("ann_gameover_v7", 0.4)
 	if is_best: announce("ann_highscore_v7", 2.6)
 	sfx.play("round_end", 0, 0.7)
@@ -938,6 +961,8 @@ func repair_window(p: Player, w: WindowBarricade) -> void:
 		if p and is_instance_valid(p): p.add_trauma(0.07)
 
 func buy_door(p: Player, id: String) -> void:
+	if facility.open_doors.get(id, false): return
+	if not p.economy.can_afford(Facility.DOORS[id].cost): _deny_cost(p, Facility.DOORS[id].cost); return
 	var err := facility.buy_door(id, p.economy)
 	if err != "": _deny(err); return
 	sfx.play("door"); sfx.play("buy", -6)
@@ -954,18 +979,19 @@ func throw_power(lever: Node3D) -> void:
 	hud.banner("Power restored", 3.0)
 	hud.power_flash()
 	var g := create_tween(); g.tween_interval(wave * 0.5); g.tween_callback(func(): player.add_trauma(0.35))
-	env.ambient_light_energy = 0.5
+	env.ambient_light_energy = 0.58
 	if player.flashlight: player.flashlight.shadow_enabled = flashlight_shadows()
 	player.add_trauma(0.3)
 
 func perk_prompt(p: Player, id: String) -> String:
 	var d: Dictionary = Perks.ALL[id]
-	if not facility.power_on: return "%s: power required" % d.name
+	if not facility.power_on: return "%s — no power (throw the switch in the Generator Wing)" % d.name
 	if p.perks.get(id, false) == true: return ""
-	if id == "lazarus" and int(p.perks.get("_lazarus_buys", 0)) >= Perks.LAZARUS_MAX: return "%s: sold out" % d.name
-	return "%s (%s): %d" % [d.name, d.desc, d.cost]
+	if id == "lazarus" and int(p.perks.get("_lazarus_buys", 0)) >= Perks.LAZARUS_MAX: return "%s — sold out" % d.name
+	return price_text(p.economy.points, "%s (%s)" % [d.name, d.desc], d.cost)
 
 func buy_perk(p: Player, id: String) -> void:
+	if facility.power_on and not p.perks.get(id, false) and not p.economy.can_afford(Perks.ALL[id].cost): _deny_cost(p, Perks.ALL[id].cost); return
 	var err := Perks.buy(id, p.perks, p.economy, facility.power_on)
 	if err != "": _deny(err); return
 	sfx.play("perk")
@@ -976,10 +1002,10 @@ func buy_perk(p: Player, id: String) -> void:
 
 func forge_prompt(p: Player) -> String:
 	if forge_busy > 0.0: return ""
-	if not facility.power_on: return "%s: power required" % OverchargeForge.NAME
+	if not facility.power_on: return "%s — no power (throw the switch in the Generator Wing)" % OverchargeForge.NAME
 	var c := forge.cost_for(p.weapon())
-	if c < 0: return "%s: weapon maxed" % OverchargeForge.NAME
-	return "%s -> Mk.%d: %d" % [OverchargeForge.NAME, p.weapon().tier + 2, c]
+	if c < 0: return "%s — %s is fully upgraded" % [OverchargeForge.NAME, p.weapon().display_name()]
+	return price_text(p.economy.points, "Upgrade %s to Mk.%d" % [p.weapon().name, p.weapon().tier + 2], c)
 
 func use_forge(p: Player) -> void:
 	if not facility.power_on: _deny("Power required"); return
@@ -987,11 +1013,13 @@ func use_forge(p: Player) -> void:
 	var slot := p.loadout.current
 	var up := forge.upgrade(p.weapon(), p.economy)
 	if up == null:
-		_deny("Already maxed" if p.weapon().is_maxed() else "Not enough points"); return
+		if p.weapon().is_maxed(): _deny("Already fully upgraded")
+		else: _deny_cost(p, forge.cost_for(p.weapon()))
+		return
 	# the forge swallows the gun for ~5 s, then hands back the overcharged version
 	forge_busy = OverchargeForge.FORGE_TIME
 	var held: Ammo = p.loadout.slots[slot]
-	held.reload_left = OverchargeForge.FORGE_TIME   # can't fire it while it's in the machine
+	held.reload_left = 0.0; held.locked = true   # can't fire, reload or swap-cancel it while it's in the machine
 	sfx.play("forge"); sfx.play("forge_jingle", -5); announce("ann_forge_v7", 0.4); hud.info("%s working..." % OverchargeForge.NAME)
 	map.forge_working(OverchargeForge.FORGE_TIME)
 	var tw := create_tween(); tw.tween_property(self, "forge_busy", 0.0, OverchargeForge.FORGE_TIME)
@@ -1006,13 +1034,13 @@ func crate_prompt(p: Player) -> String:
 	match crate_node.state:
 		CrateNode.State.ROLLING: return ""
 		CrateNode.State.READY: return "Take %s (%ds)" % [Weapons.make(crate_node.result).name, ceili(crate_node.t)]
-	return "Mystery Crate: %d" % crate.cost
+	return price_text(p.economy.points, "Mystery Crate (random weapon)", crate.cost)
 
 func use_crate(p: Player) -> void:
 	match crate_node.state:
 		CrateNode.State.IDLE:
 			var id := crate.buy(p.economy, rng, p.weapon().id)
-			if id == "": _deny("Not enough points"); return
+			if id == "": _deny_cost(p, crate.cost); return
 			crate_node.start(id); sfx.play_at("crate", crate_node.global_position + Vector3.UP)
 			sfx.play_at("crate_jingle", crate_node.global_position + Vector3.UP, -4)
 			if crate_mover.on_roll(rng): crate_node.move_after = true
@@ -1025,17 +1053,18 @@ func wall_prompt(p: Player, id: String) -> String:
 	var i := p.loadout.has(id)
 	if i >= 0:
 		if p.loadout.slots[i].is_full(): return ""
-		return "%s ammo: %d" % [p.loadout.slots[i].weapon.display_name(), Weapons.ammo_price(id) * (5 if p.loadout.slots[i].weapon.tier > 0 else 1)]
-	return "Buy %s: %d" % [Weapons.make(id).name, Weapons.WALL_PRICES[id]]
+		return price_text(p.economy.points, "Refill %s ammo" % p.loadout.slots[i].weapon.display_name(), Weapons.ammo_price(id) * (5 if p.loadout.slots[i].weapon.tier > 0 else 1))
+	return price_text(p.economy.points, "Buy %s" % Weapons.make(id).name, Weapons.WALL_PRICES[id])
 
 func buy_wall(p: Player, id: String) -> void:
 	var i := p.loadout.has(id)
 	if i >= 0:
 		var a: Ammo = p.loadout.slots[i]
 		if a.is_full(): return
-		if not p.economy.spend(Weapons.ammo_price(id) * (5 if a.weapon.tier > 0 else 1)): _deny("Not enough points"); return
+		var ac: int = Weapons.ammo_price(id) * (5 if a.weapon.tier > 0 else 1)
+		if not p.economy.spend(ac): _deny_cost(p, ac); return
 		a.refill(); sfx.play("buy", -4); hud.info("Ammo refilled"); return
-	if not p.economy.spend(Weapons.WALL_PRICES[id]): _deny("Not enough points"); return
+	if not p.economy.spend(Weapons.WALL_PRICES[id]): _deny_cost(p, Weapons.WALL_PRICES[id]); return
 	p.loadout.give(Weapons.make(id)); p.apply_reload_perk()
 	if tutorial: tutorial.event("buy")
 	sfx.play("buy", -4); hud.info("Bought %s" % Weapons.make(id).name)
@@ -1279,7 +1308,7 @@ func _tick_sentry(e: Dictionary, dt: float) -> void:
 	_tracer(muzzle, aim, Weapons.make("rifle"))
 
 func tech_locker_prompt(p: Player) -> String:
-	return "Tech Locker (random gadget): %d" % Backpack.LOCKER_PRICE
+	return price_text(p.economy.points, "Tech Locker (random gadget)", Backpack.LOCKER_PRICE)
 
 func use_tech_locker(p: Player) -> void:
 	var id: String = Backpack.GADGETS.keys()[rng.randi_range(0, Backpack.GADGETS.size() - 1)]
