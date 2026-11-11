@@ -82,7 +82,7 @@ func _t_shooting() -> void:
 	z.hp = 100000
 	game.hitscan(pl, Vector3(0.9, 1.66, 3), Vector3(0, 0, -1), w)
 	ok(z.hp == 100000, "a shot past the head misses")
-	# zombie behind the closed Generator Wing wall: the bullet must stop at the wall
+	# zombie behind the closed Back Alley wall: the bullet must stop at the wall
 	z.global_position = Vector3(4, 0.05, -11.5)
 	await frames(3)
 	game.hitscan(pl, Vector3(4, 1.1, -8.5), Vector3(0, 0, -1), w)
@@ -148,11 +148,11 @@ func _t_purchases_and_nav() -> void:
 	pl.global_position = Vector3(8.4, 0.1, 0); pl.yaw = -PI / 2; pl.velocity = Vector3.ZERO
 	await frames(4)
 	pl.economy.points = 400; game._update_prompt()
-	ok(game.current_prompt == "Open Lab Corridor — 1000 points (need 600 more)", "prompt explains an unaffordable door", game.current_prompt)
+	ok(game.current_prompt == "Open General Store — 1000 points (need 600 more)", "prompt explains an unaffordable door", game.current_prompt)
 	game.player_use(pl, true, false)
 	ok(pl.economy.points == 400 and not game.facility.open_doors.has("east"), "cannot buy without the points")
 	pl.economy.points = 3000; game._update_prompt()
-	ok(game.current_prompt == "Open Lab Corridor — 1000 points", "prompt shows action and price", game.current_prompt)
+	ok(game.current_prompt == "Open General Store — 1000 points", "prompt shows action and price", game.current_prompt)
 	for i in 20: game.player_use(pl, false, true)   # button held: no purchase without a fresh press
 	ok(pl.economy.points == 3000, "holding the use button does not buy")
 	game.player_use(pl, true, false)
@@ -167,7 +167,7 @@ func _t_purchases_and_nav() -> void:
 	pl.economy.points = 5000
 	game.buy_door(pl, "cold"); game.buy_door(pl, "north")
 	await frames(240)
-	ok(_reach(gen), "the loop Intake - Generator - Cold - Lab is fully connected")
+	ok(_reach(gen), "the loop Diner - Back Alley - Garage - Store is fully connected")
 	var p0 := NavigationServer3D.map_get_path(game.map.get_navigation_map(), Vector3(0, 0.1, 3), cold, true)
 	ok(p0.size() >= 2, "navmesh path exists after doors change", "%d points" % p0.size())
 	# wall weapon: buy once, then ammo only when not full

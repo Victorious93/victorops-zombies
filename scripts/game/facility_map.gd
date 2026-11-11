@@ -1,21 +1,27 @@
 class_name FacilityMap
 extends NavigationRegion3D
-## "Blackwater Quarantine Annex": original map built in code. Intake Hall (start) plus buyable
-## areas joined in a loop (Intake -> Generator -> Cold Storage -> Lab -> Intake via the Service Passage): Generator Wing (power switch), Lab Corridor (catwalk), Cold Storage (Overcharge Forge) and the
-## open-air Loading Yard (raised dock + island for training loops). PBR surfaces use CC0 ambientCG
-## textures and props are CC0 Quaternius / Kenney models (see ASSETS.md).
+## "Ashgrove, Main Street": the original abandoned-town map of VICTOR ZOMBIES (Victorious Framework),
+## built in code. The Victory Diner (start) joins the Back Alley (generator + power), Hollis Auto Repair
+## (Overcharge Forge) and Mercer's General Store in one loop; the store opens onto Main Street, the
+## street onto the Courtyard evacuation point, and the Side Alley closes a second loop back to the store.
+## Area ids in the rules (intake / generator / cold / lab / yard / pump) are unchanged from v8, so doors,
+## windows, spawns and the economy carry over. Surfaces: CC0 ambientCG PBR sets + original generated
+## town art (tools/gen_town_art.py); props: CC0 Quaternius models. See ASSETS.md.
 
 const H := 4.0
-## v7.10 extra ceiling lamp spots (x, z): 3 per room around each room's centre lamp, plus the pump house.
+## Secondary lamps (x, z): three per area around its main lamp, plus two over the Courtyard.
 const EXTRA_LAMPS := [Vector2(-6, 6), Vector2(6, 6), Vector2(-6, -6), Vector2(-6, -14), Vector2(6, -22), Vector2(-6, -22),
 	Vector2(13, 6), Vector2(23, 6), Vector2(22, -6), Vector2(14, -14), Vector2(22, -22), Vector2(14, -22),
 	Vector2(31, 14), Vector2(41, 26)]
 const T := 0.4
+## Roofed rooms (x0, z0, x1, z1): lamps inside hang from a ceiling, lamps outside hang from cables.
+const ROOFED := [Rect2(-10, -10, 20, 20), Rect2(10, -10, 16, 20), Rect2(10, -26, 16, 16)]
 
 var game
+var kit: TownKit
 var windows := {}      # id -> WindowBarricade
 var doors := {}        # id -> StaticBody3D
-var room_lights: Array = []    # white lights enabled by power
+var room_lights: Array = []    # lights enabled by power
 var emergency_lights: Array = []
 var bounce_lights: Array = []
 const BOUNCE_OFF := 0.18
@@ -40,6 +46,10 @@ var _t := 0.0
 var alarm_lights: Array = []   ## pulsing red alarms that kick in after round 5
 var alarm_mats: Array = []
 const ALARM_ROUND := 6
+var fires: Array = []          ## distant fire-glow materials (flickered in _process)
+const SIGN_NEON_OFF := 0.12    ## the diner's neon before the generator is running
+const SIGN_NEON_ON := 2.2
+const LAMP_OFF := 0.06         ## dead lamp glass before the generator runs
 
 func _ready() -> void:
 	var nm := NavigationMesh.new()
@@ -51,6 +61,9 @@ func _ready() -> void:
 
 func _tex(name: String, kind: String) -> Texture2D:
 	return load("res://assets/textures/%s_%s.jpg" % [name, kind])
+
+func _town(name: String) -> Texture2D:
+	return load("res://assets/town/%s.png" % name)
 
 ## PBR material from an ambientCG set (albedo/normal/roughness), triplanar so boxes of any size tile.
 func _pbr(name: String, tint := Color.WHITE, scale := 0.5, metal := 0.0) -> StandardMaterial3D:
@@ -69,58 +82,6 @@ func _grimy(m: StandardMaterial3D) -> StandardMaterial3D:
 	m.detail_albedo = Zombie.grime_tex(); m.detail_uv_layer = BaseMaterial3D.DETAIL_UV_1
 	return m
 
-## Mobile-friendly light shaft: an additive, Y-billboarded gradient card (no volumetrics).
-static var _shaft_mat: StandardMaterial3D
-func shaft(pos: Vector3, h: float, w: float, col: Color, parent: Node = null) -> MeshInstance3D:
-	if _shaft_mat == null:
-		var g := Gradient.new(); g.set_color(0, Color(1, 1, 1, 0.0)); g.add_point(0.15, Color(1, 1, 1, 0.55)); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
-		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill_from = Vector2(0.5, 0); gt.fill_to = Vector2(0.5, 1); gt.width = 8; gt.height = 64
-		var sideg := Gradient.new(); sideg.set_color(0, Color(1, 1, 1, 0)); sideg.add_point(0.5, Color.WHITE); sideg.set_color(sideg.get_point_count() - 1, Color(1, 1, 1, 0))
-		_shaft_mat = StandardMaterial3D.new(); _shaft_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		_shaft_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD; _shaft_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_shaft_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y; _shaft_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		_shaft_mat.albedo_texture = gt; _shaft_mat.vertex_color_use_as_albedo = true; _shaft_mat.disable_fog = true
-		_shaft_mat.detail_enabled = false
-		var sgt := GradientTexture2D.new(); sgt.gradient = sideg; sgt.width = 32; sgt.height = 4
-		_shaft_mat.detail_enabled = true; _shaft_mat.detail_albedo = sgt; _shaft_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
-	var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2(w, h); mi.mesh = qm
-	var m := _shaft_mat.duplicate() as StandardMaterial3D; m.albedo_color = col; mi.material_override = m
-	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	mi.position = pos
-	(parent if parent else self).add_child(mi)
-	return mi
-
-## Night sky: procedural dark gradient + a glowing moon disc in the moon light's direction.
-var moon_light: DirectionalLight3D
-func build_sky() -> void:
-	var moon := moon_light
-	if game == null or game.env == null or moon == null: return
-	var hdr := "res://assets/sky/satara_night_no_lamps_1k.hdr"
-	var sky := Sky.new(); sky.radiance_size = Sky.RADIANCE_SIZE_32
-	if ResourceLoader.exists(hdr):
-		var pm := PanoramaSkyMaterial.new(); pm.panorama = load(hdr); pm.energy_multiplier = 0.35   # CC0 Poly Haven HDRI
-		sky.sky_material = pm
-	else:
-		var sm := ProceduralSkyMaterial.new()
-		sm.sky_top_color = Color(0.01, 0.015, 0.04); sm.sky_horizon_color = Color(0.06, 0.07, 0.12)
-		sky.sky_material = sm
-	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
-	game.env.fog_sky_affect = 0.35
-	# moon disc + halo far away along -light direction
-	var dir := moon.global_transform.basis.z.normalized()   # points toward the light source
-	var at := Vector3(18, 0, -8) + dir * 120.0
-	for pair in [[14.0, Color(0.85, 0.9, 1.0, 1.0)], [46.0, Color(0.35, 0.45, 0.8, 0.35)]]:
-		var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2.ONE * pair[0]; mi.mesh = qm
-		var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-		m.disable_fog = true; m.albedo_color = pair[1]; m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		var g := Gradient.new(); g.set_color(0, Color.WHITE); g.add_point(0.45 if pair[0] < 20 else 0.05, Color.WHITE); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
-		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill = GradientTexture2D.FILL_RADIAL
-		gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(0.5, 0.0); gt.width = 64; gt.height = 64
-		m.albedo_texture = gt; mi.material_override = m
-		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		add_child(mi); mi.global_position = at
-
 func _mat(c: Color, rough := 0.9, metal := 0.0) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new(); m.albedo_color = c; m.roughness = rough; m.metallic = metal
 	return m
@@ -130,7 +91,87 @@ func _emit(c: Color, e := 3.0) -> StandardMaterial3D:
 	m.emission_enabled = true; m.emission = c; m.emission_energy_multiplier = e
 	return m
 
-## Box with optional collider; returns the body (or mesh when no collider).
+## Upper-storey facade: generated window texture with its own emission map (a few lit rooms).
+func _facade(name: String, tint := Color.WHITE) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new(); m.albedo_texture = _town(name); m.albedo_color = tint; m.roughness = 0.95
+	m.emission_enabled = true; m.emission_texture = _town(name + "_emit"); m.emission = Color(1.0, 0.78, 0.5)
+	m.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY; m.emission_energy_multiplier = 0.9
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	return m
+
+func _corr(tint: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new(); m.albedo_texture = _town("corrugated_albedo"); m.albedo_color = tint
+	m.normal_enabled = true; m.normal_texture = _town("corrugated_normal"); m.roughness = 0.7; m.metallic = 0.35
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	return m
+
+func _build_mats() -> void:
+	# coordinated town palette: brick, concrete, asphalt, glass, corroded metal, weathered signage
+	mats.brick = _pbr("bricks090", Color(0.62, 0.56, 0.54), 0.45)
+	mats.brick_dark = _pbr("bricks090", Color(0.42, 0.4, 0.42), 0.45)
+	mats.wall_brick = mats.brick; mats.wall_ext = mats.brick_dark
+	mats.diner_wall = _pbr("paintedplaster017", Color(0.74, 0.69, 0.58), 0.4)
+	mats.store_wall = _pbr("paintedplaster016", Color(0.62, 0.62, 0.58), 0.3)
+	mats.wall = mats.store_wall
+	mats.conc = _pbr("concrete044c", Color(0.72, 0.72, 0.7), 0.5)
+	mats.wall_low = mats.conc
+	mats.kerb = _pbr("concrete034", Color(0.62, 0.62, 0.6), 0.5)
+	mats.floor = _pbr("concrete031", Color(0.6, 0.6, 0.58), 0.3)
+	mats.tile = _pbr("tiles074", Color(0.78, 0.76, 0.72), 0.5)
+	mats.woodfloor = _pbr("woodfloor041", Color(0.7, 0.66, 0.6), 0.4)
+	mats.ground = _pbr("asphalt026c", Color(0.62, 0.63, 0.64), 0.22)
+	mats.cobble = _pbr("bricks076c", Color(0.66, 0.66, 0.66), 0.4)
+	mats.dirt = _pbr("ground037", Color(0.5, 0.5, 0.46), 0.3)
+	mats.wood = _pbr("planks021", Color(0.6, 0.5, 0.4), 0.6)
+	mats.plank = _pbr("planks021", Color(0.42, 0.32, 0.22), 0.8)
+	mats.door_wood = _pbr("planks021", Color(0.3, 0.26, 0.24), 0.7)
+	mats.rust = _pbr("rust004", Color.WHITE, 0.6, 0.4)
+	mats.trim = _pbr("metal049a", Color(0.3, 0.29, 0.28), 1.0, 0.5)
+	mats.door = _pbr("metalplates006", Color(0.62, 0.64, 0.68), 0.6, 0.7)
+	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
+	mats.metal = _pbr("metal032", Color(0.7, 0.7, 0.72), 0.8, 0.8)
+	mats.steel = _pbr("metal032", Color(0.46, 0.48, 0.5), 0.8, 0.6)
+	mats.plate = _pbr("diamondplate008c", Color(0.75, 0.75, 0.78), 0.6, 0.85)
+	mats.ceiling = _pbr("paintedplaster017", Color(0.5, 0.5, 0.48), 0.3)
+	mats.roof = _pbr("concrete031", Color(0.34, 0.34, 0.36), 0.3)
+	mats.lamp = _emit(Color(1.0, 0.86, 0.62), LAMP_OFF)
+	mats.lamp_cool = _emit(Color(0.82, 0.9, 1.0), 1.6)
+	mats.corr = _corr(Color(0.86, 0.88, 0.9)); mats.corr_red = _corr(Color(0.86, 0.42, 0.34))
+	mats.corr_blue = _corr(Color(0.42, 0.56, 0.78)); mats.corr_olive = _corr(Color(0.56, 0.62, 0.42))
+	mats.facade_brick = _facade("facade_brick"); mats.facade_plaster = _facade("facade_plaster")
+	mats.facade_concrete = _facade("facade_concrete", Color(0.8, 0.82, 0.86))
+	var sg := StandardMaterial3D.new(); sg.albedo_texture = _town("signs"); sg.roughness = 0.8
+	sg.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	mats.signs = sg
+	var sl := sg.duplicate() as StandardMaterial3D; sl.emission_enabled = true; sl.emission_texture = _town("signs_emit")
+	sl.emission = Color.WHITE; sl.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY; sl.emission_energy_multiplier = SIGN_NEON_OFF
+	mats.signs_lit = sl
+	mats.sign_back = _mat(Color(0.1, 0.1, 0.11), 0.6, 0.4)
+	var gl := StandardMaterial3D.new(); gl.albedo_texture = _town("glass_broken"); gl.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gl.cull_mode = BaseMaterial3D.CULL_DISABLED; gl.roughness = 0.08; gl.metallic = 0.2; gl.metallic_specular = 0.9
+	mats.glass = gl
+	var rp := StandardMaterial3D.new(); rp.albedo_texture = _town("road_paint"); rp.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rp.roughness = 0.9; rp.uv1_triplanar = true; rp.uv1_scale = Vector3.ONE * 0.5; rp.render_priority = -1
+	mats.paint = rp
+	var rpy := rp.duplicate() as StandardMaterial3D; rpy.albedo_color = Color(0.95, 0.78, 0.25); mats.paint_yellow = rpy
+	var vn := StandardMaterial3D.new(); vn.albedo_texture = _town("vinyl_red"); vn.roughness = 0.45; vn.uv1_triplanar = true; vn.uv1_scale = Vector3.ONE * 1.6
+	mats.vinyl = vn
+	mats.formica = _mat(Color(0.78, 0.74, 0.66), 0.35)
+	mats.chrome = _mat(Color(0.72, 0.74, 0.76), 0.25, 0.9)
+	mats.dark = _mat(Color(0.05, 0.05, 0.06), 1.0)
+	mats.pane = _mat(Color(0.06, 0.08, 0.11), 0.15, 0.3)
+	mats.carton = _pbr("planks021", Color(0.62, 0.5, 0.36), 2.0)
+	mats.tin = _mat(Color(0.5, 0.2, 0.16), 0.5, 0.4)
+	mats.canvas = _mat(Color(0.3, 0.34, 0.24), 0.95)
+	mats.sandbag = _mat(Color(0.5, 0.45, 0.34), 1.0)
+	mats.awn_red = _mat(Color(0.5, 0.13, 0.11), 0.9); mats.awn_green = _mat(Color(0.16, 0.3, 0.22), 0.9)
+	mats.awn_cream = _mat(Color(0.66, 0.62, 0.5), 0.9)
+	mats.cream = _mat(Color(0.74, 0.7, 0.6), 0.5); mats.diner_red = _mat(Color(0.56, 0.1, 0.09), 0.4)
+	mats.red_glow = _emit(Color(1.0, 0.12, 0.06), 1.6)
+	mats.amber_glow = _emit(Color(1.0, 0.62, 0.2), 1.4)
+
+## Box with optional collider; returns the body (or mesh when no collider). Used for things that move
+## or need their own node (doors, machines); static architecture goes through `kit` instead.
 func box(size: Vector3, pos: Vector3, mat: Material, collide := true, layer := 1, parent: Node3D = null) -> Node3D:
 	if parent == null: parent = self
 	var mi := MeshInstance3D.new(); var bm := BoxMesh.new(); bm.size = size
@@ -142,14 +183,23 @@ func box(size: Vector3, pos: Vector3, mat: Material, collide := true, layer := 1
 	sb.add_child(cs); sb.add_child(mi); parent.add_child(sb)
 	return sb
 
+## Invisible collision box (world geometry whose visuals are batched by the kit).
+func collider(size: Vector3, pos: Vector3, yaw := 0.0, layer := 1) -> StaticBody3D:
+	var sb := StaticBody3D.new(); sb.collision_layer = layer; sb.collision_mask = 0; sb.position = pos; sb.rotation.y = yaw
+	var cs := CollisionShape3D.new(); var sh := BoxShape3D.new(); sh.size = size; cs.shape = sh
+	sb.add_child(cs); add_child(sb)
+	return sb
+
 func label(text: String, pos: Vector3, rot_y: float, size := 48, color := Color(0.9, 0.9, 0.85)) -> Label3D:
 	var l := Label3D.new(); l.text = text; l.font_size = size; l.pixel_size = 0.004
 	l.modulate = color; l.outline_size = 8; l.position = pos; l.rotation.y = rot_y
 	l.shaded = false; l.double_sided = false
 	add_child(l); return l
 
-## Axis-aligned wall from a to b (x,z). gaps: [{at, w, kind, id, out}] measured from a.
-func wall(a: Vector2, b: Vector2, gaps: Array = []) -> void:
+## Axis-aligned wall from a to b (x,z). gaps: [{at, w, kind, id, out, skin}] measured from a.
+## style: core (material of the wall body), top (height), out (body lit by the skylight),
+## pos / neg ([material, outdoor]: cladding on the +x/+z or -x/-z face, e.g. brick outside, plaster inside).
+func wall(a: Vector2, b: Vector2, gaps: Array = [], style: Dictionary = {}) -> void:
 	var along_x: bool = absf(a.y - b.y) < 0.01
 	var length := a.distance_to(b)
 	var dir := (b - a).normalized()
@@ -161,29 +211,73 @@ func wall(a: Vector2, b: Vector2, gaps: Array = []) -> void:
 	for c in cuts:
 		segs.append([cur, c[0]]); cur = c[1]
 	segs.append([cur, length])
-	var mid0 := (a + b) / 2.0   # interior partitions plaster, perimeter/outbuildings brick
-	var wm: StandardMaterial3D = mats.wall if (mid0.x > -9.9 and mid0.x < 25.9 and mid0.y > -25.9 and mid0.y < 9.9) else mats.wall_brick
+	var top: float = style.get("top", H)
 	for s in segs:
 		if s[1] - s[0] < 0.01: continue
-		_wall_piece(a, dir, along_x, s[0], s[1], 0.0, H, wm)
+		_wall_piece(a, dir, along_x, s[0], s[1], 0.0, top, style)
 	for c in cuts:
 		var g: Dictionary = c[2]
-		if g.kind == "window":
-			_wall_piece(a, dir, along_x, c[0], c[1], 0.0, 1.0, mats.wall_low)
-			_wall_piece(a, dir, along_x, c[0], c[1], 2.3, H, wm)
-			_make_window(a + dir * g.at, along_x, g)
-		elif g.kind == "door":
-			_wall_piece(a, dir, along_x, c[0], c[1], 3.0, H, wm)
-			_make_door(a + dir * g.at, along_x, g)
+		var p := a + dir * float(g.at)
+		match g.kind:
+			"window":
+				_wall_piece(a, dir, along_x, c[0], c[1], 0.0, 1.0, style)
+				_wall_piece(a, dir, along_x, c[0], c[1], 2.3, top, style)
+				_frame(p, along_x, g.w, 1.0, 2.3, mats.plank)
+				_make_window(p, along_x, g)
+			"door":
+				_wall_piece(a, dir, along_x, c[0], c[1], 3.0, top, style)
+				_frame(p, along_x, g.w, 0.0, 3.0, mats.trim, true)
+				_make_door(p, along_x, g)
+			"shop":
+				_wall_piece(a, dir, along_x, c[0], c[1], 0.0, 0.8, style)
+				_wall_piece(a, dir, along_x, c[0], c[1], 2.9, top, style)
+				_frame(p, along_x, g.w, 0.8, 2.9, mats.trim)
+				_make_shop(p, along_x, g)
+			"open":
+				_wall_piece(a, dir, along_x, c[0], c[1], 3.2, top, style)
+				_frame(p, along_x, g.w, 0.0, 3.2, mats.kerb)
 
-func _wall_piece(a: Vector2, dir: Vector2, along_x: bool, s0: float, s1: float, y0: float, y1: float, m: Material) -> void:
+func _wall_piece(a: Vector2, dir: Vector2, along_x: bool, s0: float, s1: float, y0: float, y1: float, style: Dictionary) -> void:
 	var mid := a + dir * ((s0 + s1) / 2.0)
 	var len := s1 - s0
 	var size := Vector3(len, y1 - y0, T) if along_x else Vector3(T, y1 - y0, len)
-	box(size, Vector3(mid.x, (y0 + y1) / 2.0, mid.y), m)
-	# grime strip along the floor
-	var gs := Vector3(len, 0.25, T + 0.04) if along_x else Vector3(T + 0.04, 0.25, len)
-	if y0 == 0.0: box(gs, Vector3(mid.x, 0.12, mid.y), mats.trim, false)
+	collider(size, Vector3(mid.x, (y0 + y1) / 2.0, mid.y))
+	var n := Vector3(0, 0, 1) if along_x else Vector3(1, 0, 0)
+	var core: Material = style.get("core", mats.brick)
+	# visuals in <= 8 m runs so no mesh collects more than the renderer's per-object light limit
+	var parts := maxi(1, int(ceil(len / 8.0)))
+	for i in parts:
+		var c := a + dir * (s0 + len * (i + 0.5) / parts)
+		var pl := len / parts
+		var ps := Vector3(pl, y1 - y0, T) if along_x else Vector3(T, y1 - y0, pl)
+		var pc := Vector3(c.x, (y0 + y1) / 2.0, c.y)
+		kit.outdoor = style.get("out", false)
+		kit.box(core, ps, pc)
+		for side in ["pos", "neg"]:
+			var sgn := 1.0 if side == "pos" else -1.0
+			if style.has(side):
+				kit.outdoor = style[side][1]
+				var cs := Vector3(pl, y1 - y0, 0.06) if along_x else Vector3(0.06, y1 - y0, pl)
+				kit.box(style[side][0], cs, pc + n * sgn * (T / 2.0 + 0.03))
+			if y0 == 0.0 and style.get("plinth", true):   # concrete plinth course
+				kit.outdoor = style[side][1] if style.has(side) else style.get("out", false)
+				var gs := Vector3(pl, 0.3, 0.05) if along_x else Vector3(0.05, 0.3, pl)
+				kit.box(mats.kerb, gs, Vector3(c.x, 0.15, c.y) + n * sgn * (T / 2.0 + (0.085 if style.has(side) else 0.025)))
+
+## Reveal around an opening: two jambs and a head, proud of both wall faces so doors and windows keep a
+## readable silhouette. `lamp` adds an amber marker light above (doors).
+func _frame(p: Vector2, along_x: bool, w: float, y0: float, y1: float, m: Material, lamp := false) -> void:
+	kit.outdoor = true
+	var d := T + 0.3
+	for s: float in [-1.0, 1.0]:
+		var o := Vector3(s * (w / 2.0 + 0.06), 0, 0) if along_x else Vector3(0, 0, s * (w / 2.0 + 0.06))
+		kit.box(m, Vector3(0.12, y1 - y0, d) if along_x else Vector3(d, y1 - y0, 0.12), Vector3(p.x, (y0 + y1) / 2.0, p.y) + o)
+	kit.box(m, Vector3(w + 0.24, 0.14, d) if along_x else Vector3(d, 0.14, w + 0.24), Vector3(p.x, y1 + 0.07, p.y))
+	if y0 > 0.1: kit.box(m, Vector3(w + 0.3, 0.08, d + 0.14) if along_x else Vector3(d + 0.14, 0.08, w + 0.3), Vector3(p.x, y0 - 0.04, p.y))
+	if lamp:
+		for s: float in [-1.0, 1.0]:
+			var o := Vector3(0, 0, s * (d / 2.0 + 0.05)) if along_x else Vector3(s * (d / 2.0 + 0.05), 0, 0)
+			kit.box(mats.amber_glow, Vector3(0.36, 0.12, 0.1) if along_x else Vector3(0.1, 0.12, 0.36), Vector3(p.x, y1 + 0.3, p.y) + o, 0.0, Vector2.ZERO, false)
 
 func _make_window(p: Vector2, along_x: bool, g: Dictionary) -> void:
 	var w := WindowBarricade.new()
@@ -195,34 +289,67 @@ func _make_window(p: Vector2, along_x: bool, g: Dictionary) -> void:
 	w.build(g.w)
 	windows[g.id] = w
 	# invisible blocker that stops players (layer 4) but not zombies or the navmesh
-	var size := Vector3(g.w, 1.4, T) if along_x else Vector3(T, 1.4, g.w)
-	box(size, Vector3(p.x, 1.65, p.y), null, true, 8).get_child(1).visible = false
+	collider(Vector3(g.w, 1.4, T) if along_x else Vector3(T, 1.4, g.w), Vector3(p.x, 1.65, p.y), 0.0, 8)
 	game.add_interactable(w.center() - Vector3(outv.x, 0, outv.y) * 0.6, 2.0,
 		func(pl): return "Hold to rebuild barricade (+%d points)" % Economy.REPAIR if w.bar.hp < w.bar.max_hp() else "",
 		func(pl): game.repair_window(pl, w), true)
-	# a dim light outside to silhouette the horde
-	var ol := OmniLight3D.new(); ol.light_color = Color(0.35, 0.45, 0.6); ol.light_energy = 0.6; ol.omni_range = 6
+	# a dim cool light outside to silhouette whatever is climbing in
+	var ol := OmniLight3D.new(); ol.light_color = Color(0.45, 0.55, 0.75); ol.light_energy = 0.8; ol.omni_range = 6
 	ol.position = Vector3(p.x + outv.x * 3, 2.5, p.y + outv.y * 3); add_child(ol)
 
+## Buyable door. skin: "steel" (default), "shutter" (corrugated roller door), "wood" (boarded door),
+## "gate" (iron bars you can see through).
 func _make_door(p: Vector2, along_x: bool, g: Dictionary) -> void:
-	var size := Vector3(g.w, 3.0, 0.25) if along_x else Vector3(0.25, 3.0, g.w)
-	var body := box(size, Vector3(p.x, 1.5, p.y), mats.door)
-	# warning stripes
-	var ss := Vector3(g.w * 0.9, 0.2, 0.3) if along_x else Vector3(0.3, 0.2, g.w * 0.9)
-	box(ss, Vector3(0, 0.3, 0), mats.stripe, false, 1, body)
-	box(ss, Vector3(0, 0.9, 0), mats.stripe, false, 1, body)
+	var gw: float = g.w
+	var skin: String = g.get("skin", "steel")
+	var size := Vector3(gw, 3.0, 0.25) if along_x else Vector3(0.25, 3.0, gw)
+	var dm: Material = {"steel": mats.door, "shutter": mats.corr, "wood": mats.door_wood, "gate": mats.trim}[skin]
+	var body := box(size, Vector3(p.x, 1.5, p.y), dm)
+	var mesh := body.get_child(1) as MeshInstance3D
+	var wide := func(len: float, hh: float, thick: float) -> Vector3: return Vector3(len, hh, thick) if along_x else Vector3(thick, hh, len)
+	match skin:
+		"steel":
+			for y: float in [-1.2, -0.6]: box(wide.call(gw * 0.9, 0.2, 0.3), Vector3(0, y, 0), mats.stripe, false, 1, body)
+		"wood":
+			for k in 3:
+				var bd := box(wide.call(gw + 0.3, 0.2, 0.34), Vector3(0, -0.8 + k * 0.8, 0), mats.plank, false, 1, body)
+				bd.rotation = Vector3(0, 0, [0.1, -0.14, 0.07][k]) if along_x else Vector3([0.1, -0.14, 0.07][k], 0, 0)
+		"gate":
+			mesh.visible = false
+			var n := int(gw / 0.2)
+			for k in n + 1:
+				var o := -gw / 2.0 + gw * k / n
+				box(Vector3(0.05, 3.0, 0.05), Vector3(o, 0, 0) if along_x else Vector3(0, 0, o), mats.trim, false, 1, body)
+			for y: float in [-1.3, 0.2, 1.4]: box(wide.call(gw, 0.08, 0.08), Vector3(0, y, 0), mats.trim, false, 1, body)
+			box(wide.call(0.5, 0.36, 0.14), Vector3(0, -0.2, 0), mats.rust, false, 1, body)   # chained padlock plate
 	doors[g.id] = body
 	var d: Dictionary = Facility.DOORS[g.id]
 	var rot := 0.0 if along_x else PI / 2
 	for side in [-1, 1]:
 		var l := Label3D.new(); l.text = "%s\n%d" % [d.label, d.cost]; l.font_size = 40; l.pixel_size = 0.004
 		l.outline_size = 8; l.modulate = Color(1, 0.85, 0.3); l.shaded = false
-		l.position = (Vector3(0, 0.7, 0.15 * side) if along_x else Vector3(0.15 * side, 0.7, 0))
+		l.position = (Vector3(0, 0.7, 0.18 * side) if along_x else Vector3(0.18 * side, 0.7, 0))
 		l.rotation.y = rot + (0.0 if side > 0 else PI)
 		body.add_child(l)
 	game.add_interactable(Vector3(p.x, 1.0, p.y), 2.4,
 		func(pl): return "" if facility_open(g.id) else Game.price_text(pl.economy.points, "Open %s" % d.label, d.cost),
 		func(pl): game.buy_door(pl, g.id))
+
+## Shattered shop window: you can see through it but not pass or shoot through (jagged glass, bars and
+## plywood). Purely scenery: zombies only enter through the boarded WindowBarricade openings.
+func _make_shop(p: Vector2, along_x: bool, g: Dictionary) -> void:
+	var gw: float = g.w
+	collider(Vector3(gw, 2.1, T * 0.5) if along_x else Vector3(T * 0.5, 2.1, gw), Vector3(p.x, 1.85, p.y))
+	kit.outdoor = true
+	var yaw := 0.0 if along_x else PI / 2
+	kit.quad(mats.glass, gw, 2.1, Transform3D(Basis(Vector3.UP, yaw), Vector3(p.x, 1.85, p.y)), Rect2(0, 0, gw / 2.6, 1))
+	var b := Basis(Vector3.UP, yaw)
+	for k in int(gw / 0.9):   # mullions
+		kit.box_xf(mats.trim, Vector3(0.06, 2.1, 0.08), Transform3D(b, Vector3(p.x, 1.85, p.y) + b * Vector3(-gw / 2.0 + (k + 1) * gw / (int(gw / 0.9) + 1), 0, 0)))
+	var seed := int(p.x * 13.0 + p.y * 7.0)
+	if seed % 3 != 0:   # some panes got a plywood sheet before the owners left
+		var side := -1.0 if seed % 2 == 0 else 1.0
+		kit.box_xf(mats.plank, Vector3(gw * 0.42, 1.9, 0.03), Transform3D(b * Basis(Vector3(0, 0, 1), 0.03 * side), Vector3(p.x, 1.8, p.y) + b * Vector3(side * gw * 0.26, 0, 0.12)))
 
 func facility_open(id: String) -> bool:
 	return game.facility.open_doors.get(id, false)
@@ -254,6 +381,292 @@ func rebake() -> void:
 func _on_bake_done() -> void:
 	_rebake_pending = false
 	call_deferred("rebake")
+
+# ---------------------------------------------------------------- sky + dusk light
+## Blue-gray dusk: a cheap procedural gradient sky, one cool directional "skylight" from the bright
+## western horizon (it skips roofed interiors, see TownKit.INDOOR_LAYER) and a pale early moon.
+var moon_light: DirectionalLight3D
+func build_sky() -> void:
+	if game == null or game.env == null: return
+	var sm := ProceduralSkyMaterial.new()
+	sm.sky_top_color = Color(0.2, 0.25, 0.35); sm.sky_horizon_color = Color(0.56, 0.56, 0.58); sm.sky_curve = 0.3
+	sm.ground_horizon_color = Color(0.5, 0.5, 0.52); sm.ground_bottom_color = Color(0.08, 0.09, 0.11)
+	sm.sun_angle_max = 0.0; sm.sky_energy_multiplier = 1.0
+	var sky := Sky.new(); sky.radiance_size = Sky.RADIANCE_SIZE_32; sky.sky_material = sm
+	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
+	game.env.fog_sky_affect = 0.0
+	if moon_light == null: return
+	var dir := Vector3(-0.35, 0.5, -0.8).normalized()
+	var at := Vector3(18, 0, -8) + dir * 170.0
+	for pair in [[9.0, Color(0.85, 0.9, 1.0, 0.9)], [34.0, Color(0.4, 0.5, 0.8, 0.22)]]:
+		var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2.ONE * pair[0]; mi.mesh = qm
+		var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		m.disable_fog = true; m.albedo_color = pair[1]; m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		var g := Gradient.new(); g.set_color(0, Color.WHITE); g.add_point(0.45 if pair[0] < 20 else 0.05, Color.WHITE); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
+		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill = GradientTexture2D.FILL_RADIAL
+		gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(0.5, 0.0); gt.width = 64; gt.height = 64
+		m.albedo_texture = gt; mi.material_override = m
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(mi); mi.global_position = at
+
+func _dusk_light() -> void:
+	var sun := DirectionalLight3D.new(); sun.name = "DuskLight"
+	sun.light_color = Color(0.56, 0.64, 0.82); sun.light_energy = 0.95; sun.light_specular = 0.3
+	sun.rotation_degrees = Vector3(-38, -62, 0); sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 48.0; sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.light_cull_mask = 0xFFFFF & ~TownKit.INDOOR_LAYER
+	add_child(sun); shadow_lights.append(sun); moon_light = sun
+
+# ---------------------------------------------------------------- build
+## Thin visual floor slab split into <= 10 m tiles (collision is the one big ground slab).
+func floor_rect(mat: Material, x0: float, z0: float, x1: float, z1: float, y := 0.0, outdoor := true) -> void:
+	kit.outdoor = outdoor
+	var nx := maxi(1, int(ceil((x1 - x0) / 10.0))); var nz := maxi(1, int(ceil((z1 - z0) / 10.0)))
+	var sx := (x1 - x0) / nx; var sz := (z1 - z0) / nz
+	for i in nx:
+		for j in nz:
+			kit.box(mat, Vector3(sx, 0.04, sz), Vector3(x0 + (i + 0.5) * sx, y - 0.02 + 0.012, z0 + (j + 0.5) * sz), 0.0, Vector2.ZERO, false)
+
+## Roof slab: its underside is the room's ceiling. Parapet + coping are skylit.
+func roof(r: Rect2, ceil_mat: Material, band: Material, cap: Material, band_h := 0.7, uv_m := Vector2.ZERO) -> void:
+	kit.outdoor = false
+	var nx := maxi(1, int(ceil(r.size.x / 10.0))); var nz := maxi(1, int(ceil(r.size.y / 10.0)))
+	for i in nx:
+		for j in nz:
+			kit.box(ceil_mat, Vector3(r.size.x / nx, 0.3, r.size.y / nz), Vector3(r.position.x + (i + 0.5) * r.size.x / nx, H + 0.15, r.position.y + (j + 0.5) * r.size.y / nz), 0.0, uv_m)
+	kit.outdoor = true
+	var c := r.get_center()
+	for e in [[Vector3(r.size.x + 0.7, band_h, 0.3), Vector3(c.x, H + band_h / 2.0, r.position.y - 0.2)], [Vector3(r.size.x + 0.7, band_h, 0.3), Vector3(c.x, H + band_h / 2.0, r.end.y + 0.2)],
+			[Vector3(0.3, band_h, r.size.y + 0.7), Vector3(r.position.x - 0.2, H + band_h / 2.0, c.y)], [Vector3(0.3, band_h, r.size.y + 0.7), Vector3(r.end.x + 0.2, H + band_h / 2.0, c.y)]]:
+		kit.box(band, e[0], e[1], 0.0, uv_m)
+		kit.box(cap, Vector3(e[0].x + 0.1, 0.1, e[0].z + 0.1), e[1] + Vector3(0, band_h / 2.0 + 0.05, 0))
+
+## Dark room behind a neighbouring building's window, so the horde climbs out of a believable interior
+## instead of thin air. `out` points from the window into that building.
+func room_shell(p: Vector2, out: Vector2, w := 8.0, depth := 10.0) -> void:
+	kit.outdoor = false
+	var o := Vector3(out.x, 0, out.y); var side := Vector3(-out.y, 0, out.x)
+	var c := Vector3(p.x, 0, p.y)
+	var yaw := atan2(out.x, out.y)
+	kit.box(mats.store_wall, Vector3(w, H, 0.2), c + o * depth + Vector3(0, H / 2.0, 0), yaw)
+	for s: float in [-1.0, 1.0]: kit.box(mats.store_wall, Vector3(0.2, H, depth), c + o * depth * 0.5 + side * s * w * 0.5 + Vector3(0, H / 2.0, 0), yaw)
+	kit.box(mats.woodfloor, Vector3(w, 0.04, depth), c + o * (depth * 0.5 + 0.25) + Vector3(0, 0.0, 0), yaw, Vector2.ZERO, false)
+	kit.box(mats.ceiling, Vector3(w, 0.2, depth), c + o * (depth * 0.5 + 0.25) + Vector3(0, H + 0.1, 0), yaw)
+
+func build(p_game) -> void:
+	game = p_game
+	_build_mats()
+	kit = TownKit.new(self)
+	# one ground slab under the whole town: playable floors and the zombie approach lanes share a navmesh
+	collider(Vector3(100, 1, 92), Vector3(18, -0.5, -3))
+	_build_diner()
+	_build_alley()
+	_build_garage()
+	_build_store()
+	_build_street()
+	_build_court()
+	_build_annex()
+	_build_catwalk()
+	Scenery.new(self).build()
+	_build_lamps()
+	_dusk_light()
+	_place_machines()
+	_place_fuses()
+	kit.commit()
+
+## Victory Diner (area "intake", x -10..10, z -10..10): the start room.
+func _build_diner() -> void:
+	var ext := [mats.brick, true]
+	floor_rect(mats.tile, -10, -10, 10, 10, 0.0, false)
+	wall(Vector2(-10, 10), Vector2(-10, -10), [
+		{at = 3.8, w = 2.6, kind = "shop"},
+		{at = 8.0, w = 1.8, kind = "window", id = "w_west", out = Vector2(-1, 0)},
+		{at = 17.4, w = 2.6, kind = "shop"}], {core = mats.diner_wall, neg = ext})
+	wall(Vector2(-10, 10), Vector2(10, 10), [
+		{at = 2.2, w = 2.2, kind = "shop"},
+		{at = 7.0, w = 1.8, kind = "window", id = "w_south", out = Vector2(0, 1)},
+		{at = 10.4, w = 2.6, kind = "shop"}], {core = mats.diner_wall, pos = ext})
+	wall(Vector2(-10, -10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "north", skin = "wood"}], {core = mats.diner_wall, neg = ext})
+	wall(Vector2(10, 10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "east"}], {core = mats.diner_wall, pos = [mats.store_wall, false]})
+	roof(Rect2(-10, -10, 20, 20), mats.ceiling, mats.cream, mats.diner_red)
+	kit.outdoor = true
+	for r in [[Vector3(20.9, 0.16, 0.34), Vector3(0, H + 0.2, 10.22)], [Vector3(0.34, 0.16, 20.9), Vector3(-10.22, H + 0.2, 0)], [Vector3(20.9, 0.16, 0.34), Vector3(0, H + 0.2, -10.22)]]:
+		kit.box(mats.diner_red, r[0], r[1])   # the red band every roadside diner wears
+
+## Back Alley (area "generator", x -10..10, z -26..-10): open-air service lane, generator + power switch.
+func _build_alley() -> void:
+	floor_rect(mats.ground, -10, -26, 10, -10)
+	var bd := {core = mats.brick_dark, out = true}
+	wall(Vector2(-10, -10), Vector2(-10, -26), [{at = 8.0, w = 1.8, kind = "window", id = "w_gen", out = Vector2(-1, 0)}], bd)
+	wall(Vector2(-10, -26), Vector2(10, -26), [{at = HiddenRoom.CRACK_POS.x + 10.0, w = HiddenRoom.CRACK_W, kind = "hidden"}], bd)
+	room_shell(Vector2(-10, -18), Vector2(-1, 0))
+	kit.outdoor = true
+	# tenement to the west, an office block over the sealed annex to the north
+	kit.block(Rect2(-18, -27, 8, 17.5), H, 11.2, mats.facade_brick, mats.brick_dark, mats.kerb)
+	kit.block(Rect2(-10, -34, 20.5, 8), H + 0.3, 9.4, mats.facade_plaster, mats.conc, mats.kerb)
+
+## Hollis Auto Repair (area "cold", x 10..26, z -26..-10): the workshop with the Overcharge Forge.
+func _build_garage() -> void:
+	floor_rect(mats.floor, 10, -26, 26, -10, 0.0, false)
+	var cc := {core = mats.conc, out = false}
+	wall(Vector2(10, -10), Vector2(10, -26), [{at = 8.0, w = 2.4, kind = "door", id = "cold", skin = "shutter"}], {core = mats.conc, neg = [mats.conc, true]})
+	wall(Vector2(10, -26), Vector2(26, -26), [{at = 12.0, w = 1.8, kind = "window", id = "w_cold", out = Vector2(0, -1)}], cc)
+	wall(Vector2(26, -10), Vector2(26, -26), [], {core = mats.conc, pos = [mats.conc, true]})
+	wall(Vector2(10, -10), Vector2(26, -10), [{at = 15.0, w = 1.7, kind = "door", id = "service"}], {core = mats.store_wall, neg = [mats.conc, false]})
+	roof(Rect2(10, -26, 16, 16), mats.corr, mats.corr, mats.trim, 1.3, Vector2(1.6, 1.6))
+	room_shell(Vector2(22, -26), Vector2(0, -1), 7.0)
+	kit.outdoor = false
+	for x: float in [14.0, 18.0, 22.0]:   # steel roof trusses
+		kit.box(mats.steel, Vector3(0.14, 0.3, 15.6), Vector3(x, H - 0.2, -18))
+	kit.outdoor = true
+	kit.block(Rect2(18, -36, 8.5, 10), H + 1.3, 10.5, mats.facade_brick, mats.brick_dark, mats.kerb)
+
+## Mercer's General Store (area "lab", x 10..26, z -10..10): mezzanine, aisles, storefront on Main Street.
+func _build_store() -> void:
+	floor_rect(mats.woodfloor, 10, -10, 26, 10, 0.0, false)
+	wall(Vector2(10, 10), Vector2(26, 10), [
+		{at = 6.0, w = 1.8, kind = "window", id = "w_lab", out = Vector2(0, 1)},
+		{at = 12.5, w = 2.4, kind = "door", id = "alley", skin = "wood"}], {core = mats.store_wall, pos = [mats.brick_dark, true]})
+	wall(Vector2(26, 10), Vector2(26, -10), [
+		{at = 6.2, w = 2.6, kind = "shop"},
+		{at = 10.0, w = 2.6, kind = "door", id = "yard"},
+		{at = 16.5, w = 2.6, kind = "shop"}], {core = mats.store_wall, pos = [mats.brick, true]})
+	roof(Rect2(10, -10, 16, 20), mats.ceiling, mats.brick, mats.kerb, 0.3)
+	kit.outdoor = true
+	kit.block(Rect2(10, -10, 16.3, 20), H + 0.3, 8.2, mats.facade_plaster, mats.brick, mats.kerb)
+	# Side Alley (x 20..26, z 10..14): store back door -> Courtyard, closing the street loop
+	floor_rect(mats.cobble, 20.2, 10.2, 26, 14)
+	wall(Vector2(20, 10.2), Vector2(20, 14), [], {core = mats.brick_dark, out = true})
+	wall(Vector2(20, 14), Vector2(26, 14), [], {core = mats.brick_dark, out = true})
+	room_shell(Vector2(16, 10), Vector2(0, 1))
+	kit.outdoor = true
+	kit.block(Rect2(8, 10.3, 12, 13), H, 9.6, mats.facade_brick, mats.brick_dark, mats.kerb)
+	kit.block(Rect2(20.2, 14.2, 5.8, 9), 0.0, 9.6, mats.facade_brick, mats.brick_dark, mats.kerb)
+
+## Main Street (area "yard", x 26..46, z -16..10): container blockade north, storefronts east.
+func _build_street() -> void:
+	floor_rect(mats.ground, 26, -16, 46, 10)
+	floor_rect(mats.ground, 26, -46, 46, -16)
+	var bk := {core = mats.brick, out = true}
+	wall(Vector2(46, 10), Vector2(46, -16), [
+		{at = 6.0, w = 1.8, kind = "window", id = "w_yard_s", out = Vector2(1, 0)},
+		{at = 18.0, w = 1.8, kind = "window", id = "w_yard_n", out = Vector2(1, 0)}], bk)
+	wall(Vector2(26, 10), Vector2(46, 10), [{at = 10.0, w = 2.6, kind = "door", id = "pump", skin = "gate"}], {core = mats.brick_dark, out = true, top = 4.6})
+	room_shell(Vector2(46, 4), Vector2(1, 0)); room_shell(Vector2(46, -8), Vector2(1, 0))
+	# north end: the army's container blockade (solid), with the checkpoint platform in front of it
+	collider(Vector3(20, 6, T), Vector3(36, 3, -16))
+	kit.outdoor = true
+	var cm := [mats.corr_red, mats.corr_blue, mats.corr_olive]
+	for i in 3:
+		kit.container(cm[i], mats.trim, Vector3(29.3 + i * 6.7, 0, -17.5))
+		if i < 2: kit.container(cm[(i + 1) % 3], mats.trim, Vector3(32.6 + i * 6.9, 2.6, -17.6), 0.03 - i * 0.07)
+	collider(Vector3(10, 1.4, 5), Vector3(36, 0.7, -13.5))
+	kit.box(mats.conc, Vector3(10, 1.4, 5), Vector3(36, 0.7, -13.5))
+	kit.box(mats.kerb, Vector3(10.2, 0.08, 5.2), Vector3(36, 1.42, -13.5))
+	for x: float in [29.0, 43.0]:
+		var r := box(Vector3(4, 0.3, 3.2), Vector3(x, 0.62, -12.0), mats.conc)
+		r.rotation.z = (1.0 if x < 36 else -1.0) * atan2(1.4, 4.0)
+	box(Vector3(10, 0.1, 0.1), Vector3(36, 2.4, -11.0), mats.trim)  # guard rail
+	# shops along the east side: three buildings of different heights
+	kit.block(Rect2(46, -16.5, 8, 9.5), H, 9.0, mats.facade_plaster, mats.conc, mats.kerb)
+	kit.block(Rect2(46, -7, 8, 9), H, 12.2, mats.facade_brick, mats.brick, mats.kerb)
+	kit.block(Rect2(46, 2, 8, 8.2), H, 8.2, mats.facade_brick, mats.brick_dark, mats.kerb)
+	# the street carries on beyond the blockade
+	kit.block(Rect2(46, -46, 9, 29.5), 0.0, 10.6, mats.facade_plaster, mats.conc, mats.kerb)
+	kit.block(Rect2(17, -46, 9, 10), 0.0, 12.4, mats.facade_brick, mats.brick, mats.kerb)
+
+## Courtyard (area "pump", x 26..46, z 10..30): the abandoned evacuation point.
+func _build_court() -> void:
+	floor_rect(mats.cobble, 26, 10, 46, 30)
+	var bk := {core = mats.brick_dark, out = true}
+	wall(Vector2(26, 10.2), Vector2(26, 30), [{at = 1.9, w = 3.4, kind = "open"}], bk)
+	wall(Vector2(26, 30), Vector2(46, 30), [{at = 12.0, w = 1.8, kind = "window", id = "w_pump_s", out = Vector2(0, 1)}], bk)
+	wall(Vector2(46, 30), Vector2(46, 10), [{at = 10.0, w = 1.8, kind = "window", id = "w_pump_e", out = Vector2(1, 0)}], bk)
+	room_shell(Vector2(38, 30), Vector2(0, 1)); room_shell(Vector2(46, 20), Vector2(1, 0))
+	kit.outdoor = true
+	kit.block(Rect2(46, 10.2, 8, 20), H, 11.6, mats.facade_brick, mats.brick_dark, mats.kerb)
+	kit.block(Rect2(24, 30, 30, 8), H, 13.0, mats.facade_plaster, mats.conc, mats.kerb)
+	kit.block(Rect2(18, 23.2, 8, 7), 0.0, 11.0, mats.facade_brick, mats.brick, mats.kerb)
+
+func _build_catwalk() -> void:
+	# Store mezzanine at 1.8 m along the north wall with a ramp down to the east.
+	box(Vector3(8, 0.15, 2.2), Vector3(16, 1.8, -8.5), mats.plate)
+	for x: float in [12.5, 19.5]:
+		box(Vector3(0.12, 1.8, 0.12), Vector3(x, 0.9, -7.5), mats.metal)
+	box(Vector3(8, 0.08, 0.08), Vector3(16, 2.85, -7.42), mats.stripe, false)
+	var ramp := box(Vector3(4.4, 0.15, 2.2), Vector3(22, 0.9, -8.5), mats.plate)
+	ramp.rotation.z = -atan2(1.8, 4.2)
+
+func in_roofed(x: float, z: float) -> bool:
+	for r in ROOFED:
+		if r.has_point(Vector2(x, z)): return true
+	return false
+
+## Lamps. Each area's main lamp: a powered light (off until the generator runs), a red emergency lamp
+## that works on batteries, and a soft bounce fill. Indoors they hang from the ceiling; outdoors from a
+## cable strung between the buildings.
+func _build_lamps() -> void:
+	for p in [Vector3(0, H - 0.3, 0), Vector3(0, H - 0.3, -18), Vector3(18, H - 0.3, 0), Vector3(18, H - 0.3, -18)]:
+		var inside := in_roofed(p.x, p.z)
+		_fixture(p, 1.4, inside)
+		var warm := Color(1.0, 0.82, 0.58) if p.z > -10 and p.x < 10 else Color(1.0, 0.9, 0.75)
+		var w := light(p + Vector3(0, -0.4, 0), warm, 2.4, 12.0)
+		w.visible = false; room_lights.append(w); shadow_lights.append(w)
+		var em := light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0)
+		emergency_lights.append(em)
+		kit.outdoor = not inside
+		kit.box(mats.red_glow, Vector3(0.24, 0.14, 0.24), p + Vector3(2, -0.02, 2), 0.0, Vector2.ZERO, false)
+		# soft bounce fill (stand-in for baked GI on mobile): wide, no shadow/specular, brightens with power
+		var bf := light(Vector3(p.x, 1.2, p.z), Color(0.55, 0.6, 0.75), BOUNCE_OFF, 13.0, false)
+		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
+		bounce_lights.append(bf)
+		if inside: _dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
+		_dress(Vector3(p.x, 0.0, p.z), 5.0)
+	for q in EXTRA_LAMPS:
+		var lp := Vector3(q.x, H - 0.3, q.y)
+		_fixture(lp, 1.1, in_roofed(q.x, q.y))
+		var xl := light(lp + Vector3(0, -0.4, 0), Color(1.0, 0.86, 0.66), 1.5, 8.0)
+		xl.shadow_enabled = false; xl.visible = false; room_lights.append(xl)
+	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
+	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
+		var am := _emit(Color(1.0, 0.1, 0.05), 0.2); alarm_mats.append(am)
+		box(Vector3(0.3, 0.3, 0.3), p, am, false)
+		var al := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.08, 0.04), 0.0, 10.0, false)
+		al.visible = false; alarm_lights.append(al)
+
+func _fixture(p: Vector3, w: float, inside: bool) -> void:
+	kit.outdoor = not inside
+	if inside:
+		kit.box(mats.trim, Vector3(w + 0.1, 0.06, 0.5), p + Vector3(0, 0.26, 0))
+		kit.box(mats.lamp, Vector3(w, 0.08, 0.4), p + Vector3(0, 0.2, 0), 0.0, Vector2.ZERO, false)
+	else:   # enamel shade on a cable strung across the lane
+		var x0 := -10.0 if p.x < 10 else 26.0; var x1 := 10.0 if p.x < 10 else 46.0
+		kit.cable(mats.dark, Vector3(x0, p.y + 0.9, p.z), Vector3(p.x, p.y + 0.42, p.z), 0.12)
+		kit.cable(mats.dark, Vector3(p.x, p.y + 0.42, p.z), Vector3(x1, p.y + 0.9, p.z), 0.12)
+		kit.cyl(mats.trim, 0.34, 0.16, p + Vector3(0, 0.32, 0), 10, false, 0.08)
+		kit.box(mats.lamp, Vector3(0.2, 0.1, 0.2), p + Vector3(0, 0.2, 0), 0.0, Vector2.ZERO, false)
+
+## Mobile-friendly light shaft: an additive, Y-billboarded gradient card (no volumetrics).
+static var _shaft_mat: StandardMaterial3D
+func shaft(pos: Vector3, h: float, w: float, col: Color, parent: Node = null) -> MeshInstance3D:
+	if _shaft_mat == null:
+		var g := Gradient.new(); g.set_color(0, Color(1, 1, 1, 0.0)); g.add_point(0.15, Color(1, 1, 1, 0.55)); g.set_color(g.get_point_count() - 1, Color(1, 1, 1, 0))
+		var gt := GradientTexture2D.new(); gt.gradient = g; gt.fill_from = Vector2(0.5, 0); gt.fill_to = Vector2(0.5, 1); gt.width = 8; gt.height = 64
+		var sideg := Gradient.new(); sideg.set_color(0, Color(1, 1, 1, 0)); sideg.add_point(0.5, Color.WHITE); sideg.set_color(sideg.get_point_count() - 1, Color(1, 1, 1, 0))
+		_shaft_mat = StandardMaterial3D.new(); _shaft_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_shaft_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD; _shaft_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_shaft_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y; _shaft_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		_shaft_mat.albedo_texture = gt; _shaft_mat.vertex_color_use_as_albedo = true; _shaft_mat.disable_fog = true
+		_shaft_mat.detail_enabled = false
+		var sgt := GradientTexture2D.new(); sgt.gradient = sideg; sgt.width = 32; sgt.height = 4
+		_shaft_mat.detail_enabled = true; _shaft_mat.detail_albedo = sgt; _shaft_mat.detail_blend_mode = BaseMaterial3D.BLEND_MODE_MUL
+	var mi := MeshInstance3D.new(); var qm := QuadMesh.new(); qm.size = Vector2(w, h); mi.mesh = qm
+	var m := _shaft_mat.duplicate() as StandardMaterial3D; m.albedo_color = col; mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	mi.position = pos
+	(parent if parent else self).add_child(mi)
+	return mi
 
 func prop(name: String, size: float, pos: Vector3, rot_y := 0.0, by_height := false, collide := true) -> Node3D:
 	var n := ModelLib.prop(name, size, by_height)
@@ -306,110 +719,6 @@ func _rel(root: Node3D, n: Node3D) -> Transform3D:
 	while c != root and c is Node3D:
 		xf = (c as Node3D).transform * xf; c = c.get_parent()
 	return xf
-
-func build(p_game) -> void:
-	game = p_game
-	# v7 scenery: real-tiling ambientCG PBR sets (albedo + NormalGL + roughness), no blotchy overlay
-	mats.wall = _pbr("paintedplaster016", Color(0.4, 0.43, 0.38), 0.45)
-	mats.wall_brick = _pbr("bricks076c", Color(0.75, 0.7, 0.66), 0.5)
-	mats.wall_ext = _pbr("bricks090", Color(0.7, 0.68, 0.66), 0.45)
-	mats.wall_low = _pbr("concrete044c", Color(0.72, 0.72, 0.7), 0.5)
-	mats.floor = _pbr("concrete034", Color(0.5, 0.5, 0.48), 0.35)
-	mats.ground = _pbr("asphalt026c", Color(0.55, 0.56, 0.55), 0.25)
-	mats.dirt = _pbr("ground037", Color(0.6, 0.6, 0.55), 0.35)
-	mats.wood = _pbr("planks021", Color(0.7, 0.66, 0.6), 0.6)
-	mats.rust = _pbr("rust004", Color.WHITE, 0.6, 0.4)
-	mats.trim = _pbr("metal049a", Color(0.45, 0.42, 0.4), 1.0, 0.6)
-	mats.door = _pbr("metalplates006", Color(0.6, 0.62, 0.66), 0.6, 0.7)
-	mats.stripe = _mat(Color(0.75, 0.6, 0.1), 0.7)
-	mats.metal = _pbr("metal032", Color(0.7, 0.7, 0.72), 0.8, 0.8)
-	mats.plate = _pbr("diamondplate008c", Color(0.75, 0.75, 0.78), 0.6, 0.85)
-	mats.ceiling = _pbr("metalplates006", Color(0.4, 0.4, 0.42), 0.3, 0.5)
-	mats.lamp = _emit(Color(1.0, 0.92, 0.75), 2.0)
-	# ground slab covers the building and the yard so the navmesh is continuous outside
-	box(Vector3(90, 1, 76), Vector3(18, -0.5, -8), mats.ground)
-	box(Vector3(36, 0.02, 36), Vector3(8, 0.01, -8), mats.floor, false)
-	box(Vector3(36.4, 0.3, 36.4), Vector3(8, H + 0.15, -8), mats.ceiling, false)
-	# outer walls
-	wall(Vector2(-10, 10), Vector2(-10, -26), [
-		{at = 8.0, w = 1.8, kind = "window", id = "w_west", out = Vector2(-1, 0)},
-		{at = 28.0, w = 1.8, kind = "window", id = "w_gen", out = Vector2(-1, 0)}])
-	wall(Vector2(-10, 10), Vector2(26, 10), [
-		{at = 7.0, w = 1.8, kind = "window", id = "w_south", out = Vector2(0, 1)},
-		{at = 28.0, w = 1.8, kind = "window", id = "w_lab", out = Vector2(0, 1)}])
-	wall(Vector2(-10, -26), Vector2(26, -26), [
-		{at = HiddenRoom.CRACK_POS.x + 10.0, w = HiddenRoom.CRACK_W, kind = "hidden"},
-		{at = 28.0, w = 1.8, kind = "window", id = "w_cold", out = Vector2(0, -1)}])
-	_build_annex()
-	wall(Vector2(26, 10), Vector2(26, -26), [{at = 10.0, w = 2.6, kind = "door", id = "yard"}])
-	# interior walls with buyable doors
-	wall(Vector2(-10, -10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "north"}])
-	wall(Vector2(10, 10), Vector2(10, -10), [{at = 10.0, w = 2.4, kind = "door", id = "east"}])
-	wall(Vector2(10, -10), Vector2(10, -26), [{at = 8.0, w = 2.4, kind = "door", id = "cold"}])
-	# v8: Service Passage at the east end (clear of the catwalk ramp) closes the four-room loop
-	wall(Vector2(10, -10), Vector2(26, -10), [{at = 15.0, w = 1.7, kind = "door", id = "service"}])
-	_build_yard()
-	_build_pump()
-	_build_catwalk()
-	_build_props()
-	Scenery.new(self).build()
-	# ceiling lamps: emergency red (power off) + white (power on)
-	for p in [Vector3(0, H - 0.3, 0), Vector3(0, H - 0.3, -18), Vector3(18, H - 0.3, 0), Vector3(18, H - 0.3, -18)]:
-		box(Vector3(1.4, 0.08, 0.4), p + Vector3(0, 0.1, 0), mats.lamp, false)
-		var w := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.9, 0.75), 2.2, 12.0)
-		w.visible = false; room_lights.append(w); shadow_lights.append(w)
-		shaft(Vector3(0, -1.3, 0), 2.6, 1.6, Color(1.0, 0.9, 0.7, 0.16), w)
-		emergency_lights.append(light(p + Vector3(2, -0.5, 2), Color(1.0, 0.15, 0.08), 1.2, 9.0))
-		# soft bounce fill (stand-in for baked GI on mobile): wide, no shadow/specular, brightens with power
-		var bf := light(Vector3(p.x, 1.2, p.z), Color(0.55, 0.6, 0.75), BOUNCE_OFF, 13.0, false)
-		bf.light_specular = 0.0; bf.omni_attenuation = 0.7; bf.light_bake_mode = Light3D.BAKE_STATIC
-		bounce_lights.append(bf)
-		_dust(p + Vector3(0, -1.6, 0), Vector3(6, 1.6, 6))
-		_fog_cards(Vector3(p.x, 0.0, p.z), 5.5)
-		_dress(Vector3(p.x, 0.0, p.z), 5.0)
-	# v7.10 secondary strip lamps: a grid across every room (and the pump house) so the power-on cascade
-	# rolls lamp-by-lamp across the ceiling. Cheap: no shadows, shafts or dust; they join room_lights.
-	for q in EXTRA_LAMPS:
-		var lp := Vector3(q.x, H - 0.3, q.y)
-		box(Vector3(1.2, 0.07, 0.3), lp + Vector3(0, 0.1, 0), mats.lamp, false)
-		var xl := light(lp + Vector3(0, -0.4, 0), Color(1.0, 0.9, 0.75), 1.5, 8.0)
-		xl.shadow_enabled = false; xl.visible = false; room_lights.append(xl)
-	# alarm beacons (off until round 6): a red lamp housing + a pulsing light, no shadows
-	for p in [Vector3(-9.5, 3.2, 2), Vector3(-2, 3.2, 9.5), Vector3(9.5, 3.2, -4), Vector3(18, 3.2, 9.5)]:
-		var am := _emit(Color(1.0, 0.1, 0.05), 0.2); alarm_mats.append(am)
-		box(Vector3(0.3, 0.3, 0.3), p, am, false)
-		var al := light(p + Vector3(0, -0.4, 0), Color(1.0, 0.08, 0.04), 0.0, 10.0, false)
-		al.visible = false; alarm_lights.append(al)
-	# moon (dimmer: the scene is lit mostly by the gun flashlight, lamps and neon)
-	var moon := DirectionalLight3D.new(); moon.light_color = Color(0.4, 0.5, 0.85); moon.light_energy = 0.22
-	moon.rotation_degrees = Vector3(-50, 30, 0); moon.shadow_enabled = true; add_child(moon)
-	moon.directional_shadow_max_distance = 40.0
-	shadow_lights.append(moon)
-	moon_light = moon
-	_place_machines()
-	_place_fuses()
-
-## v7.13 graphics: low drifting fog cards (soft billboards, no collision, unshaded) - cheap stand-in for
-## volumetric ground fog on the mobile renderer. 4 quads per main lamp.
-static var _fog_mat: StandardMaterial3D
-func _fog_cards(at: Vector3, r: float) -> void:
-	if _fog_mat == null:
-		var img := Image.create(64, 32, false, Image.FORMAT_RGBA8)
-		for y in 32:
-			for x in 64:
-				var u := (x - 31.5) / 32.0; var v := (y - 15.5) / 16.0
-				var a := clampf(1.0 - sqrt(u * u + v * v), 0, 1)
-				img.set_pixel(x, y, Color(1, 1, 1, a * a))
-		_fog_mat = StandardMaterial3D.new(); _fog_mat.albedo_texture = ImageTexture.create_from_image(img)
-		_fog_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; _fog_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		_fog_mat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y; _fog_mat.albedo_color = Color(0.62, 0.68, 0.78, 0.09)
-		_fog_mat.disable_receive_shadows = true; _fog_mat.proximity_fade_enabled = true; _fog_mat.proximity_fade_distance = 0.8
-		_fog_mat.distance_fade_mode = BaseMaterial3D.DISTANCE_FADE_PIXEL_ALPHA; _fog_mat.distance_fade_min_distance = 1.0; _fog_mat.distance_fade_max_distance = 3.5
-	var rr := RandomNumberGenerator.new(); rr.seed = int(at.x * 31 + at.z * 17)
-	for i in 4:
-		var mi := MeshInstance3D.new(); var q := QuadMesh.new(); q.size = Vector2(rr.randf_range(4.0, 6.5), rr.randf_range(0.9, 1.4))
-		mi.mesh = q; mi.material_override = _fog_mat; mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.position = at + Vector3(rr.randf_range(-r, r), 0.45, rr.randf_range(-r, r)); add_child(mi)
 
 ## v7.13 graphics: room dressing around each main lamp - rubble chunks, loose planks, papers and a
 ## dragged blood trail. Floor-flat or tiny, no collision, so navigation and bullets are unaffected.
@@ -464,100 +773,6 @@ func _dust(at: Vector3, extents: Vector3) -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	m.albedo_color = Color(1, 0.95, 0.85, 0.32); q.material = m
 	p.position = at; add_child(p); dust.append(p)
-
-## Pump Station: x 26..46, z 10..30, south of the Loading Yard. Open-air, flooded sump, tanks + pipes.
-func _build_pump() -> void:
-	box(Vector3(40, 1, 14), Vector3(36, -0.5, 36), mats.ground)   # ground beyond the south fence for spawns
-	box(Vector3(20, 0.02, 20), Vector3(36, 0.01, 20), mats.floor, false)
-	wall(Vector2(26, 10), Vector2(26, 30))
-	wall(Vector2(26, 30), Vector2(46, 30), [{at = 12.0, w = 1.8, kind = "window", id = "w_pump_s", out = Vector2(0, 1)}])
-	wall(Vector2(46, 30), Vector2(46, 10), [{at = 10.0, w = 1.8, kind = "window", id = "w_pump_e", out = Vector2(1, 0)}])
-	# two big tanks + a pipe run (cover to kite around)
-	var tank_mat: StandardMaterial3D = mats.rust
-	for tp in [Vector3(31, 0, 24), Vector3(41, 0, 16)]:
-		var sb := StaticBody3D.new(); sb.position = tp; add_child(sb)
-		var mi := MeshInstance3D.new(); var cm := CylinderMesh.new(); cm.top_radius = 1.6; cm.bottom_radius = 1.6; cm.height = 4.0
-		mi.mesh = cm; mi.material_override = tank_mat; mi.position.y = 2.0; sb.add_child(mi)
-		var cs := CollisionShape3D.new(); var cy := CylinderShape3D.new(); cy.radius = 1.6; cy.height = 4.0; cs.shape = cy; cs.position.y = 2.0; sb.add_child(cs)
-		box(Vector3(3.4, 0.12, 0.12), tp + Vector3(0, 3.2, 0), mats.stripe, false)
-	for x in [27.0, 27.6]:
-		box(Vector3(0.3, 0.3, 16.0), Vector3(x, 2.4 + (x - 27.0), 20.0), mats.metal, false)
-	box(Vector3(10.0, 0.35, 0.35), Vector3(36, 2.6, 28.8), mats.metal, false)
-	# flooded sump: a dark glossy sheet
-	var wm := StandardMaterial3D.new(); wm.albedo_color = Color(0.05, 0.09, 0.08); wm.roughness = 0.05; wm.metallic = 0.3
-	box(Vector3(5, 0.03, 4), Vector3(37, 0.03, 23), wm, false)
-	prop("barrel", 0.95, Vector3(43.5, 0, 27), 0.3, true)
-	prop("barrel_explosive", 0.95, Vector3(33.5, 0, 14), 0.0, true)
-	prop("debris", 1.4, Vector3(29, 0, 19), 2.0, false, false)
-	label("PUMP STATION", Vector3(36, 3.4, 29.7), PI, 64, Color(0.4, 1.0, 0.8))
-	var gl := light(Vector3(36, 3.6, 20), Color(0.45, 1.0, 0.75), 1.8, 14.0)
-	shadow_lights.append(gl)
-	for sp in [Vector3(32, 3.0, 18), Vector3(40, 3.0, 25)]:
-		shaft(sp, 6.0, 2.2, Color(0.4, 0.9, 0.75, 0.10))
-	_dust(Vector3(36, 2, 20), Vector3(8, 1.5, 8))
-
-func _build_yard() -> void:
-	for sp in [Vector3(31, 3.0, -4), Vector3(40, 3.0, 4), Vector3(37, 3.0, -12)]:
-		shaft(sp, 6.0, 2.4, Color(0.45, 0.55, 0.9, 0.11))
-	# Loading Yard: x 26..46, z -16..10, open-air with a chain-link perimeter and two windows on x=46
-	wall(Vector2(46, 10), Vector2(46, -16), [
-		{at = 6.0, w = 1.8, kind = "window", id = "w_yard_s", out = Vector2(1, 0)},
-		{at = 18.0, w = 1.8, kind = "window", id = "w_yard_n", out = Vector2(1, 0)}])
-	wall(Vector2(26, 10), Vector2(46, 10), [{at = 10.0, w = 2.6, kind = "door", id = "pump"}])
-	for seg in [[Vector2(26, -16), Vector2(46, -16)]]:
-		var a: Vector2 = seg[0]; var b: Vector2 = seg[1]
-		box(Vector3(b.x - a.x, H, T), Vector3((a.x + b.x) / 2, H / 2, a.y), mats.wall_low)
-	# raised loading dock with two ramps (verticality)
-	box(Vector3(10, 1.4, 5), Vector3(36, 0.7, -13.5), mats.wall_low)
-	box(Vector3(10.2, 0.06, 5.2), Vector3(36, 1.43, -13.5), mats.plate, false)
-	for x in [29.0, 43.0]:
-		var r := box(Vector3(4, 0.3, 3.2), Vector3(x, 0.62, -12.0), mats.plate)
-		r.rotation.z = (1.0 if x < 36 else -1.0) * atan2(1.4, 4.0)
-	box(Vector3(10, 0.12, 0.12), Vector3(36, 2.4, -11.0), mats.stripe)  # guard rail
-	# dock lights
-	for x in [32.0, 40.0]:
-		var l := light(Vector3(x, 3.6, -12), Color(1.0, 0.75, 0.45), 2.0, 12.0)
-		shadow_lights.append(l)
-	_dust(Vector3(36, 2, -6), Vector3(9, 1.5, 9))
-	# central island for kiting
-	prop("police_car", 4.6, Vector3(36, 0, -1), 0.4)
-	prop("barrel", 0.95, Vector3(33.2, 0, 1.4), 0.0, true)
-	prop("barrel_explosive", 0.95, Vector3(38.9, 0, -3.2), 0.0, true)
-	prop("debris", 1.6, Vector3(41, 0, 5), 1.0, false, false)
-	prop("fence", 3.0, Vector3(30, 0, 8.6), 0.0, false, false)
-	label("LOADING YARD", Vector3(36, 3.2, -11.0), 0.0, 64, Color(1.0, 0.75, 0.3))
-	var sl := light(Vector3(36, 3.5, 3), Color(0.5, 0.6, 0.9), 1.4, 14.0, false)
-	shadow_lights.append(sl)
-
-func _build_catwalk() -> void:
-	# Lab catwalk at 1.8 m along the north wall of the lab with a ramp down to the east.
-	box(Vector3(8, 0.15, 2.2), Vector3(16, 1.8, -8.5), mats.plate)
-	for x in [12.5, 19.5]:
-		box(Vector3(0.12, 1.8, 0.12), Vector3(x, 0.9, -7.5), mats.metal)
-	box(Vector3(8, 0.08, 0.08), Vector3(16, 2.85, -7.42), mats.stripe, false)
-	var ramp := box(Vector3(4.4, 0.15, 2.2), Vector3(22, 0.9, -8.5), mats.plate)
-	ramp.rotation.z = -atan2(1.8, 4.2)
-
-func _build_props() -> void:
-	prop("crate", 1.0, Vector3(-7, 0, -7), 0.3)
-	prop("crate", 0.9, Vector3(-7.8, 0, -5.8), -0.2)
-	prop("crate", 1.0, Vector3(6.5, 0, 6.5), 0.1)
-	prop("desk", 1.8, Vector3(18, 0, -3), 0.0)
-	prop("computer", 0.6, Vector3(18, 0.82, -3), PI, false, false)
-	prop("desk", 1.8, Vector3(18, 0, 3.5), PI)
-	prop("papers", 0.5, Vector3(17.4, 0.82, 3.5), 0.4, false, false)
-	prop("shelf", 2.0, Vector3(24.8, 0, -18), PI / 2, true)
-	prop("shelf", 2.0, Vector3(24.8, 0, -21), PI / 2, true)
-	prop("gas_tank", 1.6, Vector3(-6, 0, -22), 0.0, true)
-	prop("barrel", 0.95, Vector3(5, 0, -20), 0.0, true)
-	prop("barrel", 0.95, Vector3(5.8, 0, -20.6), 0.0, true)
-	prop("pipes_panel", 2.6, Vector3(-9.6, 0, -16), PI / 2, true, false)
-	prop("bricks", 1.0, Vector3(-3, 0, 7.5), 0.6, false, false)
-	prop("debris", 1.2, Vector3(4, 0, -4), 0.0, false, false)
-	prop("signs", 1.2, Vector3(9.6, 1.6, 3), -PI / 2, false, false)
-	box(Vector3(4, 2.4, 2), Vector3(0, 1.2, -24.5), mats.metal)  # generator block
-	for x in [-6, 0, 6]:
-		box(Vector3(0.25, 0.25, 36), Vector3(x + 2, H - 0.3, -8), mats.metal, false)  # ceiling pipes
 
 func light(pos: Vector3, color: Color, energy: float, rng: float, flicker := true) -> OmniLight3D:
 	var l := OmniLight3D.new()
@@ -620,8 +835,12 @@ func lamp_cone(l: OmniLight3D) -> MeshInstance3D:
 	return mi
 
 func apply_quality(d: Dictionary) -> void:
+	# GL Compatibility (the fallback on phones without Vulkan) mis-samples omni shadow maps for the
+	# viewmodel overlay viewport when a shadowed lamp is right overhead (arms render black), so only
+	# the dusk skylight keeps its shadow there.
+	var compat := RenderingServer.get_current_rendering_method() == "gl_compatibility"
 	for l in shadow_lights:
-		if is_instance_valid(l): l.shadow_enabled = d.shadows
+		if is_instance_valid(l): l.shadow_enabled = d.shadows and not (compat and l is OmniLight3D)
 	for p in dust:
 		if p is CPUParticles3D: p.emitting = d.dust
 		p.visible = d.dust
@@ -676,13 +895,14 @@ func _place_machines() -> void:
 			func(pl): game.buy_perk(pl, pid))
 	_build_forge(Vector3(18, 0, -24.4))
 	# v7.13 Tech Locker: buy a random backpack gadget (no power needed)
-	var tl := _machine(Vector3(-3.5, 0, 9.1), 0.0, Color(0.35, 0.6, 1.0), "Tech Locker", "bolt")
+	var tl := _machine(Vector3(6.5, 0, 9.1), 0.0, Color(0.35, 0.6, 1.0), "Tech Locker", "bolt")
 	game.add_interactable(_front(tl), 2.2,
 		func(pl): return game.tech_locker_prompt(pl),
 		func(pl): game.use_tech_locker(pl))
-	# Power switch in Generator Wing
+	# Power switch: the breaker box bolted to the generator trailer in the Back Alley
 	var sw := Node3D.new(); sw.position = Vector3(3, 0, -24.3); add_child(sw)
 	box(Vector3(0.8, 1.2, 0.3), Vector3(0, 1.4, 0), mats.metal, true, 1, sw)
+	box(Vector3(0.12, 0.8, 0.12), Vector3(0, 0.4, 0), mats.trim, false, 1, sw)
 	var lever := box(Vector3(0.1, 0.5, 0.1), Vector3(0, 1.5, 0.25), _emit(Color(1, 0.2, 0.1), 2.0), false, 1, sw)
 	lever.rotation.x = 0.6; lever.name = "Lever"
 	label("POWER", Vector3(3, 2.3, -24.1), 0.0, 48, Color(1, 0.3, 0.2))
@@ -691,11 +911,11 @@ func _place_machines() -> void:
 		func(pl): game.throw_power(lever))
 	# Mystery Crate: starts in the Lab, relocates between these spots
 	crate_spots = [
-		[Vector3(16, 0, 6.6), PI, "Lab Corridor"],
-		[Vector3(36, 0, 8.4), PI, "Loading Yard"],
-		[Vector3(-6, 0, -24.6), 0.0, "Generator Wing"],
-		[Vector3(20, 0, -13.6), 0.0, "Cold Storage"],
-		[Vector3(-6, 0, 8.6), PI, "Intake Hall"],
+		[Vector3(16, 0, 6.6), PI, "General Store"],
+		[Vector3(32, 0, 8.6), PI, "Main Street"],
+		[Vector3(-6.6, 0, -24.6), 0.0, "Back Alley"],
+		[Vector3(20, 0, -13.6), 0.0, "Garage"],
+		[Vector3(-6, 0, 8.6), PI, "Victory Diner"],
 	]
 	var crate := CrateNode.new(); crate.game = game; add_child(crate); crate.build()
 	game.crate_node = crate
@@ -711,11 +931,11 @@ func _place_machines() -> void:
 	order.erase(starter); order.push_front(starter)
 	_wall_buy(order[0], Vector3(-9.75, 1.6, -3), PI / 2)
 	_wall_buy(order[1], Vector3(-9.75, 1.6, -20), PI / 2)
-	_wall_buy(order[2], Vector3(14, 1.6, 9.75), PI)
+	_wall_buy(order[2], Vector3(12.6, 1.6, 9.75), PI)
 	# Armor racks
 	_armor_rack("light", Vector3(-4, 0, -9.6), 0.0)
 	_armor_rack("medium", Vector3(25.6, 0, -4), -PI / 2)
-	_armor_rack("heavy", Vector3(14, 0, -25.6), 0.0)
+	_armor_rack("heavy", Vector3(13.6, 0, -25.6), 0.0)
 	_annex_stations()
 
 func move_crate(pos: Vector3, rot_y: float) -> void:
@@ -789,6 +1009,8 @@ func _process(dt: float) -> void:
 		if alarm:
 			var k := pow(0.5 + 0.5 * sin(_t * 5.0 + i * 1.3), 3.0)
 			al.light_energy = 2.6 * k; alarm_mats[i].emission_energy_multiplier = 0.5 + 5.0 * k
+	for i in fires.size():
+		(fires[i] as StandardMaterial3D).albedo_color.a = 0.4 + 0.14 * sin(_t * 2.3 + i * 2.1) + 0.06 * sin(_t * 7.1 + i)
 	for n in neon:
 		var m: StandardMaterial3D = n[0]
 		var base: float = MACHINE_NEON_ON if on else 0.4
@@ -834,7 +1056,7 @@ func _build_annex() -> void:
 	hint_light = OmniLight3D.new(); hint_light.light_color = Color(0.4, 1.0, 0.6); hint_light.light_energy = 1.4
 	hint_light.omni_range = 3.5; hint_light.position = Vector3(cp.x, 3.2, cp.z + 0.8); add_child(hint_light)
 	var tw := create_tween().set_loops()
-	for e in [1.4, 0.1, 1.2, 0.0, 0.0, 1.5, 0.2, 1.3]:
+	for e: float in [1.4, 0.1, 1.2, 0.0, 0.0, 1.5, 0.2, 1.3]:
 		tw.tween_property(hint_light, "light_energy", e, 0.06); tw.tween_interval(randf_range(0.05, 0.5))
 	# room light (off until revealed so nothing leaks)
 	var rl := OmniLight3D.new(); rl.name = "AnnexLight"; rl.light_color = Color(0.45, 1.0, 0.65); rl.light_energy = 0.0
@@ -917,10 +1139,12 @@ func power_cascade(origin: Vector3) -> float:
 	return last
 
 func set_power(on: bool) -> void:
+	if mats.has("signs_lit"): (mats.signs_lit as StandardMaterial3D).emission_energy_multiplier = SIGN_NEON_ON if on else SIGN_NEON_OFF
+	if mats.has("lamp"): (mats.lamp as StandardMaterial3D).emission_energy_multiplier = 2.0 if on else LAMP_OFF
 	for l in room_lights: l.visible = on
 	for l in emergency_lights: l.base = 0.3 if on else 1.2
 	for l in bounce_lights: l.light_energy = BOUNCE_ON if on else BOUNCE_OFF
-	for l in bounce_lights: l.light_color = Color(1.0, 0.92, 0.8) if on else Color(0.55, 0.6, 0.75)
+	for l in bounce_lights: l.light_color = Color(1.0, 0.9, 0.76) if on else Color(0.55, 0.6, 0.75)
 	for pair in machine_lights:
 		pair[0].light_energy = MACHINE_LIGHT_ON if on else 0.0
 		pair[1].emission_energy_multiplier = MACHINE_PANEL_ON if on else 0.3

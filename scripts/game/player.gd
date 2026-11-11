@@ -107,7 +107,7 @@ func _ready() -> void:
 	var cs := CollisionShape3D.new(); var cap := CapsuleShape3D.new(); cap.radius = 0.35; cap.height = 1.8
 	cs.shape = cap; cs.position.y = 0.9; add_child(cs)
 	head = Node3D.new(); head.position.y = 1.62; add_child(head)
-	cam = Camera3D.new(); cam.fov = 75; cam.near = 0.03; cam.far = 140; head.add_child(cam)
+	cam = Camera3D.new(); cam.fov = 75; cam.near = 0.03; cam.far = 240; head.add_child(cam)
 	cam.current = true
 	vm = Viewmodel.new(); vm.setup(cdef.get("color", Color(0.4, 0.4, 0.45))); cam.add_child(vm)
 	# gun-mounted flashlight: rides the viewmodel so the beam sways, kicks and dips on reload

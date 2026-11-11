@@ -26,6 +26,7 @@ func _ready() -> void:
 	elif args.has("hud"): _hud(args["hud"], args.get("prefix", ""))
 	elif args.has("check"): _check()
 	elif args.has("v8shots"): _v8shots(args["v8shots"])
+	elif args.has("town"): _town(args["town"])
 
 var diorama: Node3D
 var settings := GameSettings.new()
@@ -168,7 +169,7 @@ func start_game() -> void:
 
 ## True for capture / bot runs started from the command line: those must never auto-pause.
 func _scripted() -> bool:
-	for k in ["shots", "sim", "probe", "clip", "views", "hud", "check", "v8shots"]:
+	for k in ["shots", "sim", "probe", "clip", "views", "hud", "check", "v8shots", "town"]:
 		if args.has(k): return true
 	return false
 
@@ -197,6 +198,59 @@ func _v8shots(dir: String) -> void:
 	await _wait(6)
 	await _snap(dir, "v8_04_results.png")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://v8shots_highscore.cfg"))
+	get_tree().quit()
+
+## --town=<dir>: first-person review shots of the town from the real player camera (weapon + HUD on),
+## before the generator runs and again with power on. VOZ_TOWN_ONLY=<prefix> limits the set,
+## VOZ_TOWN_ZOMBIES=1 stands a few walkers in each view to judge enemy readability.
+const TOWN_VIEWS := [
+	["01_diner_spawn", Vector3(0, 0.1, 3), 0.0, 0.0],
+	["02_diner_counter", Vector3(-3, 0.1, 2.5), -1.0, 0.0],
+	["03_diner_windows", Vector3(4, 0.1, -3), 2.3, 0.02],
+	["04_alley_from_diner", Vector3(0, 0.1, -11.6), 0.25, 0.06],
+	["05_alley_to_garage", Vector3(-7.5, 0.1, -21), -1.75, 0.1],
+	["06_garage_bay", Vector3(11.6, 0.1, -11.6), -0.75, 0.0],
+	["07_garage_forge", Vector3(19.5, 0.1, -18.5), 0.25, 0.04],
+	["08_store", Vector3(11.4, 0.1, 8.2), -0.66, 0.0],
+	["09_store_front", Vector3(22.5, 0.1, 2.6), -1.9, 0.02],
+	["10_street_north", Vector3(35, 0.1, 8.4), 0.05, 0.08],
+	["11_street_from_store", Vector3(27.6, 0.1, 0), -1.0, 0.12],
+	["12_street_south", Vector3(36, 1.5, -12.6), PI + 0.1, 0.0],
+	["13_street_skyline", Vector3(29, 0.1, -7), -2.3, 0.3],
+	["14_courtyard", Vector3(36, 0.1, 11.6), PI, 0.05],
+	["15_courtyard_tent", Vector3(28.5, 0.1, 21.5), -1.2, 0.05],
+	["16_side_alley", Vector3(27.5, 0.1, 12.2), PI / 2, 0.05],
+]
+func _town(dir: String) -> void:
+	DirAccess.make_dir_recursive_absolute(dir)
+	start_game()
+	game.auto_rounds = false; game.allow_tutorial = false; game.god_mode = true
+	await _wait(12)
+	for d in Facility.DOORS: game.map.open_door(d); game.facility.open_doors[d] = true
+	var pl := game.player
+	pl.bot_input = {"mv": Vector2.ZERO, "fire": false, "ads": false, "use": false, "sprint": false}
+	await _wait(80)
+	var only := OS.get_environment("VOZ_TOWN_ONLY")
+	for pass_i in 2:
+		if pass_i == 1:
+			if OS.get_environment("VOZ_TOWN_POWER") == "0": break
+			game.throw_power(Node3D.new()); await _wait(170)
+		for v in TOWN_VIEWS:
+			if only != "" and not v[0].begins_with(only): continue
+			pl.global_position = v[1]; pl.yaw = v[2]; pl.pitch = v[3]; pl.velocity = Vector3.ZERO
+			var zs := []
+			if OS.get_environment("VOZ_TOWN_ZOMBIES") != "":
+				var fwd := Vector3(-sin(v[2]), 0, -cos(v[2])); var right := Vector3(cos(v[2]), 0, -sin(v[2]))
+				for i in 3:
+					var z: Zombie = game.spawn_zombie("", "walker")
+					z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0; z.set_physics_process(false)
+					z.global_position = v[1] + fwd * (4.5 + i * 3.5) + right * (i - 1) * 1.3; z.global_position.y = 0.05
+					var dv: Vector3 = v[1] - z.global_position; z.rotation.y = atan2(-dv.x, -dv.z); z.model.rotation.y = PI; z._locomotion(); zs.append(z)
+			await _wait(10)
+			await _snap(dir, "%s_%s.png" % [v[0], "power" if pass_i == 1 else "dusk"])
+			for z in zs:
+				if is_instance_valid(z): z.queue_free()
+			game.zombies.clear()
 	get_tree().quit()
 
 ## `godot --headless --fixed-fps 60 -- --check`: scene-level self-check (see scripts/game/self_check.gd).
