@@ -36,6 +36,8 @@ func _ready() -> void:
 	await _t_ammo_rules()
 	await _t_purchases_and_nav()
 	await _t_forge_and_pickups()
+	await _t_choices()
+	await _t_elite()
 	await _t_damage_and_pause()
 	await _t_touch()
 	await _t_death_and_restart()
@@ -246,7 +248,24 @@ func _t_purchases_and_nav() -> void:
 func _t_forge_and_pickups() -> void:
 	pl.economy.points = 6000
 	ok(game.forge_prompt(pl).contains("no power"), "upgrade station explains it needs power", game.forge_prompt(pl))
-	var lever := Node3D.new(); game.throw_power(lever); lever.free()
+	# v10 power objective: walk to the generator and hold USE; each tick is one crank
+	ok(game.facility.objective().contains("crank the generator"), "objective points at the generator once the Back Alley is open", game.facility.objective())
+	ok(game.perk_prompt(pl, "ironhide").contains("no power"), "tonic machine explains it needs power")
+	pl.economy.points = 6000; game.buy_perk(pl, "ironhide")
+	ok(pl.economy.points == 6000 and not pl.perks.has("ironhide"), "no tonic is sold without power")
+	pl.global_position = Vector3(3, 0.1, -22.6); pl.yaw = 0.0; pl.velocity = Vector3.ZERO
+	await frames(4)
+	game._update_prompt()
+	ok(game.current_prompt.begins_with("Hold to crank the generator  0/%d" % Facility.POWER_CRANKS), "generator prompt shows progress", game.current_prompt)
+	game.player_use(pl, true, true)
+	ok(game.facility.cranks == 1 and not game.facility.power_on, "one press is one crank, not instant power")
+	for i in Facility.POWER_CRANKS + 3: game.player_use(pl, false, true)
+	ok(game.facility.power_on and game.facility.cranks == Facility.POWER_CRANKS and game.stats.power, "holding USE starts the generator", "%d cranks" % game.facility.cranks)
+	game._update_prompt()
+	ok(game.current_prompt == "", "the generator prompt disappears once it runs", game.current_prompt)
+	ok(game.map.power_label.text.contains("RUNNING") and game.map.power_beacon_light.light_color.is_equal_approx(FacilityMap.POWER_CUE_ON), "generator sign and beacon switch to running")
+	ok(not game.facility.objective().contains("Restore"), "the objective moves on after power", game.facility.objective())
+	pl.global_position = Vector3(0, 0.1, 3); await frames(3)
 	ok(game.forge_prompt(pl).begins_with("Upgrade Pulse Rifle to Mk.2 — 5000 points"), "upgrade prompt", game.forge_prompt(pl))
 	var base := pl.weapon().damage; var base_mag := pl.weapon().mag_size
 	game.use_forge(pl); game.use_forge(pl)
@@ -284,12 +303,146 @@ func _t_damage_and_pause() -> void:
 	var clock := game.stats.time
 	game.toggle_pause()
 	ok(get_tree().paused and game.paused and game.hud.pause_panel != null, "pause opens the pause menu")
+	ok(game.hud.pause_panel.find_child("Status", true, false) != null and game.hud.pause_panel.find_child("Actions", true, false) != null, "the pause menu shows status and actions")
+	# app interruption: a focus-loss notification pauses a live match and a second one does not unpause it
+	game.toggle_pause()
+	var ap := game.auto_pause; game.auto_pause = true
+	ok(Game.wants_auto_pause(game.auto_pause, game.paused, game.over, pl.bot_input != null), "a live match wants to pause when the app loses focus")
+	game.toggle_pause()
+	ok(not Game.wants_auto_pause(game.auto_pause, game.paused, game.over, false), "a second interruption does not toggle the pause off")
+	game.auto_pause = ap
 	for i in 30: await get_tree().process_frame
 	ok(is_equal_approx(game.stats.time, clock), "the match clock stops while paused")
 	game.toggle_pause()
 	ok(not get_tree().paused and game.hud.pause_panel == null, "resume closes the pause menu")
 	await frames(10)
 	ok(game.stats.time > clock, "the match continues after resume")
+
+# ---------------------------------------------------------------- v10: tonics, crate, purchase safety
+func _t_choices() -> void:
+	# the three enhancements: bought once, with power, and each one changes the player
+	var hp0: float = pl.max_health; var st0: float = pl.stamina_max()
+	pl.economy.points = 20000
+	for id in Perks.CORE:
+		var before := pl.economy.points
+		game.buy_perk(pl, id); game.buy_perk(pl, id)
+		ok(pl.perks.get(id, false) == true and pl.economy.points == before - Perks.ALL[id].cost, "%s is charged exactly once" % Perks.ALL[id].name)
+		ok(game.perk_prompt(pl, id) == "", "%s is no longer offered once owned" % Perks.ALL[id].name)
+	ok(is_equal_approx(pl.max_health, hp0 * Perks.HEALTH_MULT) and is_equal_approx(pl.health, pl.max_health), "Iron Hide doubles maximum health", "%.0f -> %.0f" % [hp0, pl.max_health])
+	ok(is_equal_approx(pl.ammo().reload_mult, Perks.RELOAD_MULT) and pl.ammo().reload_step() < pl.weapon().reload_time * 0.6, "Quickhand halves the reload", "%.2f s" % pl.ammo().reload_step())
+	ok(is_equal_approx(pl.stamina_max(), st0 * Perks.STAMINA_MULT), "Fleetfoot extends sprint endurance", "%.1f -> %.1f s" % [st0, pl.stamina_max()])
+	pl.economy.points = 100
+	game.buy_perk(pl, "marksman")
+	ok(pl.economy.points == 100 and not pl.perks.has("marksman"), "an unaffordable tonic is refused")
+	var status := "\n".join(game.status_lines())
+	ok(status.contains("Iron Hide Tonic — Doubles max health") and status.contains("Quickhand") and status.contains("Fleetfoot") and status.contains("Mk.2"), "pause status lists owned upgrades and their effects")
+	# mystery crate: visible cost, never a gun already carried, never a downgrade of the upgraded one
+	var sign_ok := false
+	for c in game.crate_node.get_children():
+		if c is Label3D and (c as Label3D).text.contains(str(game.crate.cost)): sign_ok = true
+	ok(sign_ok, "the crate shows its price in the world")
+	pl.economy.points = 500
+	ok(game.crate_prompt(pl).contains("need %d more" % (game.crate.cost - 500)), "crate prompt explains the shortfall", game.crate_prompt(pl))
+	game.use_crate(pl)
+	ok(pl.economy.points == 500 and game.crate_node.state == CrateNode.State.IDLE, "the crate refuses an unaffordable roll")
+	var owned := game._owned_ids(pl); var bad := []
+	var c2 := MysteryCrate.new()
+	for i in 500:
+		var id := c2.roll(game.rng, owned)
+		if id in owned or Weapons.make(id) == null: bad.append(id)
+	ok(bad.is_empty(), "the crate only offers real weapons the player does not carry", "carrying %s" % str(owned))
+	pl.economy.points = 5000
+	var upgraded: WeaponDef = pl.weapon()
+	game.use_crate(pl); game.use_crate(pl)
+	ok(pl.economy.points == 5000 - game.crate.cost and game.crate_node.state == CrateNode.State.ROLLING, "one crate roll is charged once")
+	var t := 0
+	while game.crate_node.state == CrateNode.State.ROLLING and t < 900: await get_tree().physics_frame; t += 1
+	ok(game.crate_node.state == CrateNode.State.READY and not (game.crate_node.result in owned), "the crate lands on a new weapon", game.crate_node.result)
+	var got: String = game.crate_node.result
+	game.use_crate(pl)
+	ok(pl.weapon().id == got and pl.loadout.slots.size() == Loadout.MAX_SLOTS and pl.ammo().is_full(), "taking the crate weapon equips it with full ammunition", pl.weapon().name)
+	ok(pl.economy.points == 5000 - game.crate.cost, "taking the weapon costs nothing more")
+	# a gun inside the Forge cannot be traded away, and it comes back upgraded even after a knock-down
+	pl.economy.points = 20000
+	var base := pl.weapon().damage
+	game.use_forge(pl)
+	var locked: Ammo = pl.ammo()
+	var pts := pl.economy.points
+	game.buy_wall(pl, "smg" if pl.loadout.has("smg") < 0 else "scatter")
+	ok(pl.economy.points == pts and pl.ammo() == locked, "no weapon purchase while the gun is in the upgrade station")
+	pl.since_hit = 99.0; pl.perks["lazarus"] = true
+	pl.take_damage(9999.0, pl.global_position + Vector3(0, 0, 2))
+	ok(pl.is_downed, "knocked down while the gun is in the station")
+	game._update_prompt(); game.player_use(pl, true, true)
+	await frames(int(maxf(OverchargeForge.FORGE_TIME, LastStand.SELF_REVIVE) * 60) + 40)
+	ok(not pl.is_downed and pl.weapon().tier == 1 and pl.weapon().damage == base * 2 and not pl.ammo().locked, "the upgraded gun returns to its slot after a revive",
+		"%s tier %d locked %s" % [pl.weapon().display_name(), pl.weapon().tier, pl.ammo().locked])
+	ok(Perks.held(pl.perks).is_empty() and is_equal_approx(pl.max_health, hp0), "self-revive removes every tonic effect", "max health %.0f" % pl.max_health)
+	for z in game.zombies.duplicate():
+		if is_instance_valid(z): z.queue_free()
+	game.zombies.clear()
+
+# ---------------------------------------------------------------- v10: the Brute
+func _t_elite() -> void:
+	pl.global_position = Vector3(0, 0.1, 3); pl.yaw = 0.0; pl.velocity = Vector3.ZERO
+	pl.health = pl.max_health; pl.since_hit = 99.0
+	game.round = 4
+	var z: Zombie = game.spawn_zombie("", "brute")
+	z.drop_in = false; z.state = Zombie.State.CHASE; z.model.position.y = 0.0; z.model.rotation.x = 0.0
+	z.global_position = Vector3(0, 0.05, -0.5); z.slam_cd = 0.0
+	await frames(3)
+	ok(z.max_hp == ZombieTypes.health("brute", Rounds.zombie_health(4)) and z.max_hp > Rounds.zombie_health(4) * 4, "the Brute is several times tougher than a walker", "%d HP" % z.max_hp)
+	ok(z.model.scale.y > 1.3 and z.weak_light != null, "the Brute is visibly larger and its weak point glows")
+	var w := Weapons.make("sidearm")
+	var hp := z.hp
+	game.hitscan(pl, Vector3(0, 1.3, 3), Vector3(0, 0, -1), w)
+	var body := hp - z.hp; hp = z.hp
+	game.hitscan(pl, Vector3(0, z.head_y() + 0.25, 3), Vector3(0, 0, -1), w)
+	var head := hp - z.hp
+	ok(body == w.damage / 2 and head == w.damage * 2, "armour halves body shots; the head takes double", "body %d, head %d" % [body, head])
+	await frames(12)
+	ok(z.model.scale.is_equal_approx(z.type_scale) and z.model.scale.y > 1.3, "being shot does not shrink the Brute back to normal size", str(z.model.scale))
+	var t := 0
+	while z.slam_t <= 0.0 and t < 240: await get_tree().physics_frame; t += 1
+	ok(z.slam_t > 0.0 and z.slam_ring != null and z.slam_ring.visible, "the Brute telegraphs a slam with a ring on the floor", "after %.1f s" % (t / 60.0))
+	var hp_before: float = pl.health
+	await frames(int(ZombieTypes.SLAM_WINDUP * 60 * 0.5))
+	ok(is_equal_approx(pl.health, hp_before), "no damage during the wind-up")
+	# step out of the ring: the slam must miss
+	pl.global_position = z.global_position + Vector3(0, 0.05, ZombieTypes.SLAM_RADIUS + 1.5)
+	t = 0
+	while z.winded_t <= 0.0 and t < 120: await get_tree().physics_frame; t += 1
+	ok(z.winded_t > 0.0 and is_equal_approx(pl.health, hp_before), "leaving the ring avoids the slam", "health %.0f" % pl.health)
+	ok(z.exposed and not z.slam_ring.visible, "after the slam the Brute is winded and the ring is gone")
+	hp = z.hp
+	game.hitscan(pl, Vector3(z.global_position.x, 1.3, pl.global_position.z), Vector3(0, 0, -1), w)
+	ok(hp - z.hp == w.damage, "a winded Brute takes full body damage", "%d" % (hp - z.hp))
+	await frames(int(ZombieTypes.SLAM_WINDED * 60) + 10)
+	ok(not z.exposed and z.winded_t <= 0.0, "the Brute recovers and its armour returns")
+	# stand inside the ring: the slam hits once, and does not kill a healthy survivor
+	z.set_physics_process(false)
+	pl.global_position = z.global_position + Vector3(0, 0.05, 2.0); pl.health = pl.max_health; pl.since_hit = 99.0
+	z.slam_cd = 0.0; z.set_physics_process(true)
+	t = 0
+	while z.winded_t <= 0.0 and t < 400:
+		pl.global_position = z.global_position + Vector3(0, 0.05, 2.0); pl.velocity = Vector3.ZERO
+		await get_tree().physics_frame; t += 1
+	ok(is_equal_approx(pl.health, pl.max_health - ZombieTypes.SLAM_DAMAGE) and not pl.is_downed, "standing in the ring takes one slam and survives it", "health %.0f of %.0f" % [pl.health, pl.max_health])
+	# reward
+	z.set_physics_process(false)
+	var pts := pl.economy.points; var drops := game.drops.size(); var elites := game.stats.elites
+	z.take_damage(z.hp + 1, true, pl, "head", Vector3.ZERO)
+	ok(pl.economy.points >= pts + int(ZombieTypes.ALL.brute.points) and game.stats.elites == elites + 1, "killing the Brute pays its bounty", "+%d" % (pl.economy.points - pts))
+	var restock := false
+	for d in game.drops: if d.id == "restock": restock = true
+	ok(game.drops.size() > drops and restock, "the Brute drops a RESTOCK pickup")
+	ok(z.slam_ring == null or not is_instance_valid(z.slam_ring) or z.slam_ring.is_queued_for_deletion(), "its slam ring is removed when it dies")
+	ok(ZombieTypes.brute_count(4) == 1 and ZombieTypes.brute_count(5) == 0 and ZombieTypes.brute_count(12) == 2, "Brutes arrive every %d rounds" % ZombieTypes.BRUTE_EVERY)
+	game.round = 3
+	for d in game.drops.duplicate(): (d.node as Node).queue_free()
+	game.drops.clear()
+	pl.global_position = Vector3(0, 0.1, 3); pl.health = pl.max_health; pl.since_hit = 99.0
+	await frames(5)
 
 # ---------------------------------------------------------------- touch
 func _touch(idx: int, pos: Vector2, pressed: bool) -> void:
@@ -352,12 +505,43 @@ func _t_death_and_restart() -> void:
 	ok(pl.is_downed and not game.over, "lethal damage drops the player into last stand")
 	await frames(int(LastStand.BLEED_OUT * 60) + 30)
 	ok(game.over and game.hud.over_panel != null, "bleeding out ends the match with a results screen")
+	ok(is_equal_approx(Engine.time_scale, 1.0), "the results screen runs at normal speed")
+	var tot := HighScore.new(hs_path).load_totals()
+	ok(int(tot.matches) == 1 and int(tot.kills) == game.kills and int(tot.headshots) == game.stats.headshots and int(tot.elites) == game.stats.elites, "lifetime kills and headshots are saved",
+		"%d kills, %d headshots, %d Brutes" % [tot.kills, tot.headshots, tot.elites])
+	var over_text := ""
+	for c in game.hud.over_panel.get_children():
+		if c is Label: over_text += (c as Label).text + "\n"
+	ok(over_text.contains("Districts  3/3") and over_text.contains("Power  restored") and over_text.contains("Lifetime"), "results list districts, power and lifetime totals")
 	var rec := HighScore.new(hs_path).load_records()
 	ok(int(rec.round) == game.round and int(rec.score) == game.stats.points_earned and game.round >= 3, "best round and best score are saved", "round %d, score %d" % [rec.round, rec.score])
 	var old := game
+	# leave as much state behind as possible, then restart
+	Engine.time_scale = 0.3; old.slowmo_t = 1.0
+	old.power.activate("doublepay"); old.paks.activate("overdrive")
+	var settings_before := old.settings.to_dict()
 	game.restart()
 	for i in 10: await get_tree().process_frame
 	var g2: Game = main.game
 	ok(g2 != old and g2.round == 0 and not g2.over and g2.player.health == g2.player.max_health and not get_tree().paused, "restart begins a fresh match")
 	ok(g2.player.economy.points == Economy.START and g2.facility.open_doors.is_empty(), "restart resets points and doors")
+	var p2: Player = g2.player
+	ok(not g2.facility.power_on and g2.facility.cranks == 0 and g2.facility.districts_open() == 1 and g2.facility.objective().contains("open the Back Alley"), "restart turns the power off and resets the objective")
+	ok(Perks.held(p2.perks).is_empty() and is_equal_approx(p2.max_health, float(p2.cdef.max_health)) and is_equal_approx(p2.stamina_max(), Player.STAMINA_MAX) and is_equal_approx(p2.ammo().reload_mult, 1.0), "restart removes every enhancement")
+	var tiers := 0
+	for sl in p2.loadout.slots: tiers += sl.weapon.tier
+	ok(tiers == 0 and p2.loadout.weapon().id == Weapons.STARTER and not p2.ammo().locked, "restart returns the starting weapons, not upgraded")
+	ok(g2.zombies.is_empty() and get_tree().get_nodes_in_group("voz_zombie").filter(func(n): return not n.is_queued_for_deletion() and n.get_parent() == g2).is_empty(), "restart leaves no enemies behind")
+	ok(g2.power.timers.is_empty() and not g2.paks.active() and g2.drops.is_empty() and g2.gear_drops.is_empty() and g2.forge_busy <= 0.0 and p2.economy.mult == 1, "restart clears timed effects, pickups and the upgrade timer")
+	ok(is_equal_approx(Engine.time_scale, 1.0) and g2.slowmo_t <= 0.0 and g2.kills == 0 and g2.stats.kills == 0 and g2.stats.time < 1.0, "restart clears slow motion and run statistics")
+	ok(g2.settings.to_dict() == settings_before, "restart keeps the settings")
+	ok(int(HighScore.new(hs_path).load_records().round) >= 3 and int(HighScore.new(hs_path).load_totals().matches) == 1, "restart keeps the records")
+	# back to the menu and into a third match: still clean
+	g2.to_menu()
+	for i in 10: await get_tree().process_frame
+	ok(main.game == null and main.menu != null and not get_tree().paused, "Main menu returns to the menu")
+	ok(main.menu.find_children("*", "Button", true, false).any(func(b): return (b as Button).text == "How to play"), "the menu offers How to play")
+	main.start_game()
+	for i in 10: await get_tree().process_frame
+	ok(main.game != null and main.game.round == 0 and main.game.player.economy.points == Economy.START and not main.game.facility.power_on, "a match started from the menu is fresh")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(hs_path))

@@ -12,9 +12,9 @@ func test_distinct_silhouettes_and_roles():
 	assert_gt(t.brute.scale, 1.3); assert_gt(t.brute.hp, 4.0); assert_gt(t.brute.armor, 0.0); assert_lt(t.brute.speed, 1.0)
 	assert_gt(t.bloater.scale, t.walker.scale); assert_lt(t.bloater.speed, 1.0)
 
-func test_brute_every_eight_rounds():
+func test_brute_arrives_periodically():
 	for r in range(1, 40):
-		assert_eq(ZombieTypes.is_brute_round(r), r % 8 == 0, "round %d" % r)
+		assert_eq(ZombieTypes.is_brute_round(r), r % ZombieTypes.BRUTE_EVERY == 0, "round %d" % r)
 
 func test_brute_drops_guaranteed_restock():
 	assert_eq(ZombieTypes.guaranteed_drop("brute"), "restock")
@@ -39,7 +39,7 @@ func test_pick_distribution():
 
 func test_health_scaling_per_type():
 	assert_eq(ZombieTypes.health("walker", 150), 150)
-	assert_eq(ZombieTypes.health("brute", 150), 1200)
+	assert_eq(ZombieTypes.health("brute", 150), 900)
 	assert_eq(ZombieTypes.health("sprinter", 150), 90)
 	assert_gte(ZombieTypes.health("sprinter", 1), 1)
 

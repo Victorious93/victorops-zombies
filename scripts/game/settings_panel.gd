@@ -27,7 +27,10 @@ static func _choice(h: HBoxContainer, opts: Array, cur: String, cb: Callable) ->
 		b.pressed.connect(func(): cb.call(o))
 		h.add_child(b)
 
-static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> Control:
+## [title] heads the panel; [status] lines (pause screen: objective, weapons, tonics, timed effects)
+## are listed above the settings. Action buttons sit directly under the status so Resume is always
+## reachable without scrolling.
+static func make(st: GameSettings, on_change: Callable, buttons: Array = [], title := "SETTINGS", status: Array = []) -> Control:
 	var root := PanelContainer.new()
 	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var sb := StyleBoxFlat.new(); sb.bg_color = Color(0.02, 0.02, 0.03, 0.82); root.add_theme_stylebox_override("panel", sb)
@@ -36,10 +39,26 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	var box := VBoxContainer.new(); box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL; box.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_theme_constant_override("separation", 10); scroll.add_child(box)
-	var t := Label.new(); t.text = "SETTINGS"; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var t := Label.new(); t.text = title; t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	t.add_theme_font_size_override("font_size", 44); t.add_theme_color_override("font_color", Color(0.85, 0.1, 0.06)); box.add_child(t)
+	if not status.is_empty():
+		var sl := Label.new(); sl.name = "Status"; sl.text = "\n".join(status); sl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		sl.add_theme_font_size_override("font_size", 20); sl.add_theme_color_override("font_color", Color(0.8, 0.95, 1.0)); box.add_child(sl)
+	if not buttons.is_empty():
+		var brow := HFlowContainer.new(); brow.name = "Actions"; brow.alignment = FlowContainer.ALIGNMENT_CENTER
+		brow.add_theme_constant_override("h_separation", 14); brow.add_theme_constant_override("v_separation", 10); box.add_child(brow)
+		for pair in buttons:
+			var b := Button.new(); b.text = pair[0]; b.custom_minimum_size = Vector2(230, 60)
+			b.add_theme_font_size_override("font_size", 26)
+			b.pressed.connect(pair[1]); brow.add_child(b)
+		var st_t := Label.new(); st_t.text = "SETTINGS"; st_t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		st_t.add_theme_font_size_override("font_size", 28); st_t.add_theme_color_override("font_color", Color(0.3, 0.95, 1.0)); box.add_child(st_t)
 	_slider(_row(box, "Look sensitivity"), 0.2, 3.0, st.sensitivity, 0.05, func(x): st.set_sensitivity(x); on_change.call())
 	_slider(_row(box, "Camera shake"), 0.0, 1.5, st.shake, 0.05, func(x): st.shake = clampf(x, 0.0, 1.5); on_change.call())
+	var ih := _row(box, "Invert vertical look")
+	var ic := CheckButton.new(); ic.button_pressed = st.invert_y; ic.custom_minimum_size = Vector2(80, 48)
+	ic.toggled.connect(func(on): st.invert_y = on; on_change.call()); ih.add_child(ic)
 	var gh := _row(box, "Graphics")
 	var grp := ButtonGroup.new()
 	for id in GameSettings.ORDER:
@@ -70,8 +89,4 @@ static func make(st: GameSettings, on_change: Callable, buttons: Array = []) -> 
 	bt.toggled.connect(func(on): st.beats = on; on_change.call()); bth.add_child(bt)
 	_slider(_row(box, "Music"), 0.0, 1.0, st.music, 0.05, func(x): st.music = x; on_change.call())
 	_slider(_row(box, "Effects"), 0.0, 1.0, st.sfx, 0.05, func(x): st.sfx = x; on_change.call())
-	for pair in buttons:
-		var b := Button.new(); b.text = pair[0]; b.custom_minimum_size = Vector2(320, 64)
-		b.add_theme_font_size_override("font_size", 28); b.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		b.pressed.connect(pair[1]); box.add_child(b)
 	return root
