@@ -10,7 +10,7 @@
   <a href="https://github.com/Victorious93/victorops-zombies/actions/workflows/godot.yml"><img src="https://img.shields.io/github/actions/workflow/status/Victorious93/victorops-zombies/godot.yml?branch=main&style=flat-square&labelColor=0B0F1A&logo=githubactions&logoColor=00E5FF&label=CI" alt="CI"/></a>
   <a href="https://github.com/Victorious93/victorops-zombies/releases"><img src="https://img.shields.io/github/v/release/Victorious93/victorops-zombies?include_prereleases&style=flat-square&labelColor=0B0F1A&color=00E5FF&label=release" alt="Release"/></a>
   <img src="https://img.shields.io/badge/license-GPL--3.0-FF2BD6?style=flat-square&labelColor=0B0F1A" alt="License"/>
-  <img src="https://img.shields.io/badge/platform-Android%20|%20Desktop-00E5FF?style=flat-square&labelColor=0B0F1A" alt="Platform"/>
+  <img src="https://img.shields.io/badge/platform-Android%20%26%20Desktop-00E5FF?style=flat-square&labelColor=0B0F1A" alt="Platform"/>
   <a href="https://victorious-framework.pages.dev"><img src="https://img.shields.io/badge/Victorious-Framework-FF2BD6?style=flat-square&labelColor=0B0F1A" alt="Victorious Framework"/></a>
 </p>
 
