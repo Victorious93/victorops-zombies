@@ -2,7 +2,7 @@
 **By Victorious Framework**
 
 Original offline, single-player, first-person, round-based zombie survival for **Android** (first-class) and desktop.
-Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **10.0.0**, package `com.victorious.zombie`.
+Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **10.1.0**, package `com.victorious.zombie`.
 
 This README is the project's living guide (Victorious Framework): status, controls, architecture, how to run, export and verify, attribution, and what is left.
 
@@ -126,19 +126,32 @@ In the Android Godot editor: open the folder, let it import, press Play.
 ## Verify
 
 ```bash
-godot --headless -s addons/gut/gut_cmdln.gd -gexit      # 285 rule tests (pure logic)
-godot --headless --fixed-fps 60 -- --check              # 138 scene checks, exit code 0 = all passed
+godot --headless -s addons/gut/gut_cmdln.gd -gexit      # 295 rule tests (pure logic)
+godot --headless --fixed-fps 60 -- --check              # 142 scene checks, exit code 0 = all passed
 godot --headless --fixed-fps 60 -- --sim=10             # a bot plays rounds 1-10 and prints a report
 xvfb-run -a godot --rendering-driver opengl3 -- --v10shots=<dir>   # 12 review screenshots (needs a display)
 ```
 
-Results of this pass (Godot 4.7.2, Linux, 2026-11-11): 285 / 285 tests, 137 / 138 scene checks, bot reached round 11 with 245 kills, 0 downs and 0 stuck zombies (it met Brutes on rounds 4 and 8).
+Results of the v10.1 graphics pass (Godot 4.7.2, Linux, 2026-11-24): 295 / 295 tests, 142 / 142 scene checks, bot reached round 11 with 245 kills, 0 downs and 0 stuck zombies.
+
+Results of the v10.0 pass (Godot 4.7.2, Linux, 2026-11-11): 285 / 285 tests, 137 / 138 scene checks, bot reached round 11 with 245 kills, 0 downs and 0 stuck zombies (it met Brutes on rounds 4 and 8).
 
 `--check` (`scripts/game/self_check.gd`) drives the real scene without a renderer. It covers the complete flow in order: countdown and three rounds; exact damage, headshots, walls, shotgun, reload and switch rules; an unaffordable door, a door charged once, navigation after every door, both loops; wall weapon and ammunition; **the power objective through the real interaction** (prompt, one crank per press, power on, signs switch, tonics refused before power); the Forge (charged once, gun locked, stats doubled); pickups and expiry; **each tonic charged once and its effect on the player; the pause status text; the crate's price sign, refusal when short, one charge per roll, never a carried weapon; no weapon trade while the gun is in the Forge; a knock-down during an upgrade still returns the upgraded gun; self-revive removes tonic effects; the Brute's health, armour, weak point, slam telegraph, dodge, hit, winded window, bounty and drop**; hit grace and regeneration; pause, the pause menu and the focus-loss rule; three simultaneous touches; death, results text, records and **lifetime totals; then restart: power off, objective reset, no tonics, stock weapons, no enemies, no timed effects or pickups, normal time scale, zeroed statistics, settings unchanged, records kept; back to the menu and into a third fresh match**.
 
 What the automated checks do **not** show: rendering on a phone GPU, real audio output, frame rate, how the touch controls feel, a real Android pause/resume cycle (only the pause rule and the notification handler's logic are tested), gamepad input, and the Low preset on real hardware (it was only applied in desktop software rendering).
 
 Screenshots were reviewed by eye for the menu, How to play, the power signs and cable, the crank prompt, power on, the crate sign, the Brute (walking, slam ring, winded), the pause status and the results screen. Review sheets: `docs/v10_flow.jpg` (High preset: menu, How to play, power sign, cable and generator, crank prompt, power on, crate sign, pause status, results) and `docs/v10_low_touch_brute.jpg` (Low preset with the touch HUD: Brute, slam ring, winded, crank prompt, power on, results). Both are desktop software OpenGL at 1280 × 720, not a phone.
+
+## v10.1 graphics pass (dusk pass)
+
+Cosmetic only: no rule, price, damage, navigation or collision changed. Tuning lives in `scripts/rules/dusk_look.gd` (tested in `tests/test_v10_1.gd`).
+
+- **Sky and fog.** Indigo overhead with a narrow dusty-rose band where the sun went down; fog is a little denser and hangs lower over the paving (`FOG_HEIGHT_DENSITY`), and the horizon bleeds into it. Glossy surfaces now reflect the sky instead of flat ambient. Ambient stays at 92% of v10 so silhouettes still read.
+- **Wet town.** Open-air asphalt and cobbles are darker and glossier, and 34 rain puddles (one MultiMesh, one draw call on every preset, no collision) catch the sky, lamps and beacon in the Back Alley, Main Street and the Courtyard.
+- **Generator payoff.** When it catches: a green-white flash lights the alley, sparks burst from the panel, beacon and stack; while it runs, exhaust smoke (follows the dust toggle), a fluttering work lamp and a green light shaft over the beacon.
+- **Brute slam.** A dust shockwave rolls out just past the red danger ring, with a low dust sheet, a short flash and a cracked scorch left on the floor.
+- **Round transitions.** A blood-red edge vignette hits as a round starts and bleeds out; a cold dark edge settles in for the breather after a round is survived (capped at 45% so the HUD and the room stay visible).
+- Quality presets: puddles are on everywhere (one draw call); smoke and light shafts follow the existing dust toggle (off on Low); no new shadowed lights; the two new lights (flash, work lamp) are unshadowed and the flash light is hidden after 1.4 s.
 
 ## Export an Android APK
 

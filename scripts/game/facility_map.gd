@@ -119,8 +119,10 @@ func _build_mats() -> void:
 	mats.floor = _pbr("concrete031", Color(0.6, 0.6, 0.58), 0.3)
 	mats.tile = _pbr("tiles074", Color(0.78, 0.76, 0.72), 0.5)
 	mats.woodfloor = _pbr("woodfloor041", Color(0.7, 0.66, 0.6), 0.4)
-	mats.ground = _pbr("asphalt026c", Color(0.62, 0.63, 0.64), 0.22)
-	mats.cobble = _pbr("bricks076c", Color(0.66, 0.66, 0.66), 0.4)
+	mats.ground = _pbr("asphalt026c", Color(0.56, 0.57, 0.6), 0.22)
+	mats.cobble = _pbr("bricks076c", Color(0.6, 0.6, 0.62), 0.4)
+	# v10.1: the town has just been rained on: open-air paving is darker and glossier
+	for k in ["ground", "cobble"]: (mats[k] as StandardMaterial3D).roughness = DuskLook.WET_ROUGHNESS
 	mats.dirt = _pbr("ground037", Color(0.5, 0.5, 0.46), 0.3)
 	mats.wood = _pbr("planks021", Color(0.6, 0.5, 0.4), 0.6)
 	mats.plank = _pbr("planks021", Color(0.42, 0.32, 0.22), 0.8)
@@ -398,12 +400,13 @@ var moon_light: DirectionalLight3D
 func build_sky() -> void:
 	if game == null or game.env == null: return
 	var sm := ProceduralSkyMaterial.new()
-	sm.sky_top_color = Color(0.2, 0.25, 0.35); sm.sky_horizon_color = Color(0.56, 0.56, 0.58); sm.sky_curve = 0.3
-	sm.ground_horizon_color = Color(0.5, 0.5, 0.52); sm.ground_bottom_color = Color(0.08, 0.09, 0.11)
-	sm.sun_angle_max = 0.0; sm.sky_energy_multiplier = 1.0
+	# v10.1 dusk pass: indigo overhead, a narrow dusty-rose band where the sun went down
+	sm.sky_top_color = DuskLook.SKY_TOP; sm.sky_horizon_color = DuskLook.SKY_HORIZON; sm.sky_curve = DuskLook.SKY_CURVE
+	sm.ground_horizon_color = DuskLook.GROUND_HORIZON; sm.ground_bottom_color = DuskLook.GROUND_BOTTOM
+	sm.sun_angle_max = 0.0; sm.sky_energy_multiplier = DuskLook.SKY_ENERGY
 	var sky := Sky.new(); sky.radiance_size = Sky.RADIANCE_SIZE_32; sky.sky_material = sm
 	game.env.sky = sky; game.env.background_mode = Environment.BG_SKY
-	game.env.fog_sky_affect = 0.0
+	game.env.fog_sky_affect = DuskLook.FOG_SKY_AFFECT
 	if moon_light == null: return
 	var dir := Vector3(-0.35, 0.5, -0.8).normalized()
 	var at := Vector3(18, 0, -8) + dir * 170.0
@@ -481,6 +484,7 @@ func build(p_game) -> void:
 	Scenery.new(self).build()
 	_build_lamps()
 	_dusk_light()
+	_puddles()
 	_place_machines()
 	_place_fuses()
 	kit.commit()
@@ -854,6 +858,97 @@ func apply_quality(d: Dictionary) -> void:
 		p.visible = d.dust
 	for z in get_tree().get_nodes_in_group("voz_zombie"):
 		ModelLib.set_shadows(z.model, d.shadows)
+	_dust_on = d.dust
+
+# ---------------------------------------------------------------- v10.1 dusk pass
+## Rain puddles on the open-air paving: one MultiMesh of glossy dark patches (a single draw call on every
+## preset), purely visual (no collision, the navmesh never sees them). They mirror the dusk sky and pick up
+## lamp and beacon highlights, which sells "wet town at dusk" on GL Compatibility as well as Mobile.
+var puddles: MultiMeshInstance3D
+static func puddle_texture() -> ImageTexture:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	var n := FastNoiseLite.new(); n.frequency = 0.06; n.seed = 41
+	for y in 64:
+		for x in 64:
+			var d := Vector2(x - 31.5, y - 31.5).length() / 32.0
+			var v := (1.0 - d) + n.get_noise_2d(x, y) * 0.55
+			img.set_pixel(x, y, Color(1, 1, 1, smoothstep(0.12, 0.3, v)))
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+func _puddles() -> void:
+	var spots := DuskLook.puddle_spots(1010, DuskLook.PUDDLE_COUNT, ROOFED)
+	var mm := MultiMesh.new(); mm.transform_format = MultiMesh.TRANSFORM_3D
+	var pm := PlaneMesh.new(); pm.size = Vector2.ONE; mm.mesh = pm
+	mm.instance_count = spots.size()
+	for i in spots.size():
+		var sp: Array = spots[i]
+		var b := Basis(Vector3.UP, sp[3]).scaled(Vector3(sp[2] * 1.3, 1.0, sp[2]))
+		mm.set_instance_transform(i, Transform3D(b, Vector3(sp[0], DuskLook.PUDDLE_Y, sp[1])))
+	var m := StandardMaterial3D.new(); m.albedo_color = Color(0.035, 0.04, 0.055, 0.92); m.albedo_texture = puddle_texture()
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; m.roughness = DuskLook.PUDDLE_ROUGHNESS; m.metallic = 0.0; m.metallic_specular = 0.9
+	m.render_priority = -1
+	puddles = MultiMeshInstance3D.new(); puddles.name = "Puddles"; puddles.multimesh = mm; puddles.material_override = m
+	puddles.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(puddles)
+
+## Generator payoff: a hard green-white flash and spark showers when it catches, then exhaust smoke from
+## the stack and a work lamp on the trailer for as long as it runs (the smoke follows the dust toggle).
+var gen_smoke: CPUParticles3D
+var gen_lamp: OmniLight3D
+var burst_light: OmniLight3D
+var power_shaft: MeshInstance3D
+var _burst_t := -1.0
+var _dust_on := true
+const GEN_STACK := Vector3(-1.5, 3.3, -24.9)
+func _generator_fx() -> void:
+	gen_smoke = CPUParticles3D.new(); gen_smoke.name = "GeneratorSmoke"; gen_smoke.amount = 18; gen_smoke.lifetime = 3.2
+	gen_smoke.emitting = false; gen_smoke.position = GEN_STACK
+	gen_smoke.direction = Vector3(0.2, 1, 0.1); gen_smoke.spread = 14; gen_smoke.initial_velocity_min = 0.6; gen_smoke.initial_velocity_max = 1.1
+	gen_smoke.gravity = Vector3(0.25, 0.15, 0.1); gen_smoke.damping_min = 0.2; gen_smoke.damping_max = 0.4
+	gen_smoke.scale_amount_min = 0.6; gen_smoke.scale_amount_max = 1.0
+	var c := Curve.new(); c.add_point(Vector2(0, 0.35)); c.add_point(Vector2(1, 1.6)); gen_smoke.scale_amount_curve = c
+	var g := Gradient.new(); g.set_color(0, Color(0.32, 0.32, 0.34, 0.5)); g.set_color(1, Color(0.25, 0.26, 0.3, 0.0)); gen_smoke.color_ramp = g
+	var q := QuadMesh.new(); q.size = Vector2(0.9, 0.9)
+	var sm := StandardMaterial3D.new(); sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA; sm.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	sm.vertex_color_use_as_albedo = true; sm.albedo_texture = pool_texture_alpha(); sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	sm.disable_receive_shadows = true; q.material = sm; gen_smoke.mesh = q
+	add_child(gen_smoke)
+	gen_lamp = OmniLight3D.new(); gen_lamp.name = "GeneratorLamp"; gen_lamp.light_color = Color(0.78, 1.0, 0.82); gen_lamp.light_energy = 0.0
+	gen_lamp.omni_range = 7.5; gen_lamp.omni_attenuation = 1.4; gen_lamp.position = Vector3(1.0, 2.6, -22.8); gen_lamp.visible = false
+	add_child(gen_lamp)
+	burst_light = OmniLight3D.new(); burst_light.name = "PowerBurst"; burst_light.light_color = DuskLook.POWER_BURST_COLOR
+	burst_light.omni_range = 14.0; burst_light.light_energy = 0.0; burst_light.visible = false; burst_light.position = Vector3(1.0, 2.2, -22.6)
+	add_child(burst_light)
+	power_shaft = shaft(Vector3(3, 1.6, -24.3), 3.2, 1.3, Color(0.3, 1.0, 0.45, 0.3))
+	power_shaft.visible = false
+
+static var _soft_alpha: GradientTexture2D
+static func pool_texture_alpha() -> GradientTexture2D:
+	if _soft_alpha == null:
+		var g := Gradient.new(); g.set_color(0, Color(1, 1, 1, 1)); g.set_color(1, Color(1, 1, 1, 0))
+		_soft_alpha = GradientTexture2D.new(); _soft_alpha.gradient = g; _soft_alpha.width = 32; _soft_alpha.height = 32
+		_soft_alpha.fill = GradientTexture2D.FILL_RADIAL; _soft_alpha.fill_from = Vector2(0.5, 0.5); _soft_alpha.fill_to = Vector2(1.0, 0.5)
+	return _soft_alpha
+
+## Called once when the generator catches (after power_beacon(true)).
+func power_payoff() -> void:
+	_burst_t = 0.0
+	if burst_light: burst_light.visible = true; burst_light.light_energy = DuskLook.power_burst(0.0)
+	if game and game.fx:
+		for at in [Vector3(1.0, 1.55, -23.4), Vector3(3, 2.95, -24.1), Vector3(-1.5, 3.2, -24.7)]:
+			game.fx.sparks(at, Vector3(0, 0.6, 1).normalized(), Color(0.85, 1.0, 0.8), 18, 0.5, 6.0, 0.04)
+			game.fx.sparks(at, Vector3.UP, Color(1.0, 0.95, 0.7), 10, 0.3, 3.5)
+
+func _process_power_fx(dt: float, on: bool) -> void:
+	if _burst_t >= 0.0 and burst_light:
+		_burst_t += dt
+		burst_light.light_energy = DuskLook.power_burst(_burst_t)
+		if _burst_t >= DuskLook.POWER_BURST_TIME: burst_light.visible = false; _burst_t = -1.0
+	if gen_smoke: gen_smoke.emitting = on and _dust_on
+	if gen_lamp:
+		gen_lamp.visible = on
+		if on: gen_lamp.light_energy = 1.3 * (0.93 + 0.07 * sin(_t * 31.0) * sin(_t * 7.0))   # engine-driven flutter
+	if power_shaft: power_shaft.visible = on and _dust_on
 
 # ---------------------------------------------------------------- machines
 ## Neon perk machine: cabinet + glowing tube outline + emblem + sign.
@@ -919,6 +1014,7 @@ func _place_machines() -> void:
 		func(pl): return game.crank_prompt(pl),
 		func(pl): game.crank_power(lever), true)
 	_power_cues()
+	_generator_fx()
 	# Mystery Crate: starts in the Lab, relocates between these spots
 	crate_spots = [
 		[Vector3(16, 0, 6.6), PI, "General Store"],
@@ -1050,6 +1146,7 @@ func _process(dt: float) -> void:
 		var spd := (1.4 if on else 0.25) * (1.0 + i * 0.4) * (1 if i % 2 == 0 else -1) * (1.0 + 7.0 * sin(clampf(forge_work / OverchargeForge.FORGE_TIME, 0, 1) * PI))
 		r.scale = Vector3.ONE * (1.0 + (0.25 * sin(_t * 20.0) if forge_work > 0.0 else 0.0))
 		r.rotation.x += dt * spd; r.rotation.y += dt * spd * 0.7
+	_process_power_fx(dt, on)
 	if power_beacon_light:   # strobe until the generator runs, then a steady glow
 		power_beacon_light.light_energy = 1.2 if on else 2.6 * pow(0.5 + 0.5 * sin(_t * 6.0), 3.0)
 		if power_cue_mat: power_cue_mat.emission_energy_multiplier = 1.6 if on else 0.6 + 2.6 * pow(0.5 + 0.5 * sin(_t * 6.0), 3.0)

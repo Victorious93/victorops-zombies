@@ -962,6 +962,7 @@ func _slam_land(pl) -> void:
 	pl.add_trauma(clampf(0.9 - d * 0.08, 0.15, 0.8))
 	game.sfx.play_at("land_thud", global_position, 6, 0.55); game.sfx.play_at("rumble", global_position, 0, 1.3)
 	if game.fx:
+		game.fx.shockwave(global_position, ZombieTypes.SLAM_RADIUS)   # v10.1
 		for i in 10:
 			var a := TAU * i / 10.0
 			game.fx.dirt_burst(global_position + Vector3(cos(a), 0, sin(a)) * ZombieTypes.SLAM_RADIUS * 0.8)

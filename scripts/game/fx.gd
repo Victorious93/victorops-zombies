@@ -211,6 +211,7 @@ func shell(from: Vector3, right: Vector3, up: Vector3, big := false) -> void:
 
 var _movers: Array = []
 func _process(dt: float) -> void:
+	_update_shocks(dt)
 	for m in _movers.duplicate():
 		if not is_instance_valid(m[0]) or m[1].call(dt):
 			if is_instance_valid(m[0]): m[0].queue_free()
@@ -239,3 +240,55 @@ func popup(at: Vector3, text: String, color := Color(1.0, 0.86, 0.3)) -> void:
 	var tw := create_tween(); tw.tween_property(l, "global_position:y", at.y + 0.8, 0.8)
 	tw.parallel().tween_property(l, "modulate:a", 0.0, 0.8).set_delay(0.3)
 	tw.tween_callback(l.queue_free)
+
+## v10.1 Brute slam impact: a dust shockwave ring that rolls out past the danger radius, a low dust
+## sheet, a short hot flash and a cracked scorch left on the ground. All quads/one torus, no shaders.
+var shocks: Array = []   ## {ring, mat, sheet, sheet_mat, t, r, at}
+func shockwave(at: Vector3, slam_radius: float) -> void:
+	var ring := MeshInstance3D.new(); var tm := TorusMesh.new(); tm.inner_radius = 0.86; tm.outer_radius = 1.0; tm.rings = 32; tm.ring_segments = 4
+	ring.mesh = tm
+	var m := StandardMaterial3D.new(); m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.albedo_color = Color(0.62, 0.56, 0.5, 0.9); ring.material_override = m; ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring); ring.global_position = at + Vector3.UP * 0.12
+	var sheet := MeshInstance3D.new(); var pm := PlaneMesh.new(); pm.size = Vector2.ONE * 2.0; sheet.mesh = pm
+	var sm := StandardMaterial3D.new(); sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED; sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	sm.albedo_texture = _soft_tex; sm.albedo_color = Color(0.45, 0.42, 0.4, 0.55); sm.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	sheet.material_override = sm; sheet.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(sheet); sheet.global_position = at + Vector3.UP * 0.3
+	shocks.append({ring = ring, mat = m, sheet = sheet, sheet_mat = sm, t = 0.0, r = slam_radius})
+	var l := OmniLight3D.new(); l.light_color = Color(1.0, 0.55, 0.4); l.light_energy = 4.0; l.omni_range = slam_radius * 2.2
+	add_child(l); l.global_position = at + Vector3.UP * 0.6
+	var tl := create_tween(); tl.tween_property(l, "light_energy", 0.0, 0.35); tl.tween_callback(l.queue_free)
+	surface_quad(at + Vector3.UP * 0.02, Vector3.UP, slam_radius * 0.75, _quad_mat("slam_crack", _crack_tex(), Color(1, 1, 1, 0.9)))
+	sparks(at + Vector3.UP * 0.1, Vector3.UP, Color(0.3, 0.27, 0.24), int(20 * maxf(particle_scale, 0.4)), 0.9, 4.5, 0.08)
+
+func _update_shocks(dt: float) -> void:
+	for s in shocks.duplicate():
+		s.t += dt
+		var a := DuskLook.shock_alpha(s.t)
+		if a <= 0.0:
+			s.ring.queue_free(); s.sheet.queue_free(); shocks.erase(s); continue
+		var r := DuskLook.shock_radius(s.t, s.r)
+		s.ring.scale = Vector3(r, 1.0 + 2.0 * a, r); s.mat.albedo_color.a = a
+		s.sheet.scale = Vector3.ONE * r * 0.9; s.sheet_mat.albedo_color.a = a * 0.6
+
+var _crack: Texture2D
+## Radial crack pattern for the slam decal (generated once): dark jagged spokes over a soft scorch.
+func _crack_tex() -> Texture2D:
+	if _crack: return _crack
+	var n := 96; var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	var rng := RandomNumberGenerator.new(); rng.seed = 1010
+	var spokes: Array = []
+	for i in 9: spokes.append(TAU * i / 9.0 + rng.randf_range(-0.25, 0.25))
+	for y in n:
+		for x in n:
+			var p := Vector2(x, y) - Vector2(n, n) / 2.0
+			var d := p.length() / (n / 2.0)
+			var ang := atan2(p.y, p.x)
+			var a := clampf(0.55 - d * 0.6, 0.0, 0.55)   # soft scorch
+			for s in spokes:
+				var da := absf(wrapf(ang - s - sin(d * 9.0 + s) * 0.08, -PI, PI))
+				if da * d * n * 0.5 < 1.4 * (1.0 - d) + 0.3 and d < 0.95: a = maxf(a, 0.95 * (1.0 - d * 0.7))
+			img.set_pixel(x, y, Color(0.04, 0.035, 0.03, a))
+	_crack = ImageTexture.create_from_image(img)
+	return _crack
