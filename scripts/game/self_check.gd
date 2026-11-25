@@ -265,6 +265,11 @@ func _t_forge_and_pickups() -> void:
 	ok(game.current_prompt == "", "the generator prompt disappears once it runs", game.current_prompt)
 	ok(game.map.power_label.text.contains("RUNNING") and game.map.power_beacon_light.light_color.is_equal_approx(FacilityMap.POWER_CUE_ON), "generator sign and beacon switch to running")
 	ok(not game.facility.objective().contains("Restore"), "the objective moves on after power", game.facility.objective())
+	# v10.1 dusk pass: the generator pays off visibly, and the wet-town dressing is visual only
+	ok(game.map.burst_light != null and game.map.burst_light.visible and game.map.burst_light.light_energy > 1.0, "the generator flashes when it catches", "%.1f" % (game.map.burst_light.light_energy if game.map.burst_light else -1.0))
+	await frames(int(DuskLook.POWER_BURST_TIME * 60) + 10)
+	ok(not game.map.burst_light.visible and game.map.gen_lamp.visible and game.map.gen_smoke.emitting == game.map._dust_on, "after the flash: work lamp on, exhaust smoking, flash light freed for the GPU")
+	ok(game.map.puddles != null and game.map.puddles.multimesh.instance_count == DuskLook.PUDDLE_COUNT and game.map.puddles.get_child_count() == 0, "rain puddles: one multimesh, no collision", "%d" % (game.map.puddles.multimesh.instance_count if game.map.puddles else -1))
 	pl.global_position = Vector3(0, 0.1, 3); await frames(3)
 	ok(game.forge_prompt(pl).begins_with("Upgrade Pulse Rifle to Mk.2 — 5000 points"), "upgrade prompt", game.forge_prompt(pl))
 	var base := pl.weapon().damage; var base_mag := pl.weapon().mag_size
@@ -414,6 +419,7 @@ func _t_elite() -> void:
 	while z.winded_t <= 0.0 and t < 120: await get_tree().physics_frame; t += 1
 	ok(z.winded_t > 0.0 and is_equal_approx(pl.health, hp_before), "leaving the ring avoids the slam", "health %.0f" % pl.health)
 	ok(z.exposed and not z.slam_ring.visible, "after the slam the Brute is winded and the ring is gone")
+	ok(game.fx.shocks.size() >= 1, "the slam rolls out a dust shockwave", "%d live" % game.fx.shocks.size())
 	hp = z.hp
 	game.hitscan(pl, Vector3(z.global_position.x, 1.3, pl.global_position.z), Vector3(0, 0, -1), w)
 	ok(hp - z.hp == w.damage, "a winded Brute takes full body damage", "%d" % (hp - z.hp))

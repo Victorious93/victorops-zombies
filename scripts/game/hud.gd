@@ -104,6 +104,14 @@ func _ready() -> void:
 	var gt := GradientTexture2D.new(); gt.fill = GradientTexture2D.FILL_RADIAL; gt.fill_from = Vector2(0.5, 0.5); gt.fill_to = Vector2(1.05, 1.05)
 	var gr := Gradient.new(); gr.set_color(0, Color(0.02, 0.03, 0.05, 0.0)); gr.set_color(1, Color(0.02, 0.03, 0.05, 0.55)); gr.add_point(0.55, Color(0.02, 0.03, 0.05, 0.0))
 	gt.gradient = gr; gt.width = 128; gt.height = 128; mood.texture = gt; add_child(mood)
+	# v10.1 round transition: a heavy edge vignette (blood red as a round starts, cold dark as one ends)
+	trans_rect = TextureRect.new(); trans_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	trans_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE; trans_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	trans_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	var tg := GradientTexture2D.new(); tg.fill = GradientTexture2D.FILL_RADIAL; tg.fill_from = Vector2(0.5, 0.5); tg.fill_to = Vector2(1.0, 1.0)
+	var tgr := Gradient.new(); tgr.set_color(0, Color(1, 1, 1, 0)); tgr.add_point(0.38, Color(1, 1, 1, 0)); tgr.set_color(tgr.get_point_count() - 1, Color(1, 1, 1, 1))
+	tg.gradient = tgr; tg.width = 128; tg.height = 128; trans_rect.texture = tg; trans_rect.modulate = Color(1, 1, 1, 0)
+	add_child(trans_rect)
 	vignette = ColorRect.new(); vignette.color = Color(0.6, 0, 0, 0); vignette.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	vignette.mouse_filter = Control.MOUSE_FILTER_IGNORE; add_child(vignette)
 	blood_rect = TextureRect.new(); blood_rect.texture = _blood_screen_tex(); blood_rect.stretch_mode = TextureRect.STRETCH_SCALE
@@ -216,7 +224,7 @@ func _draw_center() -> void:
 	if power_t > 0.0:
 		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(1.0, 0.96, 0.85, power_flash_alpha(power_t)))
 	if round_t > 0.0:
-		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.25))
+		hit.draw_rect(Rect2(Vector2.ZERO, hit.size), Color(0.6, 0.0, 0.0, round_t * 0.12))   # v10.1: the edge vignette carries the rest
 	var pf := ThemeDB.fallback_font
 	for pp in pops:
 		var n: int = pp.n; var a: float = pp.age
@@ -382,6 +390,21 @@ static func slam_alpha(a: float) -> float:
 	return clampf((SLAM_TIME - a) / 0.8, 0.0, 1.0)
 static func slam_bar(a: float) -> float:  ## 0..1 width of the red wipe bars
 	return clampf(a / 0.25, 0.0, 1.0) * clampf((SLAM_TIME - a) / 0.6, 0.0, 1.0)
+## v10.1: start = true when a round begins (red), false when one is survived (cold dark breather).
+var trans_rect: TextureRect
+var trans_t := -1.0
+var trans_in := true
+const TRANS_RED := Color(0.55, 0.0, 0.0)
+const TRANS_COLD := Color(0.01, 0.02, 0.05)
+func round_transition(start: bool) -> void:
+	trans_in = start; trans_t = 0.0
+func _update_transition(dt: float) -> void:
+	if trans_rect == null or trans_t < 0.0: return
+	trans_t += dt
+	var a := DuskLook.round_in_alpha(trans_t) if trans_in else DuskLook.round_out_alpha(trans_t)
+	var c := TRANS_RED if trans_in else TRANS_COLD
+	trans_rect.modulate = Color(c.r, c.g, c.b, a)
+	if trans_t >= (DuskLook.ROUND_IN_TIME if trans_in else DuskLook.ROUND_OUT_TIME): trans_t = -1.0; trans_rect.modulate.a = 0.0
 func round_flash() -> void:
 	round_t = 1.0
 	round_lbl.scale = Vector2.ONE * 1.6
@@ -466,6 +489,7 @@ func _process(dt: float) -> void:
 	feed_t -= dt; feed_lbl.visible = feed_t > 0.0
 	feed_lbl.scale = feed_lbl.scale.lerp(Vector2.ONE, clampf(dt * 10, 0, 1))
 	round_t = maxf(0.0, round_t - dt * 0.8)
+	_update_transition(dt)
 	slam_age += dt
 	for pp in pops: pp.age += dt
 	pops = pops.filter(func(pp): return pp.age < POP_LIFE)

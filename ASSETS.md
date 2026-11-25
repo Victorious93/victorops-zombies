@@ -153,3 +153,7 @@ Town geometry (buildings, diner furniture, shelving, containers, tent, benches, 
 ## v10 (final implementation run)
 
 No new asset files. Everything added in v10 is built in code from primitives and existing materials: the Brute's slam ring, weak-point glow and plates, the generator cable, marker lamps, beacon and signs, the objective line and the How to play card. The sounds used for cranking and the slam (`rack`, `rumble`, `land_thud`, `brute_roar`) are existing original files from earlier passes. The game loads nothing at run time from the network; v10 also removes the Android INTERNET permission.
+
+## v10.1 (graphics pass: dusk, wet streets, generator payoff, slam shockwave, round transition)
+
+No new asset files and no third-party content. Everything added in v10.1 is generated in code at run time and is original: the puddle alpha mask (seeded `FastNoiseLite` blob, `FacilityMap.puddle_texture`), the Brute slam crack decal (`Fx._crack_tex`, procedural radial spokes), the generator exhaust and power-on flash (Godot `CPUParticles3D`, `OmniLight3D`, gradient textures), the round-transition edge vignette (`GradientTexture2D`), and the new sky, fog and wet-paving values (`scripts/rules/dusk_look.gd`). Existing CC0 ambientCG textures (`asphalt026c`, `bricks076c`) are only re-tinted and given a lower roughness.
