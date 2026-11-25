@@ -1,10 +1,32 @@
+<div align="center">
+
+<img src="assets/victorops-zombies-logo.jpg" width="260" alt="VICTOR ZOMBIES logo"/>
+
 # VICTOR ZOMBIES
-**By Victorious Framework**
 
-Original offline, single-player, first-person, round-based zombie survival for **Android** (first-class) and desktop.
-Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **10.0.0**, package `com.victorious.zombie`.
+**Offline first-person round-based zombie survival for Android and desktop, by Victorious Framework.**
 
-This README is the project's living guide (Victorious Framework): status, controls, architecture, how to run, export and verify, attribution, and what is left.
+<p>
+  <a href="https://github.com/Victorious93/victorops-zombies/actions/workflows/godot.yml"><img src="https://img.shields.io/github/actions/workflow/status/Victorious93/victorops-zombies/godot.yml?branch=main&style=flat-square&labelColor=0B0F1A&logo=githubactions&logoColor=00E5FF&label=CI" alt="CI"/></a>
+  <a href="https://github.com/Victorious93/victorops-zombies/releases"><img src="https://img.shields.io/github/v/release/Victorious93/victorops-zombies?include_prereleases&style=flat-square&labelColor=0B0F1A&color=00E5FF&label=release" alt="Release"/></a>
+  <img src="https://img.shields.io/badge/license-GPL--3.0-FF2BD6?style=flat-square&labelColor=0B0F1A" alt="License"/>
+  <img src="https://img.shields.io/badge/platform-Android%20|%20Desktop-00E5FF?style=flat-square&labelColor=0B0F1A" alt="Platform"/>
+  <a href="https://victorious-framework.pages.dev"><img src="https://img.shields.io/badge/Victorious-Framework-FF2BD6?style=flat-square&labelColor=0B0F1A" alt="Victorious Framework"/></a>
+</p>
+
+<p><a href="https://github.com/Victorious93/victorops-zombies/releases">Releases</a> · <a href="https://victorious-framework.pages.dev">Victorious Framework</a></p>
+
+</div>
+
+---
+
+Original offline, single-player, first-person, round-based zombie survival for **Android** (first-class) and desktop. Engine: **Godot 4.7.2 stable**, GDScript only, Mobile renderer (GL Compatibility fallback). Version **10.0.0**, package `com.victorious.zombie`.
+
+> This README is also the project's living guide: status, controls, architecture, how to run, export and verify, attribution, and what is left. The game has **never been installed or run on a device or emulator**; see the status table.
+
+## Download
+
+Pre-release test builds are listed on the [Releases page](https://github.com/Victorious93/victorops-zombies/releases) (the newest tagged build there is `v7.14-test`, older than the v10.0.0 source described below). Every push also builds a release APK in CI and uploads it as the `victor-zombies-apk` artifact on the [Godot CI workflow](https://github.com/Victorious93/victorops-zombies/actions/workflows/godot.yml).
 
 ## Status (v10.0.0 — final implementation run)
 
@@ -258,3 +280,19 @@ All third-party assets are CC0; sources and licences are listed file by file in 
 - 30 s skippable first-run tutorial (move, shoot, rebuild, buy) - replay it from the menu Armory.
 - **Pump Station** expansion south of the Loading Yard (1250) with the new **Marksman Mist** perk (2500: headshots x3 instead of x2, tighter ADS).
 - Menu **Armory**: choose which wall gun hangs in the spawn room.
+
+---
+
+## Victorious fleet
+
+VICTOR ZOMBIES is part of the [Victorious Framework](https://victorious-framework.pages.dev), a family of Android and PC tools by Don Victor. **Every app works standalone; fleet integrations are optional** and never required.
+
+Related: [droidcommand-AI](https://github.com/Victorious93/droidcommand-AI) (fleet controller), [victorious-fleet](https://github.com/Victorious93/victorious-fleet) (index of all fleet apps), [fleet-manifest](https://github.com/Victorious93/fleet-manifest) (fleet status feed). The full roster lives in [victorious-fleet](https://github.com/Victorious93/victorious-fleet), and live status is in [fleet-manifest](https://github.com/Victorious93/fleet-manifest).
+
+## Contributing
+
+Issues and pull requests are welcome. Keep changes focused, match the existing code style, never commit secrets or release keys, and keep any fleet integration optional so the app still works on its own. Open a PR against the default branch and wait for CI to pass.
+
+## License
+
+Game code is licensed under the GNU GPL v3; see [LICENSE](LICENSE). Third-party assets are CC0 with sources listed in [ASSETS.md](ASSETS.md); the town art, sounds and music are original.
