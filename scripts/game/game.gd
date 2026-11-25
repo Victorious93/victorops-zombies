@@ -80,7 +80,7 @@ var stuck_respawns := 0
 
 func on_zombie_stuck(_z) -> void: stuck_respawns += 1
 const SETTINGS_PATH := "user://settings.cfg"
-const BASE_FOG := Color(0.24, 0.28, 0.36)
+const BASE_FOG := DuskLook.FOG_COLOR   ## v10.1 dusk pass (v10: 0.24, 0.28, 0.36)
 const AMBIENT_OFF := 0.5    ## before the generator runs
 const AMBIENT_ON := 0.62
 
@@ -116,15 +116,15 @@ func _build_env() -> void:
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.2, 0.23, 0.3)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.4, 0.46, 0.6)
-	env.ambient_light_energy = AMBIENT_OFF   # blue-gray dusk: dim but every silhouette, door and route reads
+	env.ambient_light_color = DuskLook.AMBIENT_COLOR
+	env.ambient_light_energy = AMBIENT_OFF * DuskLook.AMBIENT_SCALE   # blue-gray dusk: dim but every silhouette, door and route reads
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	# v9: atmosphere comes from composition and light, not murk. Fog is a thin aerial haze that only
 	# separates distant layers; a little hangs low over the paving.
 	env.fog_enabled = true
 	env.fog_light_color = BASE_FOG
-	env.fog_density = 0.008
-	env.fog_height = 0.4; env.fog_height_density = 0.06
+	env.fog_density = DuskLook.FOG_DENSITY
+	env.fog_height = DuskLook.FOG_HEIGHT; env.fog_height_density = DuskLook.FOG_HEIGHT_DENSITY
 	env.fog_aerial_perspective = 0.4
 	env.fog_sun_scatter = 0.0
 	env.glow_enabled = true
@@ -133,7 +133,9 @@ func _build_env() -> void:
 	env.glow_hdr_threshold = 1.0
 	env.set_glow_level(1, 0.5)
 	env.adjustment_enabled = true
-	env.adjustment_contrast = 1.06
+	env.adjustment_contrast = DuskLook.CONTRAST
+	# v10.1: glossy surfaces (puddles, wet asphalt, chrome) pick up the dusk sky instead of flat ambient
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.adjustment_saturation = SATURATION
 	var we := WorldEnvironment.new(); we.environment = env; add_child(we)
 
@@ -360,7 +362,7 @@ func _update_rounds(dt: float) -> void:
 				if not elite_hint_shown: elite_hint_shown = true; hud.info(ZombieTypes.BRUTE_HINT, 9.0)
 			_apply_atmosphere()
 			tint = 1.0
-			hud.round_flash(); hud.tally_flip(round); hud.round_slam(round)
+			hud.round_flash(); hud.tally_flip(round); hud.round_slam(round); hud.round_transition(true)
 			if round > 1:
 				player.equipment.on_round_start()
 	elif to_spawn > 0:
@@ -388,6 +390,7 @@ func _update_rounds(dt: float) -> void:
 		sfx.play("round_end_v6", -1)
 		if pact.on_round_end(round): _seal_pact()
 		duck_music(4.0)
+		hud.round_transition(false)
 		tint = 0.6
 		player.health = player.max_health
 
@@ -686,8 +689,8 @@ static func atmosphere01(r: int) -> float: return clampf((r - 1) / 14.0, 0.0, 1.
 func _apply_atmosphere() -> void:
 	if env == null: return
 	var k := atmosphere01(round)
-	env.fog_density = lerpf(0.008, 0.02, k)
-	env.ambient_light_energy = (AMBIENT_ON if facility.power_on else AMBIENT_OFF) * lerpf(1.0, 0.86, k)
+	env.fog_density = DuskLook.fog_density(k)
+	env.ambient_light_energy = (AMBIENT_ON if facility.power_on else AMBIENT_OFF) * DuskLook.AMBIENT_SCALE * lerpf(1.0, 0.86, k)
 
 func fog_base() -> Color:
 	return BASE_FOG.lerp(Color(0.3, 0.14, 0.12), atmosphere01(round) * 0.7)
@@ -1059,6 +1062,7 @@ func _power_restored(lever: Node3D) -> void:
 	stats.power = true
 	hud.info("Overcharge Forge and tonic machines are online", 6.0)
 	map.power_beacon(true)
+	map.power_payoff()
 	lever.rotation.x = -0.6
 	var wave: float = map.power_cascade(lever.global_position if lever.is_inside_tree() else player.global_position)
 	sfx.play("power_on")
